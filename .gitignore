@@ -14,3 +14,8 @@ worker-configuration.d.ts
 
 # CodeSight local scanner config (machine-specific paths)
 .codesight/
+
+# Vite build output + TS project build info
+web/dist/
+.tsbuild/
+*.tsbuildinfo

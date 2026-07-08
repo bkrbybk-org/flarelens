@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+	--font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+	/* Cloudflare brand orange */
+	--color-cf: #f38020;
+	--color-cf-hover: #e57200;
+	--color-cf-soft: #f3802033;
+}
+
+html {
+	font-family: var(--font-sans);
+}
+
+body {
+	@apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+}

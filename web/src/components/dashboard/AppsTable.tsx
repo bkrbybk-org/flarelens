@@ -1,0 +1,454 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+	flexRender,
+	getCoreRowModel,
+	getFilteredRowModel,
+	getPaginationRowModel,
+	getSortedRowModel,
+	useReactTable,
+	type ColumnDef,
+	type SortingState,
+	type VisibilityState,
+} from "@tanstack/react-table";
+import type { CfApp, CfPolicy } from "../../types";
+import { formatColumnLabel, formatLocalDateTime, resolvePolicy, type RuleContext } from "../../lib/rules";
+import { ChevronDownIcon, ChevronUpIcon, ColumnsIcon, SearchIcon } from "../Icons";
+import { DecisionBadge, ErrorBadge, PolicyChip, Tag } from "./PolicyChip";
+import { SkeletonCards, SkeletonRows } from "./SkeletonRows";
+
+const DEFAULT_VISIBLE = ["name", "self_hosted_domains", "tags", "allowed_idps", "policies", "updated_at"];
+const HIDDEN_KEYS = new Set(["policies_error"]);
+
+interface AppsTableProps {
+	apps: CfApp[];
+	loading: boolean;
+	ctx: RuleContext;
+	reusableMap: Record<string, CfPolicy>;
+	onSelect: (app: CfApp) => void;
+	perPage: number;
+	density: "comfortable" | "compact";
+	columnVisibility: VisibilityState;
+	columnOrder: string[];
+	onPrefsChange: (patch: {
+		perPage?: number;
+		density?: "comfortable" | "compact";
+		columnVisibility?: VisibilityState;
+		columnOrder?: string[];
+	}) => void;
+}
+
+function sortableValue(val: unknown): string | number | boolean {
+	if (val === null || val === undefined) return "";
+	if (typeof val === "object") return JSON.stringify(val);
+	return val as string | number | boolean;
+}
+
+function DefaultCell({ value }: { value: unknown }) {
+	if (value === null || value === undefined) {
+		return <span className="text-zinc-400 dark:text-zinc-500">-</span>;
+	}
+	if (typeof value === "boolean") {
+		return <Tag label={value ? "True" : "False"} />;
+	}
+	if (typeof value === "object") {
+		return <span className="break-all text-xs">{JSON.stringify(value)}</span>;
+	}
+	return <>{String(value)}</>;
+}
+
+function renderCell(col: string, app: CfApp, ctx: RuleContext, reusableMap: Record<string, CfPolicy>) {
+	const value = app[col];
+	if (col === "policies") {
+		if (app.policies_error) {
+			return <ErrorBadge label="Policies unavailable" />;
+		}
+		return (
+			<span className="flex flex-wrap gap-1.5">
+				{app.policies.map((raw) => {
+					const p = resolvePolicy(raw, reusableMap);
+					return <PolicyChip key={p.id} name={p.name || "Unnamed Policy"} decision={p.decision || "unknown"} />;
+				})}
+			</span>
+		);
+	}
+	if ((col === "tags" || col === "self_hosted_domains") && Array.isArray(value)) {
+		return <span className="flex flex-wrap gap-1">{(value as string[]).map((v) => <Tag key={v} label={v} />)}</span>;
+	}
+	if (col === "allowed_idps" && Array.isArray(value)) {
+		return <span className="flex flex-wrap gap-1">{(value as string[]).map((id) => <Tag key={id} label={ctx.idpName(id)} />)}</span>;
+	}
+	if (col === "destinations" && Array.isArray(value)) {
+		return (
+			<span className="flex flex-wrap gap-1">
+				{(value as Record<string, string>[]).map((d, i) => (
+					<Tag key={i} label={d.uri || d.cidr || d.hostname || d.ip || JSON.stringify(d)} />
+				))}
+			</span>
+		);
+	}
+	if ((col === "updated_at" || col === "created_at") && value != null) {
+		return <span className="whitespace-nowrap tabular-nums">{formatLocalDateTime(value)}</span>;
+	}
+	if (col === "name") {
+		return <span className="font-medium">{String(value ?? "-")}</span>;
+	}
+	return <DefaultCell value={value} />;
+}
+
+export function AppsTable({
+	apps, loading, ctx, reusableMap, onSelect,
+	perPage, density, columnVisibility, columnOrder, onPrefsChange,
+}: AppsTableProps) {
+	const [sorting, setSorting] = useState<SortingState>([]);
+	const [globalFilter, setGlobalFilter] = useState("");
+	const [columnsOpen, setColumnsOpen] = useState(false);
+	const columnsMenuRef = useRef<HTMLDivElement>(null);
+
+	const allKeys = useMemo(() => {
+		const keys: string[] = [];
+		const seen = new Set<string>();
+		for (const app of apps) {
+			for (const key of Object.keys(app)) {
+				if (!seen.has(key) && !HIDDEN_KEYS.has(key)) {
+					seen.add(key);
+					keys.push(key);
+				}
+			}
+		}
+		return keys;
+	}, [apps]);
+
+	const columns = useMemo<ColumnDef<CfApp>[]>(
+		() =>
+			allKeys.map((key) => ({
+				id: key,
+				accessorFn: (row) => sortableValue(row[key]),
+				header: formatColumnLabel(key),
+				cell: ({ row }) => renderCell(key, row.original, ctx, reusableMap),
+			})),
+		[allKeys, ctx, reusableMap],
+	);
+
+	// Effective visibility: stored prefs win; otherwise defaults.
+	const effectiveVisibility = useMemo<VisibilityState>(() => {
+		const vis: VisibilityState = {};
+		for (const key of allKeys) {
+			vis[key] = columnVisibility[key] ?? DEFAULT_VISIBLE.includes(key);
+		}
+		return vis;
+	}, [allKeys, columnVisibility]);
+
+	const effectiveOrder = useMemo(() => {
+		const known = columnOrder.filter((key) => allKeys.includes(key));
+		const rest = allKeys.filter((key) => !known.includes(key));
+		return [...known, ...rest];
+	}, [allKeys, columnOrder]);
+
+	const [pageIndex, setPageIndex] = useState(0);
+
+	const table = useReactTable({
+		data: apps,
+		columns,
+		state: {
+			sorting,
+			globalFilter,
+			columnVisibility: effectiveVisibility,
+			columnOrder: effectiveOrder,
+			pagination: { pageIndex, pageSize: perPage },
+		},
+		onSortingChange: setSorting,
+		onGlobalFilterChange: setGlobalFilter,
+		onPaginationChange: (updater) => {
+			const next = typeof updater === "function" ? updater({ pageIndex, pageSize: perPage }) : updater;
+			setPageIndex(next.pageIndex);
+			if (next.pageSize !== perPage) {
+				onPrefsChange({ perPage: next.pageSize });
+			}
+		},
+		globalFilterFn: (row, _columnId, filterValue) =>
+			JSON.stringify(row.original).toLowerCase().includes(String(filterValue).toLowerCase()),
+		getCoreRowModel: getCoreRowModel(),
+		getSortedRowModel: getSortedRowModel(),
+		getFilteredRowModel: getFilteredRowModel(),
+		getPaginationRowModel: getPaginationRowModel(),
+		autoResetPageIndex: false,
+	});
+
+	useEffect(() => {
+		setPageIndex(0);
+	}, [globalFilter, apps]);
+
+	// Close the columns menu on outside click
+	useEffect(() => {
+		if (!columnsOpen) return;
+		const onDown = (e: MouseEvent) => {
+			if (!columnsMenuRef.current?.contains(e.target as Node)) {
+				setColumnsOpen(false);
+			}
+		};
+		document.addEventListener("mousedown", onDown);
+		return () => document.removeEventListener("mousedown", onDown);
+	}, [columnsOpen]);
+
+	const rows = table.getRowModel().rows;
+	const pageCount = table.getPageCount();
+	const totalRows = table.getFilteredRowModel().rows.length;
+	const cellPad = density === "compact" ? "px-4 py-2" : "px-4 py-3.5";
+	const visibleCount = table.getVisibleLeafColumns().length;
+
+	function moveColumn(key: string, dir: -1 | 1) {
+		const order = [...effectiveOrder];
+		const from = order.indexOf(key);
+		const to = from + dir;
+		if (to < 0 || to >= order.length) return;
+		order.splice(from, 1);
+		order.splice(to, 0, key);
+		onPrefsChange({ columnOrder: order });
+	}
+
+	return (
+		<div className="space-y-3">
+			{/* Toolbar */}
+			<div className="flex flex-wrap items-center gap-2">
+				<div className="relative min-w-0 flex-1 basis-56">
+					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+					<input
+						type="search"
+						value={globalFilter}
+						onChange={(e) => setGlobalFilter(e.target.value)}
+						placeholder="Search applications…"
+						disabled={loading}
+						className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cf focus:ring-2 focus:ring-cf/30 dark:border-zinc-700 dark:bg-zinc-900"
+					/>
+				</div>
+
+				<div ref={columnsMenuRef} className="relative">
+					<button
+						type="button"
+						onClick={() => setColumnsOpen((v) => !v)}
+						disabled={loading}
+						aria-expanded={columnsOpen}
+						className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+					>
+						<ColumnsIcon size={15} />
+						Columns
+					</button>
+					{columnsOpen && (
+						<div className="absolute right-0 z-30 mt-1 max-h-80 w-64 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+							{effectiveOrder.map((key, i) => (
+								<div key={key} className="flex items-center gap-1 rounded-lg px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+									<label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm">
+										<input
+											type="checkbox"
+											checked={effectiveVisibility[key]}
+											onChange={(e) =>
+												onPrefsChange({ columnVisibility: { ...effectiveVisibility, [key]: e.target.checked } })
+											}
+											className="accent-cf"
+										/>
+										<span className="truncate">{formatColumnLabel(key)}</span>
+									</label>
+									<button
+										type="button"
+										aria-label={`Move ${formatColumnLabel(key)} up`}
+										disabled={i === 0}
+										onClick={() => moveColumn(key, -1)}
+										className="rounded p-0.5 text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
+									>
+										<ChevronUpIcon size={14} />
+									</button>
+									<button
+										type="button"
+										aria-label={`Move ${formatColumnLabel(key)} down`}
+										disabled={i === effectiveOrder.length - 1}
+										onClick={() => moveColumn(key, 1)}
+										className="rounded p-0.5 text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
+									>
+										<ChevronDownIcon size={14} />
+									</button>
+								</div>
+							))}
+						</div>
+					)}
+				</div>
+
+				<button
+					type="button"
+					onClick={() => onPrefsChange({ density: density === "compact" ? "comfortable" : "compact" })}
+					disabled={loading}
+					title="Toggle row density"
+					className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+				>
+					{density === "compact" ? "Comfortable" : "Compact"}
+				</button>
+			</div>
+
+			{/* Desktop table */}
+			<div className="hidden overflow-hidden rounded-xl border border-zinc-200 bg-white md:block dark:border-zinc-800 dark:bg-zinc-900">
+				<div className="overflow-x-auto">
+					<table className="w-full text-sm">
+						<thead className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60">
+							{table.getHeaderGroups().map((hg) => (
+								<tr key={hg.id}>
+									{hg.headers.map((header) => {
+										const sorted = header.column.getIsSorted();
+										return (
+											<th key={header.id} className="px-2 py-1 text-left">
+												<button
+													type="button"
+													onClick={header.column.getToggleSortingHandler()}
+													className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+												>
+													{flexRender(header.column.columnDef.header, header.getContext())}
+													{sorted === "asc" && <ChevronUpIcon size={13} className="text-cf" />}
+													{sorted === "desc" && <ChevronDownIcon size={13} className="text-cf" />}
+												</button>
+											</th>
+										);
+									})}
+								</tr>
+							))}
+						</thead>
+						<tbody>
+							{loading ? (
+								<SkeletonRows cols={Math.max(visibleCount, 1)} />
+							) : rows.length === 0 ? (
+								<tr>
+									<td colSpan={Math.max(visibleCount, 1)} className="px-4 py-16 text-center text-zinc-500 dark:text-zinc-400">
+										No matching applications.
+									</td>
+								</tr>
+							) : (
+								rows.map((row) => (
+									<tr
+										key={row.id}
+										onClick={() => onSelect(row.original)}
+										onKeyDown={(e) => {
+											if (e.key === "Enter" || e.key === " ") {
+												e.preventDefault();
+												onSelect(row.original);
+											}
+										}}
+										tabIndex={0}
+										className="cursor-pointer border-b border-zinc-100 transition last:border-0 hover:bg-zinc-50 focus:bg-zinc-50 focus:outline-none dark:border-zinc-800/60 dark:hover:bg-zinc-800/40 dark:focus:bg-zinc-800/40"
+									>
+										{row.getVisibleCells().map((cell) => (
+											<td key={cell.id} className={`${cellPad} align-top`}>
+												{flexRender(cell.column.columnDef.cell, cell.getContext())}
+											</td>
+										))}
+									</tr>
+								))
+							)}
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			{/* Mobile cards */}
+			<div className="md:hidden">
+				{loading ? (
+					<SkeletonCards />
+				) : rows.length === 0 ? (
+					<p className="rounded-xl border border-zinc-200 bg-white px-4 py-12 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+						No matching applications.
+					</p>
+				) : (
+					<div className="space-y-3">
+						{rows.map((row) => {
+							const app = row.original;
+							return (
+								<button
+									key={row.id}
+									type="button"
+									onClick={() => onSelect(app)}
+									className="block w-full rounded-xl border border-zinc-200 bg-white p-4 text-left transition hover:border-cf/50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-cf/50"
+								>
+									<div className="mb-1 flex items-center justify-between gap-2">
+										<span className="truncate font-medium">{app.name || "Unnamed"}</span>
+										{app.policies_error ? (
+											<ErrorBadge label="error" />
+										) : (
+											app.policies[0]?.decision && <DecisionBadge decision={app.policies[0].decision} />
+										)}
+									</div>
+									<div className="truncate text-xs text-zinc-500 dark:text-zinc-400">{app.domain || app.id}</div>
+									<div className="mt-2 flex flex-wrap gap-1">
+										{(app.tags || []).map((t) => <Tag key={t} label={t} />)}
+									</div>
+									{app.updated_at != null && (
+										<div className="mt-2 text-xs text-zinc-400">Updated {formatLocalDateTime(app.updated_at)}</div>
+									)}
+								</button>
+							);
+						})}
+					</div>
+				)}
+			</div>
+
+			{/* Pagination */}
+			{!loading && totalRows > 0 && (
+				<div className="flex flex-wrap items-center justify-between gap-3">
+					<div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+						<select
+							value={perPage}
+							onChange={(e) => table.setPageSize(Number(e.target.value))}
+							aria-label="Rows per page"
+							className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+						>
+							{[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n} rows</option>)}
+						</select>
+						<span>{totalRows} total</span>
+					</div>
+
+					{pageCount > 1 && (
+						<nav className="flex items-center gap-1" aria-label="Pagination">
+							<button
+								type="button"
+								onClick={() => table.previousPage()}
+								disabled={!table.getCanPreviousPage()}
+								className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+							>
+								Prev
+							</button>
+							{Array.from({ length: pageCount }, (_, i) => i)
+								.filter((i) => i === 0 || i === pageCount - 1 || Math.abs(i - pageIndex) <= 1)
+								.reduce<(number | "gap")[]>((acc, i, idx, arr) => {
+									if (idx > 0 && i - (arr[idx - 1]) > 1) acc.push("gap");
+									acc.push(i);
+									return acc;
+								}, [])
+								.map((item, idx) =>
+									item === "gap" ? (
+										<span key={`gap-${idx}`} className="px-1 text-zinc-400">…</span>
+									) : (
+										<button
+											key={item}
+											type="button"
+											onClick={() => table.setPageIndex(item)}
+											aria-current={item === pageIndex ? "page" : undefined}
+											className={
+												item === pageIndex
+													? "rounded-lg bg-cf px-3 py-1.5 text-sm font-medium text-white"
+													: "rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+											}
+										>
+											{item + 1}
+										</button>
+									),
+								)}
+							<button
+								type="button"
+								onClick={() => table.nextPage()}
+								disabled={!table.getCanNextPage()}
+								className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+							>
+								Next
+							</button>
+						</nav>
+					)}
+				</div>
+			)}
+		</div>
+	);
+}
