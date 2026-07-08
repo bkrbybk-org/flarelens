@@ -16,7 +16,7 @@ import { ChevronDownIcon, ChevronUpIcon, ColumnsIcon, SearchIcon } from "../Icon
 import { DecisionBadge, ErrorBadge, PolicyChip, Tag } from "./PolicyChip";
 import { SkeletonCards, SkeletonRows } from "./SkeletonRows";
 
-const DEFAULT_VISIBLE = ["name", "self_hosted_domains", "tags", "allowed_idps", "policies", "updated_at"];
+const DEFAULT_VISIBLE = ["name", "destinations", "type", "session_duration", "tags", "allowed_idps", "policies", "updated_at"];
 const HIDDEN_KEYS = new Set(["policies_error"]);
 
 interface AppsTableProps {
@@ -63,7 +63,7 @@ function renderCell(col: string, app: CfApp, ctx: RuleContext, reusableMap: Reco
 			return <ErrorBadge label="Policies unavailable" />;
 		}
 		return (
-			<span className="flex flex-wrap gap-1.5">
+			<span className="flex flex-col items-start gap-1.5">
 				{app.policies.map((raw) => {
 					const p = resolvePolicy(raw, reusableMap);
 					return <PolicyChip key={p.id} name={p.name || "Unnamed Policy"} decision={p.decision || "unknown"} />;
@@ -207,7 +207,7 @@ export function AppsTable({
 	}
 
 	return (
-		<div className="space-y-3">
+		<div className="flex min-h-0 flex-1 flex-col gap-3">
 			{/* Toolbar */}
 			<div className="flex flex-wrap items-center gap-2">
 				<div className="relative min-w-0 flex-1 basis-56">
@@ -283,11 +283,11 @@ export function AppsTable({
 				</button>
 			</div>
 
-			{/* Desktop table */}
-			<div className="hidden overflow-hidden rounded-xl border border-zinc-200 bg-white md:block dark:border-zinc-800 dark:bg-zinc-900">
-				<div className="overflow-x-auto">
+			{/* Desktop table — the only vertical scroll region on the page */}
+			<div className="hidden min-h-0 flex-1 overflow-hidden rounded-xl border border-zinc-200 bg-white md:block dark:border-zinc-800 dark:bg-zinc-900">
+				<div className="h-full overflow-auto">
 					<table className="w-full text-sm">
-						<thead className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60">
+						<thead className="sticky top-0 z-10 border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
 							{table.getHeaderGroups().map((hg) => (
 								<tr key={hg.id}>
 									{hg.headers.map((header) => {
@@ -345,8 +345,8 @@ export function AppsTable({
 				</div>
 			</div>
 
-			{/* Mobile cards */}
-			<div className="md:hidden">
+			{/* Mobile cards — scrolls independently, page stays fixed */}
+			<div className="min-h-0 flex-1 overflow-y-auto md:hidden">
 				{loading ? (
 					<SkeletonCards />
 				) : rows.length === 0 ? (

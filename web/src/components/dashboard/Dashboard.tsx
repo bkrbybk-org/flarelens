@@ -56,7 +56,7 @@ export function Dashboard({
 		"rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900";
 
 	return (
-		<div className="space-y-4 p-4 md:p-6">
+		<div className="flex h-full flex-col gap-4 p-4 md:p-6">
 			{progressRunning && (
 				<div className="overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800" role="progressbar" aria-valuenow={Math.round(progressPercent)} aria-valuemin={0} aria-valuemax={100}>
 					<div

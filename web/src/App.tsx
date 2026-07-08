@@ -45,7 +45,7 @@ export default function App() {
 	}
 
 	return (
-		<div className="flex min-h-dvh">
+		<div className="flex h-dvh overflow-hidden">
 			<Sidebar
 				accountName={session.accountName}
 				onDisconnect={disconnect}
@@ -61,7 +61,7 @@ export default function App() {
 					syncing={data.loading}
 					onMobileMenu={() => setMobileMenuOpen(true)}
 				/>
-				<main className="min-w-0 flex-1">
+				<main className="min-h-0 min-w-0 flex-1">
 					<Dashboard
 						apps={data.data?.apps || []}
 						idpCount={data.data?.idps.length || 0}
