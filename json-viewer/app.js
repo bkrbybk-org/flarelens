@@ -216,6 +216,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const accountNameDisplay = document.getElementById('account-name-display');
     const refreshBtn = document.getElementById('refresh-btn');
     const disconnectBtn = document.getElementById('disconnect-btn');
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const loadingProgressFill = document.getElementById('loading-progress-fill');
+    const loadingPercentage = document.getElementById('loading-percentage');
+    const loadingEta = document.getElementById('loading-eta');
+    const loadingStatusText = document.getElementById('loading-status-text');
 
     let allData = [];
     let filteredData = [];
@@ -479,9 +484,68 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Fake-but-honest progress bar: no server-side progress events exist (single
+    // JSON response), so we estimate against the last real load time and decelerate
+    // toward 95% until the response actually lands, then snap to 100%.
+    const LOAD_DURATION_STORAGE_KEY = 'cf_zt_last_load_ms';
+    const DEFAULT_ESTIMATE_MS = 8000;
+    let progressTimer = null;
+    let progressStartedAt = 0;
+    let progressEstimateMs = DEFAULT_ESTIMATE_MS;
+
+    function formatEta(ms) {
+        if (ms <= 300) return 'Almost done…';
+        const seconds = Math.ceil(ms / 1000);
+        return `~${seconds}s remaining`;
+    }
+
+    function startLoadingProgress() {
+        const stored = Number(sessionStorage.getItem(LOAD_DURATION_STORAGE_KEY));
+        progressEstimateMs = stored > 0 ? stored : DEFAULT_ESTIMATE_MS;
+        progressStartedAt = performance.now();
+
+        loadingStatusText.textContent = 'Fetching Zero Trust configuration…';
+        loadingOverlay.classList.remove('hidden');
+        loadingProgressFill.style.width = '0%';
+        loadingPercentage.textContent = '0%';
+        loadingEta.textContent = formatEta(progressEstimateMs);
+
+        clearInterval(progressTimer);
+        progressTimer = setInterval(() => {
+            const elapsed = performance.now() - progressStartedAt;
+            // Asymptotic curve: fast at first, crawls toward 95% and waits for the real response.
+            const percent = Math.min(95, 95 * (1 - Math.exp(-elapsed / progressEstimateMs)));
+            const remaining = Math.max(0, progressEstimateMs - elapsed);
+
+            loadingProgressFill.style.width = `${percent}%`;
+            loadingPercentage.textContent = `${Math.round(percent)}%`;
+            loadingEta.textContent = percent >= 94 ? 'Almost done…' : formatEta(remaining);
+        }, 100);
+    }
+
+    function stopLoadingProgress(success) {
+        clearInterval(progressTimer);
+        progressTimer = null;
+
+        if (success) {
+            const elapsed = performance.now() - progressStartedAt;
+            // Blend with the previous estimate so occasional slow loads don't overreact next time.
+            const previous = Number(sessionStorage.getItem(LOAD_DURATION_STORAGE_KEY)) || elapsed;
+            sessionStorage.setItem(LOAD_DURATION_STORAGE_KEY, String(Math.round((previous + elapsed) / 2)));
+
+            loadingProgressFill.style.width = '100%';
+            loadingPercentage.textContent = '100%';
+            loadingEta.textContent = 'Done';
+        }
+
+        setTimeout(() => loadingOverlay.classList.add('hidden'), success ? 250 : 0);
+    }
+
     async function loadData(token, accountId) {
         setLoading(true);
         refreshBtn.disabled = true;
+        startLoadingProgress();
+        let success = false;
 
         try {
             const response = await fetch(`/api/data?account_id=${accountId}`, {
@@ -530,6 +594,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
+            success = true;
             if (allData.length === 0) {
                 showEmptyState('No Zero Trust Applications found in this account.', false);
             } else {
@@ -541,6 +606,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             setLoading(false);
             refreshBtn.disabled = false;
+            stopLoadingProgress(success);
         }
     }
 

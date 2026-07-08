@@ -128,6 +128,17 @@
             </div>
 
             <div class="table-container glass-panel">
+                <div id="loading-overlay" class="loading-overlay hidden">
+                    <div class="loading-spinner"></div>
+                    <div class="loading-status" id="loading-status-text">Fetching Zero Trust configuration&hellip;</div>
+                    <div class="loading-progress-bar">
+                        <div class="loading-progress-fill" id="loading-progress-fill"></div>
+                    </div>
+                    <div class="loading-meta">
+                        <span id="loading-percentage">0%</span>
+                        <span id="loading-eta">Estimating time remaining&hellip;</span>
+                    </div>
+                </div>
                 <table id="data-table">
                     <thead>
                         <tr id="table-head-row">
