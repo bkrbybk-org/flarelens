@@ -1,0 +1,16 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+.env.*
+dist/
+*.log
+.DS_Store
+worker-configuration.d.ts
+
+# Local Wrangler / Miniflare caches (account IDs, request metadata)
+**/.cache/wrangler/
+**/.mf/
+
+# CodeSight local scanner config (machine-specific paths)
+.codesight/

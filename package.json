@@ -1,0 +1,19 @@
+{
+  "name": "cf-zt-policy-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "wrangler deploy --dry-run --outdir=dist",
+    "types": "wrangler types"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250517.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^3.114.0"
+  }
+}
