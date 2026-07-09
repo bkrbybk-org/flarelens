@@ -64,6 +64,24 @@ export async function fetchWafEvents<E, D>(
 	return { events: data.result || [], diagnostics: data.diagnostics };
 }
 
+export async function fetchCacheAnalysis<T>(token: string, zoneId: string, rangeHours: number): Promise<T> {
+	const response = await fetch("/api/cache/analyze", {
+		method: "POST",
+		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+		body: JSON.stringify({ zoneId, rangeHours }),
+	});
+	let data: ApiEnvelope<T>;
+	try {
+		data = await response.json();
+	} catch {
+		throw new ApiError("Invalid response from server", response.status);
+	}
+	if (!response.ok || !data.success) {
+		throw new ApiError(data.errors?.[0]?.message || "Request failed", response.status);
+	}
+	return data.result as T;
+}
+
 export function fetchWafRulesets<M>(token: string, accountId: string, zoneId: string): Promise<M> {
 	const params = new URLSearchParams({ account_id: accountId });
 	if (zoneId) {

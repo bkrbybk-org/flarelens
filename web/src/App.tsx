@@ -118,7 +118,7 @@ export default function App() {
 						/>
 					)}
 					{route === "waf" && <WafPage session={session} zoneId={prefs.wafZone} onAuthError={disconnect} />}
-					{route === "cache" && <CachePage />}
+					{route === "cache" && <CachePage session={session} zoneId={prefs.cacheZone} onAuthError={disconnect} />}
 				</main>
 			</div>
 		</div>
