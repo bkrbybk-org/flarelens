@@ -95,7 +95,10 @@ export function ConnectPage({ onConnect }: ConnectPageProps) {
 							</button>
 						</div>
 						<p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
-							Requires <strong>Access: Read</strong> (Access and Teams) and <strong>Account Settings: Read</strong>.
+							Recommended scopes: <strong>Account Settings: Read</strong>, <strong>Access: Read</strong>,{" "}
+							<strong>Zone: Read</strong>, <strong>Cache Rules: Read</strong>, <strong>Analytics: Read</strong>,{" "}
+							<strong>Zone WAF: Read</strong> + <strong>Account WAF: Read</strong>. Sections degrade individually
+							when a scope is missing.
 						</p>
 					</div>
 
