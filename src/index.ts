@@ -1,3 +1,5 @@
+import { Hono } from "hono";
+
 interface Env {
 	ASSETS: Fetcher;
 }
@@ -63,35 +65,11 @@ const SECURITY_HEADERS: Record<string, string> = {
 	].join("; "),
 };
 
-function withSecurityHeaders(response: Response, noStore = false): Response {
-	const headers = new Headers(response.headers);
-	for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
-		headers.set(key, value);
-	}
-	if (noStore) {
-		headers.set("Cache-Control", "no-store");
-	}
-	return new Response(response.body, {
-		status: response.status,
-		statusText: response.statusText,
-		headers,
-	});
-}
-
-function apiResponse(data: unknown, status = 200): Response {
-	return withSecurityHeaders(Response.json(data, { status }), true);
-}
-
-function apiError(message: string, status: number): Response {
-	return apiResponse({ success: false, errors: [{ message }] }, status);
-}
-
-function getAuthHeader(request: Request): string | null {
-	const auth = request.headers.get("Authorization");
-	if (!auth || !auth.startsWith("Bearer ")) {
+function getAuthToken(authorization: string | undefined): string | null {
+	if (!authorization || !authorization.startsWith("Bearer ")) {
 		return null;
 	}
-	return auth.substring(7).trim();
+	return authorization.substring(7).trim();
 }
 
 async function fetchCloudflare<T>(path: string, token: string): Promise<{ status: number; data: CfListResponse<T> }> {
@@ -154,96 +132,110 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 	return results;
 }
 
-export default {
-	async fetch(request: Request, env: Env): Promise<Response> {
-		const url = new URL(request.url);
+const app = new Hono<{ Bindings: Env }>();
 
-		if (url.pathname === "/health") {
-			return withSecurityHeaders(Response.json({ status: "ok" }));
+// Security headers on every response; API responses are token-derived, never cacheable.
+// Asset responses arrive with immutable headers, so rewrap before mutating.
+app.use("*", async (c, next) => {
+	await next();
+	const res = new Response(c.res.body, c.res);
+	for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+		res.headers.set(key, value);
+	}
+	if (c.req.path.startsWith("/api/")) {
+		res.headers.set("Cache-Control", "no-store");
+	}
+	c.res = res;
+});
+
+app.get("/health", (c) => c.json({ status: "ok" }));
+
+app.get("/api/accounts", async (c) => {
+	const token = getAuthToken(c.req.header("Authorization"));
+	if (!token) {
+		return c.json({ success: false, errors: [{ message: "Authorization token is missing or invalid" }] }, 401);
+	}
+	const { status, data } = await fetchCloudflare("/accounts", token);
+	return c.json(data, status as 200);
+});
+
+app.get("/api/data", async (c) => {
+	const token = getAuthToken(c.req.header("Authorization"));
+	if (!token) {
+		return c.json({ success: false, errors: [{ message: "Authorization token is missing or invalid" }] }, 401);
+	}
+	const accountId = c.req.query("account_id");
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Missing account_id query parameter" }] }, 400);
+	}
+
+	// 1. Fetch apps, identity providers, groups, and reusable policies
+	const [appsRes, idpsRes, groupsRes, reusableRes] = await Promise.all([
+		fetchCloudflareAll<CfApp>(`/accounts/${accountId}/access/apps`, token),
+		fetchCloudflareAll<CfIdp>(`/accounts/${accountId}/access/identity_providers`, token),
+		fetchCloudflareAll<CfGroup>(`/accounts/${accountId}/access/groups`, token),
+		fetchCloudflareAll<CfPolicy>(`/accounts/${accountId}/access/policies`, token),
+	]);
+
+	if (appsRes.status !== 200) {
+		return c.json(
+			{ success: false, errors: appsRes.errors || [{ message: "Failed to fetch applications" }] },
+			appsRes.status as 200,
+		);
+	}
+	if (idpsRes.status !== 200) {
+		return c.json(
+			{ success: false, errors: idpsRes.errors || [{ message: "Failed to fetch identity providers" }] },
+			idpsRes.status as 200,
+		);
+	}
+
+	const apps = appsRes.result;
+	const idps = idpsRes.result;
+	// Groups and reusable policies are enrichment data; tokens without those
+	// read scopes still get the core app/policy view.
+	const groups = groupsRes.status === 200 ? groupsRes.result : [];
+	const reusablePolicies = reusableRes.status === 200 ? reusableRes.result : [];
+
+	// 2. Fetch policies for all applications with bounded concurrency
+	const policyResults = await mapWithConcurrency(apps, 5, async (appItem) => {
+		const res = await fetchCloudflareAll<CfPolicy>(`/accounts/${accountId}/access/apps/${appItem.id}/policies`, token);
+		if (res.status === 200) {
+			return { appId: appItem.id, policies: res.result, error: false };
 		}
+		return { appId: appItem.id, policies: [] as CfPolicy[], error: true };
+	});
+	const policyMap = new Map(policyResults.map((p) => [p.appId, p]));
 
-		// Cloudflare API proxy routes
-		if (url.pathname === "/api/accounts") {
-			const token = getAuthHeader(request);
-			if (!token) {
-				return apiError("Authorization token is missing or invalid", 401);
-			}
-			const { status, data } = await fetchCloudflare("/accounts", token);
-			return apiResponse(data, status);
-		}
+	// 3. Merge policies into applications and map fields
+	const enrichedApps = apps.map((appItem) => {
+		const entry = policyMap.get(appItem.id);
+		return {
+			...appItem,
+			policies: entry?.policies || [],
+			policies_error: entry?.error || false,
+			self_hosted_domains: appItem.self_hosted_domains || (appItem.domain ? [appItem.domain] : []),
+		};
+	});
 
-		if (url.pathname === "/api/data") {
-			const token = getAuthHeader(request);
-			if (!token) {
-				return apiError("Authorization token is missing or invalid", 401);
-			}
-			const accountId = url.searchParams.get("account_id");
-			if (!accountId) {
-				return apiError("Missing account_id query parameter", 400);
-			}
+	return c.json({
+		success: true,
+		result: {
+			apps: enrichedApps,
+			idps,
+			groups,
+			reusable_policies: reusablePolicies,
+		},
+	});
+});
 
-			// 1. Fetch apps, identity providers, groups, and reusable policies
-			const [appsRes, idpsRes, groupsRes, reusableRes] = await Promise.all([
-				fetchCloudflareAll<CfApp>(`/accounts/${accountId}/access/apps`, token),
-				fetchCloudflareAll<CfIdp>(`/accounts/${accountId}/access/identity_providers`, token),
-				fetchCloudflareAll<CfGroup>(`/accounts/${accountId}/access/groups`, token),
-				fetchCloudflareAll<CfPolicy>(`/accounts/${accountId}/access/policies`, token),
-			]);
+// Static assets fallback
+app.all("*", async (c) => {
+	const assetResponse = await c.env.ASSETS.fetch(c.req.raw);
+	if (assetResponse.status === 404) {
+		return new Response("Not Found", { status: 404 });
+	}
+	return assetResponse;
+});
 
-			if (appsRes.status !== 200) {
-				return apiResponse({ success: false, errors: appsRes.errors || [{ message: "Failed to fetch applications" }] }, appsRes.status);
-			}
-			if (idpsRes.status !== 200) {
-				return apiResponse({ success: false, errors: idpsRes.errors || [{ message: "Failed to fetch identity providers" }] }, idpsRes.status);
-			}
-
-			const apps = appsRes.result;
-			const idps = idpsRes.result;
-			// Groups and reusable policies are enrichment data; tokens without those
-			// read scopes still get the core app/policy view.
-			const groups = groupsRes.status === 200 ? groupsRes.result : [];
-			const reusablePolicies = reusableRes.status === 200 ? reusableRes.result : [];
-
-			// 2. Fetch policies for all applications with bounded concurrency
-			const policyResults = await mapWithConcurrency(apps, 5, async (app) => {
-				const res = await fetchCloudflareAll<CfPolicy>(`/accounts/${accountId}/access/apps/${app.id}/policies`, token);
-				if (res.status === 200) {
-					return { appId: app.id, policies: res.result, error: false };
-				}
-				return { appId: app.id, policies: [] as CfPolicy[], error: true };
-			});
-			const policyMap = new Map(policyResults.map((p) => [p.appId, p]));
-
-			// 3. Merge policies into applications and map fields
-			const enrichedApps = apps.map((app) => {
-				const entry = policyMap.get(app.id);
-				return {
-					...app,
-					policies: entry?.policies || [],
-					policies_error: entry?.error || false,
-					self_hosted_domains: app.self_hosted_domains || (app.domain ? [app.domain] : []),
-				};
-			});
-
-			return apiResponse({
-				success: true,
-				result: {
-					apps: enrichedApps,
-					idps,
-					groups,
-					reusable_policies: reusablePolicies,
-				},
-			});
-		}
-
-		// Static assets fallback
-		const assetResponse = await env.ASSETS.fetch(request);
-		if (assetResponse.status === 404) {
-			return withSecurityHeaders(
-				new Response("Not Found", { status: 404 }),
-			);
-		}
-
-		return withSecurityHeaders(assetResponse);
-	},
-} satisfies ExportedHandler<Env>;
+export default app;

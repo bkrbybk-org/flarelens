@@ -27,6 +27,7 @@
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
     "@tanstack/react-table": "^8.21.3",
+    "hono": "^4.12.28",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   }
