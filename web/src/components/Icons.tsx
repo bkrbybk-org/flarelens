@@ -75,6 +75,9 @@ export const UsersIcon = (p: IconProps) => (
 export const AlertIcon = (p: IconProps) => (
 	<svg {...base(p)}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
 );
+export const FilterIcon = (p: IconProps) => (
+	<svg {...base(p)}><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" /></svg>
+);
 export const KeyIcon = (p: IconProps) => (
 	<svg {...base(p)}><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" /></svg>
 );

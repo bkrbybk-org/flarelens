@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 
 const PREFS_KEY = "cf_zt_prefs";
+// Bump when column defaults change shape: stale saved order/visibility is
+// dropped so new defaults apply, while theme/density/perPage survive.
+const PREFS_VERSION = 2;
 
 export interface Prefs {
+	version: number;
 	theme: "dark" | "light";
 	perPage: number;
 	density: "comfortable" | "compact";
@@ -11,6 +15,7 @@ export interface Prefs {
 }
 
 const DEFAULT_PREFS: Prefs = {
+	version: PREFS_VERSION,
 	theme: "dark",
 	perPage: 10,
 	density: "comfortable",
@@ -24,7 +29,11 @@ function readPrefs(): Prefs {
 		if (!raw) {
 			return DEFAULT_PREFS;
 		}
-		return { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+		const parsed = { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+		if (parsed.version !== PREFS_VERSION) {
+			return { ...parsed, version: PREFS_VERSION, columnVisibility: {}, columnOrder: [] };
+		}
+		return parsed;
 	} catch {
 		return DEFAULT_PREFS;
 	}

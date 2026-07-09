@@ -7,16 +7,18 @@ import {
 	getSortedRowModel,
 	useReactTable,
 	type ColumnDef,
+	type ColumnFiltersState,
 	type SortingState,
 	type VisibilityState,
 } from "@tanstack/react-table";
 import type { CfApp, CfPolicy } from "../../types";
 import { formatColumnLabel, formatLocalDateTime, resolvePolicy, type RuleContext } from "../../lib/rules";
-import { ChevronDownIcon, ChevronUpIcon, ColumnsIcon, SearchIcon } from "../Icons";
+import { ChevronDownIcon, ChevronUpIcon, ColumnsIcon, FilterIcon, SearchIcon } from "../Icons";
 import { DecisionBadge, ErrorBadge, PolicyChip, Tag } from "./PolicyChip";
 import { SkeletonCards, SkeletonRows } from "./SkeletonRows";
 
-const DEFAULT_VISIBLE = ["name", "destinations", "type", "session_duration", "tags", "allowed_idps", "policies", "updated_at"];
+// Order matters: drives default column order when the user has not saved one
+const DEFAULT_VISIBLE = ["name", "destinations", "tags", "allowed_idps", "policies", "updated_at", "type", "session_duration"];
 const HIDDEN_KEYS = new Set(["policies_error"]);
 
 interface AppsTableProps {
@@ -41,6 +43,44 @@ function sortableValue(val: unknown): string | number | boolean {
 	if (val === null || val === undefined) return "";
 	if (typeof val === "object") return JSON.stringify(val);
 	return val as string | number | boolean;
+}
+
+interface ColumnFilterValue {
+	selected: string[];
+	query: string;
+}
+
+// Atomic values a column contributes for Excel-style filtering: array cells
+// expand to their elements so e.g. individual tags are selectable.
+function facetValues(col: string, app: CfApp, ctx: RuleContext, reusableMap: Record<string, CfPolicy>): string[] {
+	const value = app[col];
+	if (col === "policies") {
+		if (app.policies_error) return ["Policies unavailable"];
+		if (app.policies.length === 0) return ["(none)"];
+		const facets: string[] = [];
+		for (const raw of app.policies) {
+			const p = resolvePolicy(raw, reusableMap);
+			if (p.name) facets.push(p.name);
+			if (p.decision) facets.push(p.decision.toLowerCase());
+		}
+		return facets;
+	}
+	if (value === null || value === undefined) return ["(empty)"];
+	if (col === "allowed_idps" && Array.isArray(value)) {
+		return value.length ? (value as string[]).map((id) => ctx.idpName(id)) : ["(none)"];
+	}
+	if (col === "destinations" && Array.isArray(value)) {
+		return value.length
+			? (value as Record<string, string>[]).map((d) => d.uri || d.cidr || d.hostname || d.ip || JSON.stringify(d))
+			: ["(none)"];
+	}
+	if (Array.isArray(value)) {
+		return value.length ? value.map((v) => (typeof v === "string" ? v : JSON.stringify(v))) : ["(none)"];
+	}
+	if (col === "updated_at" || col === "created_at") return [formatLocalDateTime(value)];
+	if (typeof value === "boolean") return [value ? "True" : "False"];
+	if (typeof value === "object") return [JSON.stringify(value)];
+	return [String(value)];
 }
 
 function DefaultCell({ value }: { value: unknown }) {
@@ -101,8 +141,14 @@ export function AppsTable({
 }: AppsTableProps) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [globalFilter, setGlobalFilter] = useState("");
+	const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
 	const [columnsOpen, setColumnsOpen] = useState(false);
+	const [filterPopover, setFilterPopover] = useState<{ key: string; left: number; top: number } | null>(null);
+	const [filterListSearch, setFilterListSearch] = useState("");
+	const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+	const draggedKeyRef = useRef<string | null>(null);
 	const columnsMenuRef = useRef<HTMLDivElement>(null);
+	const filterPopoverRef = useRef<HTMLDivElement>(null);
 
 	const allKeys = useMemo(() => {
 		const keys: string[] = [];
@@ -125,6 +171,18 @@ export function AppsTable({
 				accessorFn: (row) => sortableValue(row[key]),
 				header: formatColumnLabel(key),
 				cell: ({ row }) => renderCell(key, row.original, ctx, reusableMap),
+				filterFn: (row, columnId, filterValue: ColumnFilterValue) => {
+					const { selected, query } = filterValue;
+					const facets = facetValues(columnId, row.original, ctx, reusableMap);
+					if (selected.length > 0) {
+						return facets.some((f) => selected.includes(f));
+					}
+					if (query) {
+						const q = query.toLowerCase();
+						return facets.some((f) => f.toLowerCase().includes(q));
+					}
+					return true;
+				},
 			})),
 		[allKeys, ctx, reusableMap],
 	);
@@ -139,8 +197,13 @@ export function AppsTable({
 	}, [allKeys, columnVisibility]);
 
 	const effectiveOrder = useMemo(() => {
+		// Default columns first in their defined order, then everything else
+		const baseOrder = [
+			...DEFAULT_VISIBLE.filter((key) => allKeys.includes(key)),
+			...allKeys.filter((key) => !DEFAULT_VISIBLE.includes(key)),
+		];
 		const known = columnOrder.filter((key) => allKeys.includes(key));
-		const rest = allKeys.filter((key) => !known.includes(key));
+		const rest = baseOrder.filter((key) => !known.includes(key));
 		return [...known, ...rest];
 	}, [allKeys, columnOrder]);
 
@@ -152,12 +215,14 @@ export function AppsTable({
 		state: {
 			sorting,
 			globalFilter,
+			columnFilters,
 			columnVisibility: effectiveVisibility,
 			columnOrder: effectiveOrder,
 			pagination: { pageIndex, pageSize: perPage },
 		},
 		onSortingChange: setSorting,
 		onGlobalFilterChange: setGlobalFilter,
+		onColumnFiltersChange: setColumnFilters,
 		onPaginationChange: (updater) => {
 			const next = typeof updater === "function" ? updater({ pageIndex, pageSize: perPage }) : updater;
 			setPageIndex(next.pageIndex);
@@ -176,7 +241,55 @@ export function AppsTable({
 
 	useEffect(() => {
 		setPageIndex(0);
-	}, [globalFilter, apps]);
+	}, [globalFilter, columnFilters, apps]);
+
+	// Distinct facet values per column for the filter popover
+	const distinctValues = useMemo(() => {
+		const map: Record<string, string[]> = {};
+		for (const key of allKeys) {
+			const seen = new Set<string>();
+			for (const app of apps) {
+				for (const facet of facetValues(key, app, ctx, reusableMap)) {
+					seen.add(facet);
+				}
+			}
+			map[key] = [...seen].sort((a, b) => a.localeCompare(b));
+		}
+		return map;
+	}, [allKeys, apps, ctx, reusableMap]);
+
+	function getColumnFilter(key: string): ColumnFilterValue {
+		return (columnFilters.find((f) => f.id === key)?.value as ColumnFilterValue) || { selected: [], query: "" };
+	}
+
+	function setColumnFilter(key: string, value: ColumnFilterValue) {
+		setColumnFilters((prev) => {
+			const rest = prev.filter((f) => f.id !== key);
+			if (value.selected.length === 0 && !value.query) {
+				return rest;
+			}
+			return [...rest, { id: key, value }];
+		});
+	}
+
+	// Close the filter popover on outside click / Escape
+	useEffect(() => {
+		if (!filterPopover) return;
+		const onDown = (e: MouseEvent) => {
+			if (!filterPopoverRef.current?.contains(e.target as Node)) {
+				setFilterPopover(null);
+			}
+		};
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === "Escape") setFilterPopover(null);
+		};
+		document.addEventListener("mousedown", onDown);
+		document.addEventListener("keydown", onKey);
+		return () => {
+			document.removeEventListener("mousedown", onDown);
+			document.removeEventListener("keydown", onKey);
+		};
+	}, [filterPopover]);
 
 	// Close the columns menu on outside click
 	useEffect(() => {
@@ -203,6 +316,17 @@ export function AppsTable({
 		if (to < 0 || to >= order.length) return;
 		order.splice(from, 1);
 		order.splice(to, 0, key);
+		onPrefsChange({ columnOrder: order });
+	}
+
+	function reorderColumn(fromKey: string, toKey: string) {
+		if (fromKey === toKey) return;
+		const order = [...effectiveOrder];
+		const from = order.indexOf(fromKey);
+		const to = order.indexOf(toKey);
+		if (from === -1 || to === -1) return;
+		order.splice(from, 1);
+		order.splice(to, 0, fromKey);
 		onPrefsChange({ columnOrder: order });
 	}
 
@@ -292,17 +416,81 @@ export function AppsTable({
 								<tr key={hg.id}>
 									{hg.headers.map((header) => {
 										const sorted = header.column.getIsSorted();
+										const key = header.column.id;
 										return (
-											<th key={header.id} className="px-2 py-1 text-left">
-												<button
-													type="button"
-													onClick={header.column.getToggleSortingHandler()}
-													className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-												>
-													{flexRender(header.column.columnDef.header, header.getContext())}
-													{sorted === "asc" && <ChevronUpIcon size={13} className="text-cf" />}
-													{sorted === "desc" && <ChevronDownIcon size={13} className="text-cf" />}
-												</button>
+											<th
+												key={header.id}
+												draggable
+												onDragStart={(e) => {
+													draggedKeyRef.current = key;
+													e.dataTransfer.effectAllowed = "move";
+												}}
+												onDragOver={(e) => {
+													e.preventDefault();
+													e.dataTransfer.dropEffect = "move";
+												}}
+												onDragEnter={() => {
+													if (draggedKeyRef.current && draggedKeyRef.current !== key) {
+														setDragOverKey(key);
+													}
+												}}
+												onDragLeave={(e) => {
+													if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+														setDragOverKey((k) => (k === key ? null : k));
+													}
+												}}
+												onDrop={(e) => {
+													e.preventDefault();
+													if (draggedKeyRef.current) {
+														reorderColumn(draggedKeyRef.current, key);
+													}
+													draggedKeyRef.current = null;
+													setDragOverKey(null);
+												}}
+												onDragEnd={() => {
+													draggedKeyRef.current = null;
+													setDragOverKey(null);
+												}}
+												className={`cursor-grab px-2 py-1 text-left active:cursor-grabbing ${
+													dragOverKey === key ? "bg-cf/10 outline-2 outline-dashed outline-cf/60 -outline-offset-2" : ""
+												}`}
+											>
+												<span className="flex items-center">
+													<button
+														type="button"
+														onClick={header.column.getToggleSortingHandler()}
+														className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+													>
+														{flexRender(header.column.columnDef.header, header.getContext())}
+														{sorted === "asc" && <ChevronUpIcon size={13} className="text-cf" />}
+														{sorted === "desc" && <ChevronDownIcon size={13} className="text-cf" />}
+													</button>
+													<button
+														type="button"
+														aria-label={`Filter ${formatColumnLabel(key)}`}
+														onClick={(e) => {
+															e.stopPropagation();
+															if (filterPopover?.key === key) {
+																setFilterPopover(null);
+																return;
+															}
+															const rect = e.currentTarget.getBoundingClientRect();
+															setFilterListSearch("");
+															setFilterPopover({
+																key,
+																left: Math.min(rect.left, window.innerWidth - 288),
+																top: rect.bottom + 4,
+															});
+														}}
+														className={`rounded-md p-1 transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+															getColumnFilter(key).selected.length > 0 || getColumnFilter(key).query
+																? "text-cf"
+																: "text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+														}`}
+													>
+														<FilterIcon size={13} />
+													</button>
+												</span>
 											</th>
 										);
 									})}
@@ -449,6 +637,87 @@ export function AppsTable({
 					)}
 				</div>
 			)}
+
+			{/* Excel-style column filter popover (fixed so the table scroll area cannot clip it) */}
+			{filterPopover && (() => {
+				const key = filterPopover.key;
+				const current = getColumnFilter(key);
+				const values = distinctValues[key] || [];
+				const shown = filterListSearch
+					? values.filter((v) => v.toLowerCase().includes(filterListSearch.toLowerCase()))
+					: values;
+				return (
+					<div
+						ref={filterPopoverRef}
+						role="dialog"
+						aria-label={`Filter ${formatColumnLabel(key)}`}
+						style={{ left: filterPopover.left, top: filterPopover.top }}
+						className="fixed z-50 w-72 rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+					>
+						<div className="border-b border-zinc-200 p-2 dark:border-zinc-800">
+							<input
+								type="search"
+								autoFocus
+								value={filterListSearch}
+								onChange={(e) => {
+									setFilterListSearch(e.target.value);
+									setColumnFilter(key, { selected: current.selected, query: e.target.value });
+								}}
+								placeholder={`Type to filter ${formatColumnLabel(key).toLowerCase()}…`}
+								className="w-full rounded-lg border border-zinc-200 bg-transparent px-2.5 py-1.5 text-sm outline-none focus:border-cf dark:border-zinc-700"
+							/>
+						</div>
+						<div className="flex items-center justify-between border-b border-zinc-200 px-3 py-1.5 text-xs dark:border-zinc-800">
+							<button
+								type="button"
+								onClick={() => setColumnFilter(key, { selected: shown, query: current.query })}
+								className="font-medium text-cf hover:underline"
+							>
+								Select all{filterListSearch ? " shown" : ""}
+							</button>
+							<button
+								type="button"
+								onClick={() => {
+									setColumnFilter(key, { selected: [], query: "" });
+									setFilterListSearch("");
+								}}
+								className="text-zinc-500 hover:underline dark:text-zinc-400"
+							>
+								Clear filter
+							</button>
+						</div>
+						<div className="max-h-64 overflow-y-auto p-1.5">
+							{shown.length === 0 ? (
+								<p className="px-2 py-3 text-center text-xs text-zinc-500 dark:text-zinc-400">No values match.</p>
+							) : (
+								shown.map((value) => (
+									<label key={value} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800">
+										<input
+											type="checkbox"
+											checked={current.selected.includes(value)}
+											onChange={(e) => {
+												const selected = e.target.checked
+													? [...current.selected, value]
+													: current.selected.filter((v) => v !== value);
+												setColumnFilter(key, { selected, query: current.query });
+											}}
+											className="accent-cf"
+										/>
+										<span className="min-w-0 flex-1 truncate" title={value}>{value}</span>
+									</label>
+								))
+							)}
+						</div>
+						{(current.selected.length > 0 || current.query) && (
+							<div className="border-t border-zinc-200 px-3 py-1.5 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+								{current.selected.length > 0
+									? `${current.selected.length} value${current.selected.length > 1 ? "s" : ""} selected`
+									: "Text filter active"}
+							</div>
+						)}
+					</div>
+				);
+			})()}
 		</div>
 	);
 }
