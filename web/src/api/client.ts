@@ -36,3 +36,40 @@ export function fetchZeroTrustData(token: string, accountId: string): Promise<Ze
 export function fetchZones(token: string, accountId: string): Promise<CfZone[]> {
 	return apiFetch<CfZone[]>(`/api/zones?account_id=${encodeURIComponent(accountId)}`, token);
 }
+
+interface WafEventsEnvelope<T, D> extends ApiEnvelope<T> {
+	diagnostics?: D;
+}
+
+export async function fetchWafEvents<E, D>(
+	token: string,
+	accountId: string,
+	zoneId: string,
+	minutes: number,
+): Promise<{ events: E[]; diagnostics?: D }> {
+	const response = await fetch("/api/waf/events", {
+		method: "POST",
+		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+		body: JSON.stringify({ accountId, zoneId: zoneId || undefined, minutes }),
+	});
+	let data: WafEventsEnvelope<E[], D>;
+	try {
+		data = await response.json();
+	} catch {
+		throw new ApiError("Invalid response from server", response.status);
+	}
+	if (!response.ok || !data.success) {
+		throw new ApiError(data.errors?.[0]?.message || "Request failed", response.status);
+	}
+	return { events: data.result || [], diagnostics: data.diagnostics };
+}
+
+export function fetchWafRulesets<M>(token: string, accountId: string, zoneId: string): Promise<M> {
+	const params = new URLSearchParams({ account_id: accountId });
+	if (zoneId) {
+		params.set("zone_id", zoneId);
+	} else {
+		params.set("include_zones", "1");
+	}
+	return apiFetch<M>(`/api/waf/rulesets?${params.toString()}`, token);
+}

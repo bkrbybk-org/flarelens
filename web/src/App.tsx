@@ -117,7 +117,7 @@ export default function App() {
 							updatePrefs={updatePrefs}
 						/>
 					)}
-					{route === "waf" && <WafPage />}
+					{route === "waf" && <WafPage session={session} zoneId={prefs.wafZone} onAuthError={disconnect} />}
 					{route === "cache" && <CachePage />}
 				</main>
 			</div>
