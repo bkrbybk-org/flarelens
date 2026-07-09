@@ -66,9 +66,9 @@ export function ConnectPage({ onConnect }: ConnectPageProps) {
 					<span className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-cf/15 text-cf">
 						<ShieldIcon size={26} />
 					</span>
-					<h1 className="text-lg font-semibold">Zero Trust Policy Dashboard</h1>
+					<h1 className="text-lg font-semibold">Cloudflare Ops Dashboard</h1>
 					<p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-						Connect your Cloudflare API token to view Access applications, policies, and identity providers.
+						Connect your Cloudflare API token to explore Access policies, WAF activity, and cache rules.
 					</p>
 				</div>
 

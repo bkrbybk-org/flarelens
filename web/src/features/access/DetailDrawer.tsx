@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CfApp, CfPolicy } from "../../types";
 import { formatLocalDateTime, resolvePolicy, type RuleContext } from "../../lib/rules";
-import { CheckIcon, CopyIcon, XIcon } from "../Icons";
+import { CheckIcon, CopyIcon, XIcon } from "../../components/Icons";
 import { DecisionBadge, ErrorBadge, Tag } from "./PolicyChip";
 import { RuleList } from "./RuleList";
 

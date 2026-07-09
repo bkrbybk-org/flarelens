@@ -1,19 +1,24 @@
-import { AppsIcon, GlobeIcon, LogoutIcon, ShieldIcon, UsersIcon, XIcon } from "../Icons";
+import type { Route } from "../../hooks/useRoute";
+import { AppsIcon, GlobeIcon, LogoutIcon, ShieldIcon, XIcon } from "../Icons";
 
 interface SidebarProps {
 	accountName: string;
+	route: Route;
+	onNavigate: (route: Route) => void;
 	onDisconnect: () => void;
 	mobileOpen: boolean;
 	onMobileClose: () => void;
 }
 
-const NAV_ITEMS = [
-	{ label: "Access Applications", icon: AppsIcon, active: true },
-	{ label: "Gateway Policies", icon: GlobeIcon, active: false },
-	{ label: "Access Groups", icon: UsersIcon, active: false },
+const NAV_ITEMS: { route: Route; label: string; icon: typeof AppsIcon }[] = [
+	{ route: "access", label: "Access Applications", icon: AppsIcon },
+	{ route: "waf", label: "WAF Analytics", icon: ShieldIcon },
+	{ route: "cache", label: "Cache Rules", icon: GlobeIcon },
 ];
 
-function SidebarContent({ accountName, onDisconnect }: Pick<SidebarProps, "accountName" | "onDisconnect">) {
+type SidebarContentProps = Pick<SidebarProps, "accountName" | "route" | "onNavigate" | "onDisconnect">;
+
+function SidebarContent({ accountName, route, onNavigate, onDisconnect }: SidebarContentProps) {
 	return (
 		<div className="flex h-full flex-col">
 			<div className="flex items-center gap-2.5 px-5 py-5">
@@ -21,30 +26,31 @@ function SidebarContent({ accountName, onDisconnect }: Pick<SidebarProps, "accou
 					<ShieldIcon size={20} />
 				</span>
 				<div className="leading-tight">
-					<div className="text-sm font-semibold">Zero Trust</div>
-					<div className="text-xs text-zinc-500 dark:text-zinc-400">Policy Dashboard</div>
+					<div className="text-sm font-semibold">Cloudflare Ops</div>
+					<div className="text-xs text-zinc-500 dark:text-zinc-400">Dashboard</div>
 				</div>
 			</div>
 
 			<nav className="flex-1 space-y-1 px-3 py-2" aria-label="Main">
-				{NAV_ITEMS.map(({ label, icon: Icon, active }) => (
-					<button
-						key={label}
-						type="button"
-						disabled={!active}
-						aria-current={active ? "page" : undefined}
-						title={active ? undefined : "Coming soon"}
-						className={
-							active
-								? "flex w-full items-center gap-3 rounded-lg bg-cf/15 px-3 py-2 text-sm font-medium text-cf"
-								: "flex w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-400 dark:text-zinc-600"
-						}
-					>
-						<Icon size={17} />
-						<span className="flex-1 text-left">{label}</span>
-						{!active && <span className="text-[10px] uppercase tracking-wide">soon</span>}
-					</button>
-				))}
+				{NAV_ITEMS.map(({ route: itemRoute, label, icon: Icon }) => {
+					const active = route === itemRoute;
+					return (
+						<button
+							key={itemRoute}
+							type="button"
+							onClick={() => onNavigate(itemRoute)}
+							aria-current={active ? "page" : undefined}
+							className={
+								active
+									? "flex w-full items-center gap-3 rounded-lg bg-cf/15 px-3 py-2 text-sm font-medium text-cf"
+									: "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+							}
+						>
+							<Icon size={17} />
+							<span className="flex-1 text-left">{label}</span>
+						</button>
+					);
+				})}
 			</nav>
 
 			<div className="border-t border-zinc-200 px-4 py-4 dark:border-zinc-800">
@@ -68,12 +74,12 @@ function SidebarContent({ accountName, onDisconnect }: Pick<SidebarProps, "accou
 	);
 }
 
-export function Sidebar({ accountName, onDisconnect, mobileOpen, onMobileClose }: SidebarProps) {
+export function Sidebar({ accountName, route, onNavigate, onDisconnect, mobileOpen, onMobileClose }: SidebarProps) {
 	return (
 		<>
 			{/* Desktop */}
 			<aside className="hidden w-60 shrink-0 border-r border-zinc-200 bg-white md:block dark:border-zinc-800 dark:bg-zinc-900">
-				<SidebarContent accountName={accountName} onDisconnect={onDisconnect} />
+				<SidebarContent accountName={accountName} route={route} onNavigate={onNavigate} onDisconnect={onDisconnect} />
 			</aside>
 
 			{/* Mobile overlay */}
@@ -94,7 +100,15 @@ export function Sidebar({ accountName, onDisconnect, mobileOpen, onMobileClose }
 						>
 							<XIcon size={18} />
 						</button>
-						<SidebarContent accountName={accountName} onDisconnect={onDisconnect} />
+						<SidebarContent
+							accountName={accountName}
+							route={route}
+							onNavigate={(r) => {
+								onNavigate(r);
+								onMobileClose();
+							}}
+							onDisconnect={onDisconnect}
+						/>
 					</aside>
 				</div>
 			)}

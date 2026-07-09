@@ -6,10 +6,11 @@ interface TopbarProps {
 	onToggleTheme: () => void;
 	onSync: () => void;
 	syncing: boolean;
+	showSync?: boolean;
 	onMobileMenu: () => void;
 }
 
-export function Topbar({ title, theme, onToggleTheme, onSync, syncing, onMobileMenu }: TopbarProps) {
+export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync = true, onMobileMenu }: TopbarProps) {
 	return (
 		<header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 md:px-6 dark:border-zinc-800 dark:bg-zinc-900">
 			<button
@@ -23,15 +24,17 @@ export function Topbar({ title, theme, onToggleTheme, onSync, syncing, onMobileM
 
 			<h1 className="flex-1 truncate text-base font-semibold">{title}</h1>
 
-			<button
-				type="button"
-				onClick={onSync}
-				disabled={syncing}
-				className="flex items-center gap-2 rounded-lg bg-cf px-3 py-1.5 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
-			>
-				<RefreshIcon size={15} className={syncing ? "animate-spin" : undefined} />
-				<span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync"}</span>
-			</button>
+			{showSync && (
+				<button
+					type="button"
+					onClick={onSync}
+					disabled={syncing}
+					className="flex items-center gap-2 rounded-lg bg-cf px-3 py-1.5 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
+				>
+					<RefreshIcon size={15} className={syncing ? "animate-spin" : undefined} />
+					<span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync"}</span>
+				</button>
+			)}
 
 			<button
 				type="button"

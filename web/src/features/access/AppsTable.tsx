@@ -13,7 +13,14 @@ import {
 } from "@tanstack/react-table";
 import type { CfApp, CfPolicy } from "../../types";
 import { formatColumnLabel, formatLocalDateTime, resolvePolicy, type RuleContext } from "../../lib/rules";
-import { ChevronDownIcon, ChevronUpIcon, ColumnsIcon, FilterIcon, SearchIcon } from "../Icons";
+import { ChevronDownIcon, ChevronUpIcon, ColumnsIcon, FilterIcon, SearchIcon } from "../../components/Icons";
+import {
+	ColumnFilterPopover,
+	EMPTY_COLUMN_FILTER,
+	facetFilterPasses,
+	isColumnFilterActive,
+	type ColumnFilterValue,
+} from "../../components/table/ColumnFilterPopover";
 import { DecisionBadge, ErrorBadge, PolicyChip, Tag } from "./PolicyChip";
 import { SkeletonCards, SkeletonRows } from "./SkeletonRows";
 
@@ -43,11 +50,6 @@ function sortableValue(val: unknown): string | number | boolean {
 	if (val === null || val === undefined) return "";
 	if (typeof val === "object") return JSON.stringify(val);
 	return val as string | number | boolean;
-}
-
-interface ColumnFilterValue {
-	selected: string[];
-	query: string;
 }
 
 // Atomic values a column contributes for Excel-style filtering: array cells
@@ -144,11 +146,9 @@ export function AppsTable({
 	const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
 	const [columnsOpen, setColumnsOpen] = useState(false);
 	const [filterPopover, setFilterPopover] = useState<{ key: string; left: number; top: number } | null>(null);
-	const [filterListSearch, setFilterListSearch] = useState("");
 	const [dragOverKey, setDragOverKey] = useState<string | null>(null);
 	const draggedKeyRef = useRef<string | null>(null);
 	const columnsMenuRef = useRef<HTMLDivElement>(null);
-	const filterPopoverRef = useRef<HTMLDivElement>(null);
 
 	const allKeys = useMemo(() => {
 		const keys: string[] = [];
@@ -171,18 +171,8 @@ export function AppsTable({
 				accessorFn: (row) => sortableValue(row[key]),
 				header: formatColumnLabel(key),
 				cell: ({ row }) => renderCell(key, row.original, ctx, reusableMap),
-				filterFn: (row, columnId, filterValue: ColumnFilterValue) => {
-					const { selected, query } = filterValue;
-					const facets = facetValues(columnId, row.original, ctx, reusableMap);
-					if (selected.length > 0) {
-						return facets.some((f) => selected.includes(f));
-					}
-					if (query) {
-						const q = query.toLowerCase();
-						return facets.some((f) => f.toLowerCase().includes(q));
-					}
-					return true;
-				},
+				filterFn: (row, columnId, filterValue: ColumnFilterValue) =>
+					facetFilterPasses(facetValues(columnId, row.original, ctx, reusableMap), filterValue),
 			})),
 		[allKeys, ctx, reusableMap],
 	);
@@ -259,7 +249,7 @@ export function AppsTable({
 	}, [allKeys, apps, ctx, reusableMap]);
 
 	function getColumnFilter(key: string): ColumnFilterValue {
-		return (columnFilters.find((f) => f.id === key)?.value as ColumnFilterValue) || { selected: [], query: "" };
+		return (columnFilters.find((f) => f.id === key)?.value as ColumnFilterValue) || EMPTY_COLUMN_FILTER;
 	}
 
 	function setColumnFilter(key: string, value: ColumnFilterValue) {
@@ -271,25 +261,6 @@ export function AppsTable({
 			return [...rest, { id: key, value }];
 		});
 	}
-
-	// Close the filter popover on outside click / Escape
-	useEffect(() => {
-		if (!filterPopover) return;
-		const onDown = (e: MouseEvent) => {
-			if (!filterPopoverRef.current?.contains(e.target as Node)) {
-				setFilterPopover(null);
-			}
-		};
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") setFilterPopover(null);
-		};
-		document.addEventListener("mousedown", onDown);
-		document.addEventListener("keydown", onKey);
-		return () => {
-			document.removeEventListener("mousedown", onDown);
-			document.removeEventListener("keydown", onKey);
-		};
-	}, [filterPopover]);
 
 	// Close the columns menu on outside click
 	useEffect(() => {
@@ -475,7 +446,6 @@ export function AppsTable({
 																return;
 															}
 															const rect = e.currentTarget.getBoundingClientRect();
-															setFilterListSearch("");
 															setFilterPopover({
 																key,
 																left: Math.min(rect.left, window.innerWidth - 288),
@@ -483,7 +453,7 @@ export function AppsTable({
 															});
 														}}
 														className={`rounded-md p-1 transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-															getColumnFilter(key).selected.length > 0 || getColumnFilter(key).query
+															isColumnFilterActive(getColumnFilter(key))
 																? "text-cf"
 																: "text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
 														}`}
@@ -638,86 +608,17 @@ export function AppsTable({
 				</div>
 			)}
 
-			{/* Excel-style column filter popover (fixed so the table scroll area cannot clip it) */}
-			{filterPopover && (() => {
-				const key = filterPopover.key;
-				const current = getColumnFilter(key);
-				const values = distinctValues[key] || [];
-				const shown = filterListSearch
-					? values.filter((v) => v.toLowerCase().includes(filterListSearch.toLowerCase()))
-					: values;
-				return (
-					<div
-						ref={filterPopoverRef}
-						role="dialog"
-						aria-label={`Filter ${formatColumnLabel(key)}`}
-						style={{ left: filterPopover.left, top: filterPopover.top }}
-						className="fixed z-50 w-72 rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
-					>
-						<div className="border-b border-zinc-200 p-2 dark:border-zinc-800">
-							<input
-								type="search"
-								autoFocus
-								value={filterListSearch}
-								onChange={(e) => {
-									setFilterListSearch(e.target.value);
-									setColumnFilter(key, { selected: current.selected, query: e.target.value });
-								}}
-								placeholder={`Type to filter ${formatColumnLabel(key).toLowerCase()}…`}
-								className="w-full rounded-lg border border-zinc-200 bg-transparent px-2.5 py-1.5 text-sm outline-none focus:border-cf dark:border-zinc-700"
-							/>
-						</div>
-						<div className="flex items-center justify-between border-b border-zinc-200 px-3 py-1.5 text-xs dark:border-zinc-800">
-							<button
-								type="button"
-								onClick={() => setColumnFilter(key, { selected: shown, query: current.query })}
-								className="font-medium text-cf hover:underline"
-							>
-								Select all{filterListSearch ? " shown" : ""}
-							</button>
-							<button
-								type="button"
-								onClick={() => {
-									setColumnFilter(key, { selected: [], query: "" });
-									setFilterListSearch("");
-								}}
-								className="text-zinc-500 hover:underline dark:text-zinc-400"
-							>
-								Clear filter
-							</button>
-						</div>
-						<div className="max-h-64 overflow-y-auto p-1.5">
-							{shown.length === 0 ? (
-								<p className="px-2 py-3 text-center text-xs text-zinc-500 dark:text-zinc-400">No values match.</p>
-							) : (
-								shown.map((value) => (
-									<label key={value} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800">
-										<input
-											type="checkbox"
-											checked={current.selected.includes(value)}
-											onChange={(e) => {
-												const selected = e.target.checked
-													? [...current.selected, value]
-													: current.selected.filter((v) => v !== value);
-												setColumnFilter(key, { selected, query: current.query });
-											}}
-											className="accent-cf"
-										/>
-										<span className="min-w-0 flex-1 truncate" title={value}>{value}</span>
-									</label>
-								))
-							)}
-						</div>
-						{(current.selected.length > 0 || current.query) && (
-							<div className="border-t border-zinc-200 px-3 py-1.5 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-								{current.selected.length > 0
-									? `${current.selected.length} value${current.selected.length > 1 ? "s" : ""} selected`
-									: "Text filter active"}
-							</div>
-						)}
-					</div>
-				);
-			})()}
+			{/* Excel-style column filter popover */}
+			{filterPopover && (
+				<ColumnFilterPopover
+					title={formatColumnLabel(filterPopover.key)}
+					anchor={filterPopover}
+					values={distinctValues[filterPopover.key] || []}
+					current={getColumnFilter(filterPopover.key)}
+					onChange={(next) => setColumnFilter(filterPopover.key, next)}
+					onClose={() => setFilterPopover(null)}
+				/>
+			)}
 		</div>
 	);
 }

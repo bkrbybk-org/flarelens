@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { CfApp } from "../../types";
-import { AlertIcon, AppsIcon, KeyIcon, UsersIcon } from "../Icons";
+import { AlertIcon, AppsIcon, KeyIcon, UsersIcon } from "../../components/Icons";
 
 interface StatsRowProps {
 	apps: CfApp[];
