@@ -12,6 +12,9 @@ export interface Prefs {
 	density: "comfortable" | "compact";
 	columnVisibility: Record<string, boolean>;
 	columnOrder: string[];
+	// Zone selection per zone-scoped feature ("" = account-wide for WAF, unselected for Cache)
+	wafZone: string;
+	cacheZone: string;
 }
 
 const DEFAULT_PREFS: Prefs = {
@@ -21,6 +24,8 @@ const DEFAULT_PREFS: Prefs = {
 	density: "comfortable",
 	columnVisibility: {},
 	columnOrder: [],
+	wafZone: "",
+	cacheZone: "",
 };
 
 function readPrefs(): Prefs {

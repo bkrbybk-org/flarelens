@@ -1,4 +1,14 @@
+import type { CfZone } from "../../types";
 import { MenuIcon, MoonIcon, RefreshIcon, SunIcon } from "../Icons";
+
+export interface ZonePickerProps {
+	zones: CfZone[];
+	value: string;
+	onChange: (zoneId: string) => void;
+	loading: boolean;
+	// WAF can run account-wide; Cache requires a concrete zone
+	accountWideLabel?: string;
+}
 
 interface TopbarProps {
 	title: string;
@@ -7,10 +17,11 @@ interface TopbarProps {
 	onSync: () => void;
 	syncing: boolean;
 	showSync?: boolean;
+	zonePicker?: ZonePickerProps;
 	onMobileMenu: () => void;
 }
 
-export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync = true, onMobileMenu }: TopbarProps) {
+export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync = true, zonePicker, onMobileMenu }: TopbarProps) {
 	return (
 		<header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 md:px-6 dark:border-zinc-800 dark:bg-zinc-900">
 			<button
@@ -23,6 +34,23 @@ export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync 
 			</button>
 
 			<h1 className="flex-1 truncate text-base font-semibold">{title}</h1>
+
+			{zonePicker && (
+				<select
+					value={zonePicker.value}
+					onChange={(e) => zonePicker.onChange(e.target.value)}
+					disabled={zonePicker.loading}
+					aria-label="Select zone"
+					className="max-w-52 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+				>
+					<option value="">
+						{zonePicker.loading ? "Loading zones…" : zonePicker.accountWideLabel || "Select zone…"}
+					</option>
+					{zonePicker.zones.map((z) => (
+						<option key={z.id} value={z.id}>{z.name || z.id}</option>
+					))}
+				</select>
+			)}
 
 			{showSync && (
 				<button

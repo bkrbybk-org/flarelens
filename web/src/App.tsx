@@ -9,6 +9,7 @@ import { usePrefs } from "./hooks/usePrefs";
 import { useRoute, type Route } from "./hooks/useRoute";
 import { useSession, type Session } from "./hooks/useSession";
 import { useZeroTrustData } from "./hooks/useZeroTrustData";
+import { useZones } from "./hooks/useZones";
 import type { RuleContext } from "./lib/rules";
 
 const PAGE_TITLES: Record<Route, string> = {
@@ -29,6 +30,7 @@ export default function App() {
 
 	const data = useZeroTrustData(handleAuthError);
 	const { load } = data;
+	const zones = useZones();
 
 	useEffect(() => {
 		if (session) {
@@ -37,6 +39,14 @@ export default function App() {
 		// Load once per session change; `load` identity churns with progress ticks.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [session?.accountId, session?.token]);
+
+	// Zone list is only needed by zone-scoped features; fetch on first visit
+	useEffect(() => {
+		if (session && (route === "waf" || route === "cache")) {
+			zones.ensureLoaded(session.token, session.accountId);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [route, session?.accountId, session?.token]);
 
 	const ctx = useMemo<RuleContext>(
 		() => ({
@@ -72,6 +82,24 @@ export default function App() {
 					onSync={() => load(session.token, session.accountId)}
 					syncing={data.loading}
 					showSync={route === "access"}
+					zonePicker={
+						route === "waf"
+							? {
+								zones: zones.zones,
+								value: prefs.wafZone,
+								onChange: (zoneId) => updatePrefs({ wafZone: zoneId }),
+								loading: zones.loading,
+								accountWideLabel: "Account (all zones)",
+							}
+							: route === "cache"
+								? {
+									zones: zones.zones,
+									value: prefs.cacheZone,
+									onChange: (zoneId) => updatePrefs({ cacheZone: zoneId }),
+									loading: zones.loading,
+								}
+								: undefined
+					}
 					onMobileMenu={() => setMobileMenuOpen(true)}
 				/>
 				<main className="min-h-0 min-w-0 flex-1">

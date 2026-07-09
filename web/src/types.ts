@@ -3,6 +3,11 @@ export interface CfAccount {
 	name?: string;
 }
 
+export interface CfZone {
+	id: string;
+	name?: string;
+}
+
 export interface CfIdp {
 	id: string;
 	name?: string;

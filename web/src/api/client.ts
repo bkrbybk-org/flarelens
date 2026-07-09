@@ -1,4 +1,4 @@
-import type { ApiEnvelope, CfAccount, ZeroTrustData } from "../types";
+import type { ApiEnvelope, CfAccount, CfZone, ZeroTrustData } from "../types";
 
 export class ApiError extends Error {
 	constructor(message: string, public readonly status: number) {
@@ -31,4 +31,8 @@ export function fetchAccounts(token: string): Promise<CfAccount[]> {
 
 export function fetchZeroTrustData(token: string, accountId: string): Promise<ZeroTrustData> {
 	return apiFetch<ZeroTrustData>(`/api/data?account_id=${encodeURIComponent(accountId)}`, token);
+}
+
+export function fetchZones(token: string, accountId: string): Promise<CfZone[]> {
+	return apiFetch<CfZone[]>(`/api/zones?account_id=${encodeURIComponent(accountId)}`, token);
 }

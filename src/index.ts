@@ -47,6 +47,11 @@ interface CfApp {
 	[key: string]: unknown;
 }
 
+interface CfZone {
+	id: string;
+	name?: string;
+}
+
 const SECURITY_HEADERS: Record<string, string> = {
 	"X-Content-Type-Options": "nosniff",
 	"X-Frame-Options": "DENY",
@@ -157,6 +162,22 @@ app.get("/api/accounts", async (c) => {
 	}
 	const { status, data } = await fetchCloudflare("/accounts", token);
 	return c.json(data, status as 200);
+});
+
+app.get("/api/zones", async (c) => {
+	const token = getAuthToken(c.req.header("Authorization"));
+	if (!token) {
+		return c.json({ success: false, errors: [{ message: "Authorization token is missing or invalid" }] }, 401);
+	}
+	const accountId = c.req.query("account_id");
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Missing account_id query parameter" }] }, 400);
+	}
+	const res = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`, token);
+	if (res.status !== 200) {
+		return c.json({ success: false, errors: res.errors || [{ message: "Failed to fetch zones" }] }, res.status as 200);
+	}
+	return c.json({ success: true, result: res.result.map((z) => ({ id: z.id, name: z.name })) });
 });
 
 app.get("/api/data", async (c) => {
