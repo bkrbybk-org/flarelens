@@ -1,6 +1,6 @@
 import type { Route } from "../../hooks/useRoute";
 import type { CfAccount } from "../../types";
-import { AppsIcon, GlobeIcon, LogoutIcon, ShieldIcon, XIcon } from "../Icons";
+import { AppsIcon, GlobeIcon, LogoutIcon, ShieldIcon, UsersIcon, XIcon } from "../Icons";
 
 interface SidebarProps {
 	accountName: string;
@@ -16,6 +16,7 @@ interface SidebarProps {
 
 const NAV_ITEMS: { route: Route; label: string; icon: typeof AppsIcon }[] = [
 	{ route: "access", label: "Access Applications", icon: AppsIcon },
+	{ route: "groups", label: "Access Groups", icon: UsersIcon },
 	{ route: "waf", label: "WAF Analytics", icon: ShieldIcon },
 	{ route: "cache", label: "Cache Rules", icon: GlobeIcon },
 ];

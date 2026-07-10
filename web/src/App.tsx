@@ -3,6 +3,7 @@ import { fetchAccounts } from "./api/client";
 import type { CfAccount } from "./types";
 import { ConnectPage } from "./components/connect/ConnectPage";
 import { Dashboard } from "./features/access/Dashboard";
+import { GroupsPage } from "./features/access/GroupsPage";
 import { CachePage } from "./features/cache/CachePage";
 import { WafPage } from "./features/waf/WafPage";
 import { Sidebar } from "./components/shell/Sidebar";
@@ -17,6 +18,7 @@ import type { RuleContext } from "./lib/rules";
 
 const PAGE_TITLES: Record<Route, string> = {
 	access: "Access Applications",
+	groups: "Access Groups",
 	waf: "WAF Analytics",
 	cache: "Cache Rules",
 };
@@ -146,6 +148,17 @@ export default function App() {
 							reusableMap={data.reusableMap}
 							prefs={prefs}
 							updatePrefs={updatePrefs}
+						/>
+					)}
+					{route === "groups" && (
+						<GroupsPage
+							groups={data.data?.groups || []}
+							apps={data.data?.apps || []}
+							loading={data.loading}
+							error={data.error}
+							progressPercent={data.progress.percent}
+							progressRunning={data.progress.running}
+							ctx={ctx}
 						/>
 					)}
 					{route === "waf" && <WafPage session={session} zoneId={prefs.wafZone} onAuthError={disconnect} />}

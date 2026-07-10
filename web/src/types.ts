@@ -17,6 +17,11 @@ export interface CfIdp {
 export interface CfGroup {
 	id: string;
 	name?: string;
+	include?: unknown[];
+	exclude?: unknown[];
+	require?: unknown[];
+	created_at?: string;
+	updated_at?: string;
 }
 
 export interface CfPolicy {
