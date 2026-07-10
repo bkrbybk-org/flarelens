@@ -7,6 +7,7 @@ import { relativeTime } from "../../lib/waf/format";
 import { AlertIcon, AppsIcon, KeyIcon, RefreshIcon, SearchIcon, ShieldIcon, UsersIcon } from "../../components/Icons";
 import { ProgressBar } from "../../components/ProgressBar";
 import { EventGraph } from "./EventGraph";
+import { RuleDrawer, type DrawerRule } from "./RuleDrawer";
 import { RulesetTable } from "./RulesetTable";
 import { RulesReview } from "./RulesReview";
 import { useWafData } from "./useWafData";
@@ -27,6 +28,7 @@ export function WafPage({ session, zoneId, onAuthError }: WafPageProps) {
 	const [tab, setTab] = useState<Tab>("overview");
 	const [globalSearch, setGlobalSearch] = useState("");
 	const [lastRefreshed, setLastRefreshed] = useState<string>("");
+	const [drawerRule, setDrawerRule] = useState<DrawerRule | null>(null);
 
 	// Deep-linkable state: #/waf?lookback=1440&tab=rules
 	useHashSyncedState("lookback", String(minutes), (v) => {
@@ -158,11 +160,19 @@ export function WafPage({ session, zoneId, onAuthError }: WafPageProps) {
 								className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cf focus:ring-2 focus:ring-cf/30 dark:border-zinc-700 dark:bg-zinc-900"
 							/>
 						</div>
-						<RulesetTable rows={rulesetRows} globalSearch={globalSearch} window={waf.window} />
+						<RulesetTable rows={rulesetRows} globalSearch={globalSearch} window={waf.window} onSelectRule={setDrawerRule} />
 					</>
 				) : (
-					<RulesReview events={waf.events} ruleMeta={waf.ruleMeta} window={waf.window} />
+					<RulesReview events={waf.events} ruleMeta={waf.ruleMeta} window={waf.window} onSelectRule={setDrawerRule} />
 				)}
+
+				<RuleDrawer
+					rule={drawerRule}
+					events={waf.events}
+					ruleMeta={waf.ruleMeta}
+					window={waf.window}
+					onClose={() => setDrawerRule(null)}
+				/>
 			</div>
 		</div>
 	);

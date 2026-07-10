@@ -273,6 +273,8 @@ const WAF_ACTIONS = ["block", "challenge", "managed_challenge", "js_challenge", 
 
 const FIREWALL_EVENT_FIELDS = `
         action
+        clientCountryName
+        clientIP
         clientRequestHTTPHost
         clientRequestPath
         datetime
@@ -310,6 +312,8 @@ query ZoneFirewallEvents($zoneTag: string!, $since: Time!, $before: Time!, $acti
 
 interface FirewallEvent {
 	action?: string;
+	clientCountryName?: string;
+	clientIP?: string;
 	clientRequestHTTPHost?: string;
 	clientRequestPath?: string;
 	datetime?: string;

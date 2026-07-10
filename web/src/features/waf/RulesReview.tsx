@@ -9,13 +9,14 @@ interface RulesReviewProps {
 	events: FirewallEvent[];
 	ruleMeta: RuleMetaMap;
 	window: { since: number; until: number } | null;
+	onSelectRule: (rule: { id: string; name: string; configuredAction?: string; lastSeen?: string }) => void;
 }
 
 const PAGE_SIZE = 25;
 
 type StatusFilter = "" | "enabled" | "disabled" | "active" | "idle";
 
-export function RulesReview({ events, ruleMeta, window: win }: RulesReviewProps) {
+export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: RulesReviewProps) {
 	const [search, setSearch] = useState("");
 	const [type, setType] = useState("");
 	const [level, setLevel] = useState("");
@@ -112,7 +113,7 @@ export function RulesReview({ events, ruleMeta, window: win }: RulesReviewProps)
 						No rules match the current filters.
 					</p>
 				) : (
-					pageRows.map((row) => <RuleCard key={row.id} row={row} win={win} />)
+					pageRows.map((row) => <RuleCard key={row.id} row={row} win={win} onSelect={onSelectRule} />)
 				)}
 			</div>
 
@@ -142,10 +143,25 @@ export function RulesReview({ events, ruleMeta, window: win }: RulesReviewProps)
 	);
 }
 
-function RuleCard({ row, win }: { row: RuleReviewRow; win: { since: number; until: number } | null }) {
+function RuleCard({ row, win, onSelect }: {
+	row: RuleReviewRow;
+	win: { since: number; until: number } | null;
+	onSelect: (rule: { id: string; name: string; configuredAction?: string; lastSeen?: string }) => void;
+}) {
 	const drift = actionDrift(row);
 	return (
-		<div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+		<div
+			role="button"
+			tabIndex={0}
+			title="Open rule details"
+			onClick={() => onSelect({ id: row.id, name: row.name, configuredAction: row.configuredAction, lastSeen: row.lastSeen })}
+			onKeyDown={(e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					onSelect({ id: row.id, name: row.name, configuredAction: row.configuredAction, lastSeen: row.lastSeen });
+				}
+			}}
+			className="cursor-pointer rounded-xl border border-zinc-200 bg-white p-4 transition hover:border-cf/50 focus:outline-none focus:ring-2 focus:ring-cf/40 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-cf/50">
 			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div className="min-w-0 flex-1">
 					<div className="flex flex-wrap items-center gap-2">

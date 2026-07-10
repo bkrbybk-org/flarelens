@@ -194,3 +194,44 @@ export function aggregateRules(events: FirewallEvent[], ruleMeta: RuleMetaMap): 
 export function topEntries(map: Map<string, number>, limit: number): [string, number][] {
 	return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, limit);
 }
+
+export interface RuleEventDetail {
+	total: number;
+	actions: Record<string, number>;
+	paths: Map<string, number>;
+	hosts: Map<string, number>;
+	countries: Map<string, number>;
+	ips: Map<string, number>;
+	times: number[];
+}
+
+/** Per-rule event breakdown for the drill-down drawer. */
+export function ruleEventDetail(events: FirewallEvent[], ruleId: string): RuleEventDetail {
+	const detail: RuleEventDetail = {
+		total: 0,
+		actions: {},
+		paths: new Map(),
+		hosts: new Map(),
+		countries: new Map(),
+		ips: new Map(),
+		times: [],
+	};
+	const bump = (map: Map<string, number>, key: string | undefined) => {
+		if (key) map.set(key, (map.get(key) || 0) + 1);
+	};
+	for (const event of events) {
+		if (eventRuleId(event) !== ruleId) continue;
+		detail.total += 1;
+		const action = normalizeAction(event.action);
+		detail.actions[action] = (detail.actions[action] || 0) + 1;
+		bump(detail.paths, event.clientRequestPath);
+		bump(detail.hosts, event.clientRequestHTTPHost);
+		bump(detail.countries, event.clientCountryName);
+		bump(detail.ips, event.clientIP);
+		if (event.datetime) {
+			const time = new Date(event.datetime).getTime();
+			if (Number.isFinite(time)) detail.times.push(time);
+		}
+	}
+	return detail;
+}

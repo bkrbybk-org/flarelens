@@ -1,5 +1,7 @@
 export interface FirewallEvent {
 	action?: string;
+	clientCountryName?: string;
+	clientIP?: string;
 	clientRequestHTTPHost?: string;
 	clientRequestPath?: string;
 	datetime?: string;
