@@ -30,10 +30,13 @@ export function CachePage({ session, zoneId, onAuthError }: CachePageProps) {
 	const cache = useCacheData(onAuthError);
 	const { load } = cache;
 	const [rangeHours, setRangeHours] = useState(24);
-	const [testResults, setTestResults] = useState<TestResults | null>(null);
+	// Results are stamped with the scope they were computed for; a scope change
+	// invalidates them implicitly (no reset-in-effect needed).
+	const scopeKey = `${zoneId}:${rangeHours}`;
+	const [testRun, setTestRun] = useState<{ key: string; results: TestResults } | null>(null);
+	const testResults = testRun && testRun.key === scopeKey ? testRun.results : null;
 
 	useEffect(() => {
-		setTestResults(null);
 		if (zoneId) {
 			load(session.token, zoneId, rangeHours);
 		}
@@ -209,7 +212,11 @@ export function CachePage({ session, zoneId, onAuthError }: CachePageProps) {
 						)}
 
 						{data.rules.length > 0 && (
-							<UrlTester rules={data.rules} hosts={data.hosts} onResults={setTestResults} />
+							<UrlTester
+								rules={data.rules}
+								hosts={data.hosts}
+								onResults={(results) => setTestRun(results ? { key: scopeKey, results } : null)}
+							/>
 						)}
 
 						<div className="space-y-3">

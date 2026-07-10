@@ -8,21 +8,23 @@ import { clampNumber, titleCase } from "../../lib/waf/format";
 export function ActionMixBar({ actions, total }: { actions: Record<string, number>; total: number }) {
 	const width = 150;
 	const height = 10;
-	let x = 0;
-	const segments = Object.entries(actions)
-		.sort((a, b) => b[1] - a[1])
-		.map(([action, count]) => {
-			const group = chartActionFor(action);
-			const color = group ? group.color : "#71717a";
-			const segWidth = total ? (count / total) * width : 0;
-			const left = x;
-			x += segWidth;
-			return (
-				<rect key={action} x={left} y="0" width={segWidth} height={height} fill={color}>
-					<title>{`${titleCase(action)}: ${count.toLocaleString()}`}</title>
-				</rect>
-			);
-		});
+	const sorted = Object.entries(actions).sort((a, b) => b[1] - a[1]);
+	// Precompute cumulative left offsets (render-time mutation trips the compiler lint)
+	const offsets = sorted.reduce<number[]>((acc, _entry, i) => {
+		const prev = i === 0 ? 0 : acc[i - 1] + (total ? (sorted[i - 1][1] / total) * width : 0);
+		acc.push(prev);
+		return acc;
+	}, []);
+	const segments = sorted.map(([action, count], i) => {
+		const group = chartActionFor(action);
+		const color = group ? group.color : "#71717a";
+		const segWidth = total ? (count / total) * width : 0;
+		return (
+			<rect key={action} x={offsets[i]} y="0" width={segWidth} height={height} fill={color}>
+				<title>{`${titleCase(action)}: ${count.toLocaleString()}`}</title>
+			</rect>
+		);
+	});
 	return (
 		<span className="block overflow-hidden rounded">
 			<svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Action mix">

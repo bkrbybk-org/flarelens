@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { ApiError, fetchZeroTrustData } from "../api/client";
-import type { ZeroTrustData } from "../types";
+import type { CfPolicy, ZeroTrustData } from "../types";
 import { useEstimatedProgress } from "./useEstimatedProgress";
 
 interface State {
@@ -50,7 +50,7 @@ export function useZeroTrustData(onAuthError: () => void) {
 	}, [state.data]);
 
 	const reusableMap = useMemo(() => {
-		const map: Record<string, import("../types").CfPolicy> = {};
+		const map: Record<string, CfPolicy> = {};
 		for (const policy of state.data?.reusable_policies || []) {
 			map[policy.id] = policy;
 		}

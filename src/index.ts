@@ -99,7 +99,7 @@ async function fetchCloudflare<T>(path: string, token: string): Promise<{ status
 	let data: CfListResponse<T>;
 	try {
 		data = await response.json();
-	} catch (e) {
+	} catch {
 		data = { success: false, errors: [{ message: "Failed to parse Cloudflare API response" }] };
 	}
 	return { status, data };

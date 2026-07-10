@@ -191,7 +191,6 @@ type FieldGetter = (facts: RequestFacts) => string;
 /* ---------------- Kleene three-valued combinators ---------------- */
 
 function triAnd(a: TriPredicate, b: TriPredicate): TriPredicate {
-  // eslint-disable-next-line sonarjs/function-return-type -- Kleene tri-state: boolean | "unknown" by design
   return (f) => {
     const x = a(f);
     if (x === false) return false;
@@ -203,7 +202,6 @@ function triAnd(a: TriPredicate, b: TriPredicate): TriPredicate {
 }
 
 function triOr(a: TriPredicate, b: TriPredicate): TriPredicate {
-  // eslint-disable-next-line sonarjs/function-return-type -- Kleene tri-state: boolean | "unknown" by design
   return (f) => {
     const x = a(f);
     if (x === true) return true;
@@ -215,7 +213,6 @@ function triOr(a: TriPredicate, b: TriPredicate): TriPredicate {
 }
 
 function triXor(a: TriPredicate, b: TriPredicate): TriPredicate {
-  // eslint-disable-next-line sonarjs/function-return-type -- Kleene tri-state: boolean | "unknown" by design
   return (f) => {
     const x = a(f);
     const y = b(f);
