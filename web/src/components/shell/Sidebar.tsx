@@ -1,8 +1,12 @@
 import type { Route } from "../../hooks/useRoute";
+import type { CfAccount } from "../../types";
 import { AppsIcon, GlobeIcon, LogoutIcon, ShieldIcon, XIcon } from "../Icons";
 
 interface SidebarProps {
 	accountName: string;
+	accountId: string;
+	accounts: CfAccount[];
+	onSwitchAccount: (account: CfAccount) => void;
 	route: Route;
 	onNavigate: (route: Route) => void;
 	onDisconnect: () => void;
@@ -16,9 +20,12 @@ const NAV_ITEMS: { route: Route; label: string; icon: typeof AppsIcon }[] = [
 	{ route: "cache", label: "Cache Rules", icon: GlobeIcon },
 ];
 
-type SidebarContentProps = Pick<SidebarProps, "accountName" | "route" | "onNavigate" | "onDisconnect">;
+type SidebarContentProps = Pick<
+	SidebarProps,
+	"accountName" | "accountId" | "accounts" | "onSwitchAccount" | "route" | "onNavigate" | "onDisconnect"
+>;
 
-function SidebarContent({ accountName, route, onNavigate, onDisconnect }: SidebarContentProps) {
+function SidebarContent({ accountName, accountId, accounts, onSwitchAccount, route, onNavigate, onDisconnect }: SidebarContentProps) {
 	return (
 		<div className="flex h-full flex-col">
 			<div className="flex items-center gap-2.5 px-5 py-5">
@@ -56,8 +63,24 @@ function SidebarContent({ accountName, route, onNavigate, onDisconnect }: Sideba
 			<div className="border-t border-zinc-200 px-4 py-4 dark:border-zinc-800">
 				<div className="mb-3 flex items-center gap-2.5">
 					<span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
-					<div className="min-w-0 leading-tight">
-						<div className="truncate text-sm font-medium" title={accountName}>{accountName}</div>
+					<div className="min-w-0 flex-1 leading-tight">
+						{accounts.length > 1 ? (
+							<select
+								value={accountId}
+								onChange={(e) => {
+									const next = accounts.find((a) => a.id === e.target.value);
+									if (next && next.id !== accountId) onSwitchAccount(next);
+								}}
+								aria-label="Switch account"
+								className="w-full truncate rounded-md border border-zinc-200 bg-transparent px-1.5 py-1 text-sm font-medium outline-none focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+							>
+								{accounts.map((a) => (
+									<option key={a.id} value={a.id}>{a.name || a.id}</option>
+								))}
+							</select>
+						) : (
+							<div className="truncate text-sm font-medium" title={accountName}>{accountName}</div>
+						)}
 						<div className="text-xs text-zinc-500 dark:text-zinc-400">Connected</div>
 					</div>
 				</div>
@@ -74,12 +97,20 @@ function SidebarContent({ accountName, route, onNavigate, onDisconnect }: Sideba
 	);
 }
 
-export function Sidebar({ accountName, route, onNavigate, onDisconnect, mobileOpen, onMobileClose }: SidebarProps) {
+export function Sidebar({ accountName, accountId, accounts, onSwitchAccount, route, onNavigate, onDisconnect, mobileOpen, onMobileClose }: SidebarProps) {
 	return (
 		<>
 			{/* Desktop */}
 			<aside className="hidden w-60 shrink-0 border-r border-zinc-200 bg-white md:block dark:border-zinc-800 dark:bg-zinc-900">
-				<SidebarContent accountName={accountName} route={route} onNavigate={onNavigate} onDisconnect={onDisconnect} />
+				<SidebarContent
+					accountName={accountName}
+					accountId={accountId}
+					accounts={accounts}
+					onSwitchAccount={onSwitchAccount}
+					route={route}
+					onNavigate={onNavigate}
+					onDisconnect={onDisconnect}
+				/>
 			</aside>
 
 			{/* Mobile overlay */}
@@ -102,6 +133,9 @@ export function Sidebar({ accountName, route, onNavigate, onDisconnect, mobileOp
 						</button>
 						<SidebarContent
 							accountName={accountName}
+							accountId={accountId}
+							accounts={accounts}
+							onSwitchAccount={onSwitchAccount}
 							route={route}
 							onNavigate={(r) => {
 								onNavigate(r);

@@ -5,7 +5,8 @@ export type Route = "access" | "waf" | "cache";
 const ROUTES: Route[] = ["access", "waf", "cache"];
 
 function parseHash(): Route {
-	const hash = window.location.hash.replace(/^#\/?/, "");
+	// Route is the path part only; query params (#/waf?zone=…) belong to useHashParams
+	const hash = window.location.hash.replace(/^#\/?/, "").split("?")[0];
 	return (ROUTES as string[]).includes(hash) ? (hash as Route) : "access";
 }
 

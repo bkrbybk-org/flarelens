@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useHashSyncedState } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
 import { AlertIcon, AppsIcon, GlobeIcon, KeyIcon, RefreshIcon } from "../../components/Icons";
 import { ProgressBar } from "../../components/ProgressBar";
@@ -31,6 +32,13 @@ export function CachePage({ session, zoneId, onAuthError }: CachePageProps) {
 	const cache = useCacheData(onAuthError);
 	const { load } = cache;
 	const [rangeHours, setRangeHours] = useState(24);
+
+	// Deep-linkable: #/cache?range=168
+	useHashSyncedState("range", String(rangeHours), (v) => {
+		const n = Number(v);
+		if (RANGE_OPTIONS.some(([value]) => value === n)) setRangeHours(n);
+	});
+
 	// Results are stamped with the scope they were computed for; a scope change
 	// invalidates them implicitly (no reset-in-effect needed).
 	const scopeKey = `${zoneId}:${rangeHours}`;

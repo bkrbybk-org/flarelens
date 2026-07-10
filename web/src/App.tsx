@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { fetchAccounts } from "./api/client";
+import type { CfAccount } from "./types";
 import { ConnectPage } from "./components/connect/ConnectPage";
 import { Dashboard } from "./features/access/Dashboard";
 import { CachePage } from "./features/cache/CachePage";
 import { WafPage } from "./features/waf/WafPage";
 import { Sidebar } from "./components/shell/Sidebar";
 import { Topbar } from "./components/shell/Topbar";
+import { useHashSyncedState } from "./hooks/useHashParams";
 import { usePrefs } from "./hooks/usePrefs";
 import { useRoute, type Route } from "./hooks/useRoute";
 import { useSession, type Session } from "./hooks/useSession";
@@ -49,6 +52,26 @@ export default function App() {
 		}
 	}, [route, sessionToken, sessionAccountId, ensureZones]);
 
+	// Accounts list powers the sidebar switcher (best-effort; single-account tokens skip it)
+	const [accounts, setAccounts] = useState<CfAccount[]>([]);
+	useEffect(() => {
+		if (!sessionToken) return;
+		let cancelled = false;
+		fetchAccounts(sessionToken)
+			.then((result) => !cancelled && setAccounts(result))
+			.catch(() => !cancelled && setAccounts([]));
+		return () => {
+			cancelled = true;
+		};
+	}, [sessionToken]);
+
+	// Deep-linkable zone for zone-scoped routes: #/waf?zone=… / #/cache?zone=…
+	const activeZone = route === "waf" ? prefs.wafZone : route === "cache" ? prefs.cacheZone : "";
+	useHashSyncedState("zone", activeZone, (zoneId) => {
+		if (route === "waf") updatePrefs({ wafZone: zoneId });
+		else if (route === "cache") updatePrefs({ cacheZone: zoneId });
+	});
+
 	const ctx = useMemo<RuleContext>(
 		() => ({
 			groupName: (id) => data.groupMap[id] || id,
@@ -69,6 +92,13 @@ export default function App() {
 		<div className="flex h-dvh overflow-hidden">
 			<Sidebar
 				accountName={session.accountName}
+				accountId={session.accountId}
+				accounts={accounts}
+				onSwitchAccount={(account) => {
+					connect({ token: session.token, accountId: account.id, accountName: account.name || account.id });
+					zones.reset();
+					updatePrefs({ wafZone: "", cacheZone: "" });
+				}}
 				route={route}
 				onNavigate={navigate}
 				onDisconnect={disconnect}

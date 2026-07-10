@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useHashSyncedState } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
 import { aggregateRulesets, countEventsByActions } from "../../lib/waf/aggregate";
 import { AUTO_REFRESH_OPTIONS, DEFAULT_LOOKBACK_MINUTES, EVENT_LIMIT, LOOKBACK_OPTIONS } from "../../lib/waf/constants";
@@ -26,6 +27,15 @@ export function WafPage({ session, zoneId, onAuthError }: WafPageProps) {
 	const [tab, setTab] = useState<Tab>("overview");
 	const [globalSearch, setGlobalSearch] = useState("");
 	const [lastRefreshed, setLastRefreshed] = useState<string>("");
+
+	// Deep-linkable state: #/waf?lookback=1440&tab=rules
+	useHashSyncedState("lookback", String(minutes), (v) => {
+		const n = Number(v);
+		if (LOOKBACK_OPTIONS.some(([value]) => value === n)) setMinutes(n);
+	});
+	useHashSyncedState("tab", tab, (v) => {
+		if (v === "overview" || v === "rules") setTab(v);
+	});
 
 	useEffect(() => {
 		load(session.token, session.accountId, zoneId, minutes).then(() => setLastRefreshed(new Date().toISOString()));
