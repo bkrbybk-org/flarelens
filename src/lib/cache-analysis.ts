@@ -13,7 +13,9 @@
  * Auth adapted to this app's model: Bearer token only (legacy X-Auth-Key
  * support dropped).
  */
-import { compileExpression, compileTriState, UnsupportedExpressionError, type RequestFacts } from "./expr";
+// Single-source expression evaluator lives with the web app (client URL tester
+// uses it too); the worker bundles it from there.
+import { compileExpression, compileTriState, UnsupportedExpressionError, type RequestFacts } from "../../web/src/lib/expr";
 import {
 	isRecord,
 	type CfEnvelope,
@@ -63,7 +65,7 @@ export type RuleAnalytics = {
 	hitRatio: number;
 };
 
-function summarize(statuses: StatusCounts): RuleAnalytics {
+export function summarize(statuses: StatusCounts): RuleAnalytics {
 	let hits = 0;
 	let misses = 0;
 	let bypass = 0;
@@ -264,7 +266,7 @@ function estimatedRequests(g: GqlGroup): number {
 	return Math.round(count * interval);
 }
 
-type PathGroup = { host: string; path: string; status: string; requests: number };
+export type PathGroup = { host: string; path: string; status: string; requests: number };
 
 export const ALLOWED_RANGES = [24, 168, 720];
 
@@ -636,7 +638,7 @@ function lastMatchingRule(rules: RuleShell[], predicates: Map<string, Predicate>
  * with later rules overriding earlier ones per setting, so each path is
  * credited to the LAST matching enabled rule.
  */
-function attributeAnalytics(
+export function attributeAnalytics(
 	rules: RuleShell[],
 	groups: PathGroup[],
 	unattributableCount: number,
