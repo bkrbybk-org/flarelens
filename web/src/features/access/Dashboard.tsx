@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ProgressBar } from "../../components/ProgressBar";
 import type { CfApp, CfPolicy } from "../../types";
 import type { RuleContext } from "../../lib/rules";
 import type { Prefs } from "../../hooks/usePrefs";
@@ -28,14 +29,7 @@ export function Dashboard({
 
 	return (
 		<div className="flex h-full flex-col gap-4 p-4 md:p-6">
-			{progressRunning && (
-				<div className="overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800" role="progressbar" aria-valuenow={Math.round(progressPercent)} aria-valuemin={0} aria-valuemax={100}>
-					<div
-						className="h-1.5 rounded-full bg-cf transition-[width] duration-150"
-						style={{ width: `${progressPercent}%` }}
-					/>
-				</div>
-			)}
+			{progressRunning && <ProgressBar percent={progressPercent} />}
 
 			{error && (
 				<div role="alert" className="rounded-xl border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">

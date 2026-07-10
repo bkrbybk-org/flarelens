@@ -4,6 +4,7 @@ import { aggregateRulesets, countEventsByActions } from "../../lib/waf/aggregate
 import { AUTO_REFRESH_OPTIONS, DEFAULT_LOOKBACK_MINUTES, EVENT_LIMIT, LOOKBACK_OPTIONS } from "../../lib/waf/constants";
 import { relativeTime } from "../../lib/waf/format";
 import { AlertIcon, AppsIcon, KeyIcon, RefreshIcon, SearchIcon, ShieldIcon, UsersIcon } from "../../components/Icons";
+import { ProgressBar } from "../../components/ProgressBar";
 import { EventGraph } from "./EventGraph";
 import { RulesetTable } from "./RulesetTable";
 import { RulesReview } from "./RulesReview";
@@ -28,8 +29,7 @@ export function WafPage({ session, zoneId, onAuthError }: WafPageProps) {
 
 	useEffect(() => {
 		load(session.token, session.accountId, zoneId, minutes).then(() => setLastRefreshed(new Date().toISOString()));
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [session.token, session.accountId, zoneId, minutes]);
+	}, [session.token, session.accountId, zoneId, minutes, load]);
 
 	useEffect(() => {
 		if (!autoRefresh) return;
@@ -37,8 +37,7 @@ export function WafPage({ session, zoneId, onAuthError }: WafPageProps) {
 			load(session.token, session.accountId, zoneId, minutes).then(() => setLastRefreshed(new Date().toISOString()));
 		}, autoRefresh);
 		return () => clearInterval(timer);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [autoRefresh, session.token, session.accountId, zoneId, minutes]);
+	}, [autoRefresh, session.token, session.accountId, zoneId, minutes, load]);
 
 	const rulesetRows = useMemo(() => aggregateRulesets(waf.events, waf.ruleMeta), [waf.events, waf.ruleMeta]);
 
@@ -64,11 +63,7 @@ export function WafPage({ session, zoneId, onAuthError }: WafPageProps) {
 	return (
 		<div className="h-full overflow-y-auto">
 			<div className="space-y-4 p-4 md:p-6">
-				{waf.loading && (
-					<div className="overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-						<div className="h-1.5 w-1/3 animate-pulse rounded-full bg-cf" />
-					</div>
-				)}
+				{waf.progress.running && <ProgressBar percent={waf.progress.percent} />}
 
 				{waf.error && (
 					<div role="alert" className="rounded-xl border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">

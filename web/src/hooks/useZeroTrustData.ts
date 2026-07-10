@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, fetchZeroTrustData } from "../api/client";
 import type { CfPolicy, ZeroTrustData } from "../types";
 import { useEstimatedProgress } from "./useEstimatedProgress";
@@ -12,10 +12,17 @@ interface State {
 export function useZeroTrustData(onAuthError: () => void) {
 	const [state, setState] = useState<State>({ data: null, loading: false, error: null });
 	const progress = useEstimatedProgress();
+	// Refs keep `load` referentially stable across progress ticks and
+	// caller re-renders, so effects can depend on it without re-firing.
+	const onAuthErrorRef = useRef(onAuthError);
+	useEffect(() => {
+		onAuthErrorRef.current = onAuthError;
+	}, [onAuthError]);
+	const { start: progressStart, stop: progressStop } = progress;
 
 	const load = useCallback(async (token: string, accountId: string) => {
 		setState((prev) => ({ ...prev, loading: true, error: null }));
-		progress.start();
+		progressStart();
 		let success = false;
 		try {
 			const data = await fetchZeroTrustData(token, accountId);
@@ -23,15 +30,15 @@ export function useZeroTrustData(onAuthError: () => void) {
 			setState({ data, loading: false, error: null });
 		} catch (err) {
 			if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-				onAuthError();
+				onAuthErrorRef.current();
 				return;
 			}
 			const message = err instanceof Error ? err.message : "Failed to retrieve Zero Trust data";
 			setState((prev) => ({ ...prev, loading: false, error: message }));
 		} finally {
-			progress.stop(success);
+			progressStop(success);
 		}
-	}, [onAuthError, progress]);
+	}, [progressStart, progressStop]);
 
 	const idpMap = useMemo(() => {
 		const map: Record<string, string> = {};

@@ -32,21 +32,22 @@ export default function App() {
 	const { load } = data;
 	const zones = useZones();
 
+	const sessionToken = session?.token;
+	const sessionAccountId = session?.accountId;
+
 	useEffect(() => {
-		if (session) {
-			load(session.token, session.accountId);
+		if (sessionToken && sessionAccountId) {
+			load(sessionToken, sessionAccountId);
 		}
-		// Load once per session change; `load` identity churns with progress ticks.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [session?.accountId, session?.token]);
+	}, [sessionToken, sessionAccountId, load]);
 
 	// Zone list is only needed by zone-scoped features; fetch on first visit
+	const ensureZones = zones.ensureLoaded;
 	useEffect(() => {
-		if (session && (route === "waf" || route === "cache")) {
-			zones.ensureLoaded(session.token, session.accountId);
+		if (sessionToken && sessionAccountId && (route === "waf" || route === "cache")) {
+			ensureZones(sessionToken, sessionAccountId);
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [route, session?.accountId, session?.token]);
+	}, [route, sessionToken, sessionAccountId, ensureZones]);
 
 	const ctx = useMemo<RuleContext>(
 		() => ({

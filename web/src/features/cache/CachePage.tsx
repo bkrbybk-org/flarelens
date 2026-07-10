@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "../../hooks/useSession";
 import { AlertIcon, AppsIcon, GlobeIcon, KeyIcon, RefreshIcon } from "../../components/Icons";
+import { ProgressBar } from "../../components/ProgressBar";
 import { CountsLine, RatioBar, RuleCard } from "./RuleCard";
 import { TrendChart } from "./TrendChart";
 import { UrlTester, type TestResults } from "./UrlTester";
@@ -40,8 +41,7 @@ export function CachePage({ session, zoneId, onAuthError }: CachePageProps) {
 		if (zoneId) {
 			load(session.token, zoneId, rangeHours);
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [session.token, zoneId, rangeHours]);
+	}, [session.token, zoneId, rangeHours, load]);
 
 	const data = cache.data;
 
@@ -90,11 +90,7 @@ export function CachePage({ session, zoneId, onAuthError }: CachePageProps) {
 	return (
 		<div className="h-full overflow-y-auto">
 			<div className="space-y-4 p-4 md:p-6">
-				{cache.loading && (
-					<div className="overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-						<div className="h-1.5 w-1/3 animate-pulse rounded-full bg-cf" />
-					</div>
-				)}
+				{cache.progress.running && <ProgressBar percent={cache.progress.percent} />}
 
 				{cache.error && (
 					<div role="alert" className="rounded-xl border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">

@@ -9,11 +9,13 @@ export function useZones() {
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const loadedForRef = useRef<string | null>(null);
+	const inFlightRef = useRef(false);
 
 	const ensureLoaded = useCallback(async (token: string, accountId: string) => {
-		if (loadedForRef.current === accountId || loading) {
+		if (loadedForRef.current === accountId || inFlightRef.current) {
 			return;
 		}
+		inFlightRef.current = true;
 		setLoading(true);
 		setError(null);
 		try {
@@ -24,9 +26,10 @@ export function useZones() {
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to fetch zones");
 		} finally {
+			inFlightRef.current = false;
 			setLoading(false);
 		}
-	}, [loading]);
+	}, []);
 
 	const reset = useCallback(() => {
 		setZones([]);

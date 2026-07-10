@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, fetchWafEvents, fetchWafRulesets } from "../../api/client";
+import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { FirewallEvent, RuleMetaMap, WafDiagnostics } from "../../lib/waf/types";
 
 interface WafState {
@@ -24,12 +25,20 @@ const INITIAL: WafState = {
 
 export function useWafData(onAuthError: () => void) {
 	const [state, setState] = useState<WafState>(INITIAL);
+	const progress = useEstimatedProgress("cf_waf_last_load_ms");
 	// Guard against out-of-order responses when scope/lookback changes quickly
 	const requestIdRef = useRef(0);
+	const onAuthErrorRef = useRef(onAuthError);
+	useEffect(() => {
+		onAuthErrorRef.current = onAuthError;
+	}, [onAuthError]);
+	const { start: progressStart, stop: progressStop } = progress;
 
 	const load = useCallback(async (token: string, accountId: string, zoneId: string, minutes: number) => {
 		const requestId = ++requestIdRef.current;
 		setState((prev) => ({ ...prev, loading: true, error: null }));
+		progressStart();
+		let success = false;
 		const until = Date.now();
 		try {
 			const [eventsRes, ruleMeta] = await Promise.all([
@@ -37,6 +46,7 @@ export function useWafData(onAuthError: () => void) {
 				fetchWafRulesets<RuleMetaMap>(token, accountId, zoneId),
 			]);
 			if (requestId !== requestIdRef.current) return;
+			success = true;
 			setState({
 				events: eventsRes.events,
 				ruleMeta,
@@ -49,7 +59,7 @@ export function useWafData(onAuthError: () => void) {
 		} catch (err) {
 			if (requestId !== requestIdRef.current) return;
 			if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-				onAuthError();
+				onAuthErrorRef.current();
 				return;
 			}
 			setState((prev) => ({
@@ -57,8 +67,10 @@ export function useWafData(onAuthError: () => void) {
 				loading: false,
 				error: err instanceof Error ? err.message : "Failed to load WAF telemetry",
 			}));
+		} finally {
+			progressStop(success);
 		}
-	}, [onAuthError]);
+	}, [progressStart, progressStop]);
 
-	return { ...state, load };
+	return { ...state, load, progress };
 }
