@@ -8,6 +8,7 @@ import { RuleList } from "./RuleList";
 
 interface GroupsPageProps {
 	groups: CfGroup[];
+	groupsError: boolean;
 	apps: CfApp[];
 	loading: boolean;
 	error: string | null;
@@ -31,7 +32,7 @@ function policyReferencesGroup(policy: CfPolicy, groupId: string): boolean {
 	return false;
 }
 
-export function GroupsPage({ groups, apps, loading, error, progressPercent, progressRunning, ctx }: GroupsPageProps) {
+export function GroupsPage({ groups, groupsError, apps, loading, error, progressPercent, progressRunning, ctx }: GroupsPageProps) {
 	const [search, setSearch] = useState("");
 
 	// group id → app names whose policies reference it
@@ -91,7 +92,9 @@ export function GroupsPage({ groups, apps, loading, error, progressPercent, prog
 						</h2>
 						<p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
 							{groups.length === 0
-								? "This account has no Access Groups configured (or the token lacks the Access: Read scope for groups)."
+								? groupsError
+									? "The API token is missing the Access: Organizations, Identity Providers, and Groups (Read) permission — groups could not be fetched."
+									: "This account has no Access Groups configured."
 								: "Try a different search."}
 						</p>
 					</div>

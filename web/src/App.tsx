@@ -153,6 +153,7 @@ export default function App() {
 					{route === "groups" && (
 						<GroupsPage
 							groups={data.data?.groups || []}
+							groupsError={data.data?.groups_error || false}
 							apps={data.data?.apps || []}
 							loading={data.loading}
 							error={data.error}

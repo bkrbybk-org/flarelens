@@ -55,7 +55,9 @@ export interface ZeroTrustData {
 	apps: CfApp[];
 	idps: CfIdp[];
 	groups: CfGroup[];
+	groups_error: boolean;
 	reusable_policies: CfPolicy[];
+	reusable_policies_error: boolean;
 }
 
 export interface ApiEnvelope<T> {

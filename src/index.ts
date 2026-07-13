@@ -224,9 +224,12 @@ app.get("/api/data", async (c) => {
 	const apps = appsRes.result;
 	const idps = idpsRes.result;
 	// Groups and reusable policies are enrichment data; tokens without those
-	// read scopes still get the core app/policy view.
+	// read scopes still get the core app/policy view. Surface the failure so
+	// the connect screen can report the scope as missing rather than "empty".
 	const groups = groupsRes.status === 200 ? groupsRes.result : [];
+	const groupsError = groupsRes.status !== 200;
 	const reusablePolicies = reusableRes.status === 200 ? reusableRes.result : [];
+	const reusablePoliciesError = reusableRes.status !== 200;
 
 	// 2. Fetch policies for all applications with bounded concurrency
 	const policyResults = await mapWithConcurrency(apps, 5, async (appItem) => {
@@ -255,7 +258,9 @@ app.get("/api/data", async (c) => {
 			apps: enrichedApps,
 			idps,
 			groups,
+			groups_error: groupsError,
 			reusable_policies: reusablePolicies,
+			reusable_policies_error: reusablePoliciesError,
 		},
 	});
 });

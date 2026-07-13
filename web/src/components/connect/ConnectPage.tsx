@@ -1,11 +1,59 @@
 import { useState, type FormEvent } from "react";
-import { fetchAccounts, fetchZeroTrustData } from "../../api/client";
+import { ApiError, fetchAccounts, fetchZeroTrustData } from "../../api/client";
 import type { CfAccount } from "../../types";
 import type { Session } from "../../hooks/useSession";
-import { EyeIcon, EyeOffIcon, ShieldIcon } from "../Icons";
+import { CheckIcon, EyeIcon, EyeOffIcon, RefreshIcon, ShieldIcon, XIcon } from "../Icons";
 
 interface ConnectPageProps {
 	onConnect: (session: Session) => void;
+}
+
+type CheckStatus = "idle" | "checking" | "granted" | "missing" | "skipped";
+
+interface RequiredCheck {
+	key: "account" | "access";
+	label: string;
+	description: string;
+	status: CheckStatus;
+	detail?: string;
+}
+
+const INITIAL_REQUIRED: RequiredCheck[] = [
+	{
+		key: "account",
+		label: "Account Settings: Read",
+		description: "Lists the accounts your token can access.",
+		status: "idle",
+	},
+	{
+		key: "access",
+		label: "Access: Read",
+		description: "Applications, policies, and identity providers.",
+		status: "idle",
+	},
+];
+
+const OPTIONAL_PERMISSIONS = [
+	{ label: "Access: Organizations, Identity Providers, and Groups", description: "Resolves group names inside policies and populates the Access Groups section." },
+	{ label: "Zone: Read", description: "Lists zones for the zone picker in WAF Analytics and Cache Rules." },
+	{ label: "Account WAF: Read", description: "Account-wide WAF rulesets in WAF Analytics." },
+	{ label: "Zone WAF: Read", description: "Zone-level WAF rulesets in WAF Analytics." },
+	{ label: "Cache Rules: Read", description: "Cache Rules section." },
+	{ label: "Zone Analytics: Read", description: "Traffic and hit-ratio data in Cache Rules." },
+] as const;
+
+function StatusBadge({ status }: { status: CheckStatus }) {
+	if (status === "checking") {
+		return <RefreshIcon size={14} className="shrink-0 animate-spin text-zinc-400" />;
+	}
+	if (status === "granted") {
+		return <CheckIcon size={14} className="shrink-0 text-emerald-500" />;
+	}
+	if (status === "missing") {
+		return <XIcon size={14} className="shrink-0 text-red-500" />;
+	}
+	// idle / skipped: not yet evaluated
+	return <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600" />;
 }
 
 export function ConnectPage({ onConnect }: ConnectPageProps) {
@@ -16,6 +64,11 @@ export function ConnectPage({ onConnect }: ConnectPageProps) {
 	const [selectedAccount, setSelectedAccount] = useState("");
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
+	const [required, setRequired] = useState<RequiredCheck[]>(INITIAL_REQUIRED);
+
+	function setCheck(key: RequiredCheck["key"], status: CheckStatus, detail?: string) {
+		setRequired((prev) => prev.map((c) => (c.key === key ? { ...c, status, detail } : c)));
+	}
 
 	async function handleSubmit(e: FormEvent) {
 		e.preventDefault();
@@ -27,12 +80,22 @@ export function ConnectPage({ onConnect }: ConnectPageProps) {
 
 		setBusy(true);
 		setError("");
+		setRequired(INITIAL_REQUIRED);
+
 		try {
 			let accountId = selectedAccount || accountIdInput.trim();
 			let accountName = accountId;
 
 			if (!accountId) {
-				const found = await fetchAccounts(trimmedToken);
+				setCheck("account", "checking");
+				let found: CfAccount[];
+				try {
+					found = await fetchAccounts(trimmedToken);
+				} catch (err) {
+					setCheck("account", "missing", err instanceof Error ? err.message : "Request failed");
+					throw err;
+				}
+				setCheck("account", "granted");
 				if (found.length === 0) {
 					throw new Error('No accounts found for this API token. Ensure it has the "Account Settings: Read" permission.');
 				}
@@ -44,6 +107,7 @@ export function ConnectPage({ onConnect }: ConnectPageProps) {
 				accountId = found[0].id;
 				accountName = found[0].name || accountId;
 			} else {
+				setCheck("account", "skipped", "Skipped — using the account ID you entered directly.");
 				const match = accounts.find((a) => a.id === accountId);
 				if (match) {
 					accountName = match.name || accountId;
@@ -51,10 +115,22 @@ export function ConnectPage({ onConnect }: ConnectPageProps) {
 			}
 
 			// Validate the token + account before committing the session
-			await fetchZeroTrustData(trimmedToken, accountId);
+			setCheck("access", "checking");
+			try {
+				await fetchZeroTrustData(trimmedToken, accountId);
+			} catch (err) {
+				setCheck("access", "missing", err instanceof Error ? err.message : "Request failed");
+				throw err;
+			}
+			setCheck("access", "granted");
+
 			onConnect({ token: trimmedToken, accountId, accountName });
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "Failed to connect");
+			if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+				setError(`${err.message} — check the token's permissions below.`);
+			} else {
+				setError(err instanceof Error ? err.message : "Failed to connect");
+			}
 			setBusy(false);
 		}
 	}
@@ -94,12 +170,6 @@ export function ConnectPage({ onConnect }: ConnectPageProps) {
 								{showToken ? <EyeOffIcon size={16} /> : <EyeIcon size={16} />}
 							</button>
 						</div>
-						<p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
-							Recommended scopes: <strong>Account Settings: Read</strong>, <strong>Access: Read</strong>,{" "}
-							<strong>Zone: Read</strong>, <strong>Cache Rules: Read</strong>, <strong>Analytics: Read</strong>,{" "}
-							<strong>Zone WAF: Read</strong> + <strong>Account WAF: Read</strong>. Sections degrade individually
-							when a scope is missing.
-						</p>
 					</div>
 
 					{accounts.length > 1 ? (
@@ -148,6 +218,50 @@ export function ConnectPage({ onConnect }: ConnectPageProps) {
 						{busy ? "Connecting…" : "Connect"}
 					</button>
 				</form>
+
+				<div className="mt-6 space-y-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+					<div>
+						<h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+							Required permissions
+						</h2>
+						<ul className="space-y-2">
+							{required.map((check) => (
+								<li key={check.key} className="flex gap-2 text-sm">
+									<StatusBadge status={check.status} />
+									<div className="min-w-0">
+										<div className="font-medium">{check.label}</div>
+										<div className="text-xs text-zinc-500 dark:text-zinc-400">{check.description}</div>
+										{check.detail && check.status !== "skipped" && (
+											<div className={`mt-0.5 text-xs ${check.status === "missing" ? "text-red-600 dark:text-red-400" : "text-zinc-400"}`}>
+												{check.detail}
+											</div>
+										)}
+									</div>
+								</li>
+							))}
+						</ul>
+					</div>
+
+					<div>
+						<h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+							Optional permissions
+						</h2>
+						<ul className="space-y-2">
+							{OPTIONAL_PERMISSIONS.map((perm) => (
+								<li key={perm.label} className="flex gap-2 text-sm">
+									<span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600" />
+									<div className="min-w-0">
+										<div className="font-medium">{perm.label}</div>
+										<div className="text-xs text-zinc-500 dark:text-zinc-400">{perm.description}</div>
+									</div>
+								</li>
+							))}
+						</ul>
+						<p className="mt-2 text-xs text-zinc-400">
+							Missing an optional scope just narrows that section — checked individually when you open it.
+						</p>
+					</div>
+				</div>
 			</div>
 		</div>
 	);
