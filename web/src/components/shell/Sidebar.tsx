@@ -34,8 +34,8 @@ function SidebarContent({ accountName, accountId, accounts, onSwitchAccount, rou
 					<ShieldIcon size={20} />
 				</span>
 				<div className="leading-tight">
-					<div className="text-sm font-semibold">Cloudflare Ops</div>
-					<div className="text-xs text-zinc-500 dark:text-zinc-400">Dashboard</div>
+					<div className="text-sm font-semibold">Flarelens</div>
+					<div className="text-xs text-zinc-500 dark:text-zinc-400">for Cloudflare</div>
 				</div>
 			</div>
 

@@ -1,6 +1,6 @@
-# Cloudflare Ops Dashboard
+# Flarelens
 
-Single-pane dashboard for reviewing a Cloudflare account's **Zero Trust Access policies**, **WAF activity**, and **Cache Rules** — served entirely from one Cloudflare Worker.
+Ops dashboard for Cloudflare: a single pane of glass for reviewing an account's **Zero Trust Access policies**, **WAF activity**, and **Cache Rules** — served entirely from one Cloudflare Worker.
 
 ## Sections
 
