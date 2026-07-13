@@ -4,6 +4,14 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-03-07",
   "compatibility_flags": ["nodejs_compat"],
+  // Serve only on the custom domain; no <name>.workers.dev URL
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "flarelens.example.com",
+      "custom_domain": true,
+    },
+  ],
   "assets": {
     "directory": "./web/dist",
     "binding": "ASSETS",
