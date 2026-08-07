@@ -1,8 +1,8 @@
 # Flarelens — Progress
 
-Status snapshot as of **`89b4597`** (2026-07-13). See [README.md](README.md) for how to run the app; this file tracks where the work stands.
+Status snapshot, last reviewed **2026-08-02** against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
 
-**TL;DR** — Feature-complete for the three planned sections, 64 unit tests green, `npm run check` clean. **Not yet deployed:** `flarelens.example.com` is configured but `wrangler deploy` has never run, and the app has never been exercised against a real API token.
+**TL;DR** — Feature-complete across all four sections, 64 unit tests green, `npm run check` clean, 0 lint errors. **Not yet deployed:** `flarelens.example.com` is configured but `wrangler deploy` has never run, and the app has never been exercised against a real API token.
 
 ---
 
@@ -102,6 +102,10 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 **Branding / deploy config**
 - `60db24b` Renamed to Flarelens · `6636210` Custom domain `flarelens.example.com`, `workers_dev: false`
 
+**Docs / review**
+- `faf1348` PROGRESS.md created
+- Codebase review (2026-08-02): fixed the `engines.node` / Wrangler 4 mismatch and the missing Sync button on Access Groups; reconciled README with the shipped feature set
+
 ---
 
 ## Open issues
@@ -112,12 +116,20 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 | P1 | **No `account_id` in [wrangler.jsonc](wrangler.jsonc)** and the token sees 2 accounts | `wrangler deploy` will prompt interactively, and fails outright in CI | Add `"account_id": "<id>"` — pick the account holding `example.com` |
 | P2 | **No git remote** — `git remote -v` is empty | Single copy on this machine; no backup, no PR flow, blocks CI/CD | `git remote add origin …` + push |
 | P2 | **Never run against a real token.** All verification used mocked `window.fetch` fixtures | Real-world API shape drift would go unnoticed | Smoke test each section with a scoped token |
+| P2 | **[src/lib/waf-meta.ts](src/lib/waf-meta.ts) has no tests** — the ruleset-flattening logic every WAF view depends on (managed `execute` resolution, entrypoint merging, id/ref aliasing) | A regression here silently mislabels every rule in WAF Analytics | Add unit tests with fixture ruleset payloads; the logic is pure apart from `cfFetch` |
 | P3 | Old `cf-zt-policy-dashboard` Worker likely still deployed | Stale duplicate serving old code | `npx wrangler delete --name cf-zt-policy-dashboard` |
 | P3 | 2 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 | P3 | [.claude/launch.json](.claude/launch.json) hardcodes the nvm `v24.16.0` binary path | Breaks when Node is upgraded | Default Node is now v24, so this can revert to plain `npx` |
+| P3 | [web/src/lib/waf/chart.ts](web/src/lib/waf/chart.ts) and [useHashParams.ts](web/src/hooks/useHashParams.ts) untested | Bucketing maths and deep-link parsing are regression-prone and cheap to cover | Both are pure functions — straightforward unit tests |
+| P4 | `useHashSyncedState` adopts URL params on mount only. Editing the hash to a *different route* while the app is open (e.g. `#/waf?zone=A` → `#/cache?zone=B`) does not adopt the new param, because `App` never unmounts — the write-back then overwrites it | Hand-edited cross-route deep links lose their param. Fresh loads and in-app navigation are unaffected | Key the adoption on `route` as well as mount |
+| P4 | Worker's `CfGroup` interface ([src/index.ts](src/index.ts)) declares only `id`/`name`, but the endpoint passes the full group object through to the client | None at runtime — TS interfaces don't strip fields — but it misleads anyone reading the Worker in isolation | Widen it to match [web/src/types.ts](web/src/types.ts) |
 | P4 | Local directory still named `cf-zt-policy-dashboard/` | Cosmetic mismatch with the Flarelens name | Rename the folder |
 
-**Environment note:** `node_modules/` was found empty at the start of this session — `npm test` / `npm run lint` fail with `Cannot find package 'vitest'` until `npm install` is run. Restored and verified green; recorded here because the symptom looks like a code failure but isn't.
+### Resolved in this review
+
+- ~~`engines.node` said `>=20.19.0` while Wrangler 4 requires `>=22`~~ — corrected to `>=22.0.0`. This mismatch already caused a real `Wrangler requires at least Node.js v22.0.0` failure; README repeated the wrong figure and is now fixed too.
+- ~~Access Groups had no Sync button~~ — `showSync` now covers `access` and `groups`, the two routes that render the `/api/data` payload. WAF and Cache keep their own in-page Refresh controls.
+- ~~`node_modules/` empty, `npm test`/`lint` failing with `Cannot find package 'vitest'`~~ — environment only, restored with `npm install`. Noted because the symptom looks like a code failure but isn't.
 
 ---
 
@@ -128,6 +140,7 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 | **CI/CD** — GitHub Actions: `npm run check` on PR, deploy on merge to main | Tests and lint exist but nothing enforces them | S | Git remote + `CLOUDFLARE_API_TOKEN` repo secret (deploy-scoped, separate from a browsing token) |
 | **Export CSV/JSON** of the filtered view | Deferred twice; the natural "give me this for an audit" ask. Frontend-only, no Worker changes | S | — |
 | **Cache range comparison** — current vs previous equivalent window (hit-ratio and volume delta) | Turns a point-in-time number into a trend signal | M | — |
+| **Close the unit-test gaps** — `waf-meta.ts` first, then `chart.ts` and `useHashParams.ts` | Three pure-logic modules currently ride on zero coverage; `waf-meta` underpins all of WAF Analytics | S | — |
 | **Component / integration tests** | Current suite covers pure logic only; UI regressions rely on manual preview checks | M | Testing-library + jsdom setup |
 | **Snapshot diff / audit trail** — persist policy snapshots, show what changed between syncs | Biggest product differentiator; answers "who changed what, when" | L | Needs a KV binding — first stateful component in the app |
 

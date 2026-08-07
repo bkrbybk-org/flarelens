@@ -6,9 +6,12 @@ Ops dashboard for Cloudflare: a single pane of glass for reviewing an account's 
 
 | Route | Section | Scope | What it shows |
 |---|---|---|---|
-| `#/access` | Access Applications | account | Apps, policies with human-readable include/require/exclude rules, IdPs, groups |
-| `#/waf` | WAF Analytics | account or zone | `firewallEventsAdaptive` telemetry correlated against ruleset metadata: KPIs, events-over-time, per-ruleset/rule tables, action-drift detection |
+| `#/access` | Access Applications | account | Apps and their policies, with include/require/exclude rules rendered as readable sentences; filterable/sortable table, per-app detail drawer |
+| `#/groups` | Access Groups | account | Reusable Access Groups with their rules, cross-referenced to the applications whose policies use them |
+| `#/waf` | WAF Analytics | account or zone | `firewallEventsAdaptive` telemetry correlated against ruleset metadata: KPIs, events-over-time, per-ruleset/rule tables, action-drift detection, per-rule drill-down |
 | `#/cache` | Cache Rules | zone | Cache rules with last-match traffic attribution, hit-ratio health grade, insights, URL tester (client-side wirefilter evaluation) |
+
+Sections carry deep-linkable state, e.g. `#/waf?zone=<id>&lookback=1440&tab=rules` or `#/cache?zone=<id>&range=168`.
 
 ## Architecture
 
@@ -23,15 +26,30 @@ web/src/lib/expr.ts       Wirefilter expression evaluator (single source; the
 
 The worker never stores credentials: the browser holds the API token in `sessionStorage` and sends it per request as `Authorization: Bearer`; the worker forwards it to `api.cloudflare.com` within the same invocation. Strict CSP (`'self'` only, no inline), security headers on every response (`run_worker_first`), `Cache-Control: no-store` on all `/api/*`.
 
+See [PROGRESS.md](PROGRESS.md) for the full route table, hook inventory, storage keys, open issues, and roadmap.
+
 ## API token scopes
 
-Account Settings: Read · Access: Read (apps, policies, groups, IdPs) · Zone: Read · Cache Rules: Read · Analytics: Read · Zone WAF: Read · Account WAF: Read.
+**Required** — the connect screen checks these two live and reports which one failed:
 
-Sections degrade individually when a scope is missing (per-section error banner, not app-wide failure).
+| Scope | Unlocks |
+|---|---|
+| Account Settings: Read | Account discovery and the account switcher |
+| Access: Read | Applications, policies, identity providers |
+
+**Optional** — each only narrows one section, which then shows its own error banner rather than failing the app:
+
+| Scope | Unlocks |
+|---|---|
+| Access: Organizations, Identity Providers, and Groups | Group names inside policy rules; the Access Groups section |
+| Zone: Read | Zone picker for WAF Analytics and Cache Rules |
+| Account WAF: Read · Zone WAF: Read | Ruleset metadata in WAF Analytics |
+| Cache Rules: Read | Cache Rules section |
+| Zone Analytics: Read | Traffic and hit-ratio data in Cache Rules |
 
 ## Development
 
-Requires **Node ≥ 20.19** (Vite 8). With nvm: `nvm use 24`.
+Requires **Node ≥ 22** — Wrangler 4 enforces this, and it is stricter than Vite 8's own `≥ 20.19`. With nvm: `nvm use 24`.
 
 ```sh
 npm install

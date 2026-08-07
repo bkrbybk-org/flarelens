@@ -114,7 +114,7 @@ export default function App() {
 					onToggleTheme={() => updatePrefs({ theme: prefs.theme === "dark" ? "light" : "dark" })}
 					onSync={() => load(session.token, session.accountId)}
 					syncing={data.loading}
-					showSync={route === "access"}
+					showSync={route === "access" || route === "groups"}
 					zonePicker={
 						route === "waf"
 							? {
