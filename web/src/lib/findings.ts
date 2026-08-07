@@ -1,0 +1,200 @@
+// Pure audit-signal checks that back the Findings page. Kept dependency-free
+// of React so every check is unit-testable in isolation; FindingsPage only
+// wires these together with whichever section data happens to be loaded.
+import type { CfApp, CfGroup, CfPolicy } from "../types";
+import { resolvePolicy } from "./rules";
+import { actionDrift } from "./waf/aggregate";
+import type { RuleReviewRow } from "./waf/types";
+import type { CacheAnalysis } from "../features/cache/types";
+
+export type Severity = "high" | "medium" | "low";
+export type FindingSource = "access" | "groups" | "waf" | "cache";
+
+export interface Finding {
+	id: string;
+	severity: Severity;
+	title: string;
+	detail: string;
+	source: FindingSource;
+	href: string;
+}
+
+const SEVERITY_ORDER: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
+const SOURCE_ORDER: Record<FindingSource, number> = { access: 0, groups: 1, waf: 2, cache: 3 };
+
+export function sortFindings(findings: Finding[]): Finding[] {
+	return [...findings].sort(
+		(a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || SOURCE_ORDER[a.source] - SOURCE_ORDER[b.source],
+	);
+}
+
+export function countBySeverity(findings: Finding[]): Record<Severity, number> {
+	const counts: Record<Severity, number> = { high: 0, medium: 0, low: 0 };
+	for (const f of findings) counts[f.severity]++;
+	return counts;
+}
+
+function isEveryoneRule(rule: unknown): boolean {
+	return typeof rule === "object" && rule !== null && "everyone" in (rule as Record<string, unknown>);
+}
+
+function reachableByEveryone(policy: CfPolicy): boolean {
+	const include = policy.include || [];
+	const hasEveryone = (include as unknown[]).some(isEveryoneRule);
+	const requireEmpty = !policy.require || (policy.require as unknown[]).length === 0;
+	return hasEveryone && requireEmpty;
+}
+
+// Does any rule in this policy reference the group id? Shared by the Access
+// Groups "used by" cross-reference and the unreferenced-group finding below —
+// extracted here so neither copy drifts from the other.
+export function policyReferencesGroup(policy: CfPolicy, groupId: string): boolean {
+	for (const field of ["include", "exclude", "require"] as const) {
+		for (const rule of policy[field] || []) {
+			if (
+				typeof rule === "object" && rule !== null &&
+				(rule as { group?: { id?: string } }).group?.id === groupId
+			) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// group id → app names whose policies reference it
+export function groupUsedBy(groups: CfGroup[], apps: CfApp[]): Map<string, string[]> {
+	const map = new Map<string, string[]>();
+	for (const group of groups) {
+		const names: string[] = [];
+		for (const app of apps) {
+			if (app.policies.some((p) => policyReferencesGroup(p, group.id))) {
+				names.push(app.name || app.id);
+			}
+		}
+		map.set(group.id, names);
+	}
+	return map;
+}
+
+export function accessFindings(apps: CfApp[], reusableMap: Record<string, CfPolicy>): Finding[] {
+	const findings: Finding[] = [];
+	for (const app of apps) {
+		const label = app.name || app.id;
+
+		if (app.policies_error) {
+			findings.push({
+				id: `access:policies-error:${app.id}`,
+				severity: "medium",
+				title: `${label}: policies could not be fetched`,
+				detail: "This app's posture is unknown — the API call for its policies failed.",
+				source: "access",
+				href: "#/access",
+			});
+			continue;
+		}
+
+		if (app.policies.length === 0) {
+			findings.push({
+				id: `access:no-policy:${app.id}`,
+				severity: "high",
+				title: `${label}: no Access policy`,
+				detail: "No policy is attached to this application; the account-level default decision applies.",
+				source: "access",
+				href: "#/access",
+			});
+		}
+
+		for (const raw of app.policies) {
+			const policy = resolvePolicy(raw, reusableMap);
+			const policyLabel = policy.name || policy.id;
+
+			if (reachableByEveryone(policy)) {
+				findings.push({
+					id: `access:everyone:${app.id}:${policy.id}`,
+					severity: "high",
+					title: `${label}: "${policyLabel}" allows everyone`,
+					detail: "Include contains an everyone rule and require is empty — reachable by anyone who can reach the URL.",
+					source: "access",
+					href: "#/access",
+				});
+			}
+
+			if ((policy.decision || "").toLowerCase() === "bypass") {
+				findings.push({
+					id: `access:bypass:${app.id}:${policy.id}`,
+					severity: "medium",
+					title: `${label}: "${policyLabel}" bypasses Access`,
+					detail: "This policy's decision is bypass — it skips Access entirely for matching requests.",
+					source: "access",
+					href: "#/access",
+				});
+			}
+		}
+	}
+	return findings;
+}
+
+export function groupsFindings(groups: CfGroup[], apps: CfApp[]): Finding[] {
+	const usedBy = groupUsedBy(groups, apps);
+	const findings: Finding[] = [];
+	for (const group of groups) {
+		const refs = usedBy.get(group.id) || [];
+		if (refs.length === 0) {
+			findings.push({
+				id: `groups:unreferenced:${group.id}`,
+				severity: "low",
+				title: `${group.name || group.id}: unreferenced group`,
+				detail: "Not used by any application policy — hygiene candidate for cleanup.",
+				source: "groups",
+				href: "#/groups",
+			});
+		}
+	}
+	return findings;
+}
+
+export function wafFindings(rows: RuleReviewRow[]): Finding[] {
+	const findings: Finding[] = [];
+	for (const row of rows) {
+		const drift = actionDrift(row);
+		if (drift) {
+			findings.push({
+				id: `waf:drift:${row.id}`,
+				severity: "medium",
+				title: `${row.name}: action drift`,
+				detail: `Configured action is "${drift.configured}" but the most common observed action is "${drift.observed}".`,
+				source: "waf",
+				href: "#/waf?tab=rules",
+			});
+		}
+	}
+	return findings;
+}
+
+export function cacheFindings(analysis: CacheAnalysis): Finding[] {
+	const findings: Finding[] = [];
+	analysis.insights.forEach((insight, i) => {
+		findings.push({
+			id: `cache:insight:${analysis.zoneId}:${i}`,
+			severity: insight.severity === "warn" ? "medium" : "low",
+			title: insight.severity === "warn" ? `${analysis.zoneName}: cache insight` : `${analysis.zoneName}: cache note`,
+			detail: insight.message,
+			source: "cache",
+			href: `#/cache?zone=${analysis.zoneId}`,
+		});
+	});
+
+	if (analysis.health && (analysis.health.grade === "D" || analysis.health.grade === "F")) {
+		findings.push({
+			id: `cache:health:${analysis.zoneId}`,
+			severity: "medium",
+			title: `${analysis.zoneName}: low cache health grade (${analysis.health.grade})`,
+			detail: `Hit ratio ${analysis.health.ratio.toFixed(1)}% — cache rule configuration likely needs review.`,
+			source: "cache",
+			href: `#/cache?zone=${analysis.zoneId}`,
+		});
+	}
+
+	return findings;
+}

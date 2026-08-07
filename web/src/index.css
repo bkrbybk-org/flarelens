@@ -17,3 +17,41 @@ html {
 body {
 	@apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
 }
+
+/* Findings page print report: hide chrome, expand scroll containers, force
+   light colors regardless of active theme, keep finding cards intact. */
+@media print {
+	aside,
+	header,
+	button,
+	input,
+	select {
+		display: none !important;
+	}
+
+	html,
+	body {
+		height: auto !important;
+		overflow: visible !important;
+		background: #fff !important;
+		color: #18181b !important;
+	}
+
+	#findings-print-root,
+	#findings-print-root * {
+		height: auto !important;
+		max-height: none !important;
+		overflow: visible !important;
+		background: #fff !important;
+		color: #18181b !important;
+		border-color: #d4d4d8 !important;
+	}
+
+	#findings-print-root {
+		display: block !important;
+	}
+
+	.break-inside-avoid {
+		break-inside: avoid;
+	}
+}

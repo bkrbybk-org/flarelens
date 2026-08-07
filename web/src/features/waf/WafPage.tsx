@@ -4,6 +4,7 @@ import type { Session } from "../../hooks/useSession";
 import { aggregateRulesets, countEventsByActions } from "../../lib/waf/aggregate";
 import { AUTO_REFRESH_OPTIONS, DEFAULT_LOOKBACK_MINUTES, EVENT_LIMIT, LOOKBACK_OPTIONS } from "../../lib/waf/constants";
 import { relativeTime } from "../../lib/waf/format";
+import { publishWafSnapshot } from "../../lib/sectionSnapshot";
 import { AlertIcon, AppsIcon, KeyIcon, RefreshIcon, SearchIcon, ShieldIcon, UsersIcon } from "../../components/Icons";
 import { ProgressBar } from "../../components/ProgressBar";
 import { EventGraph } from "./EventGraph";
@@ -50,6 +51,12 @@ export function WafPage({ session, zoneId, onAuthError }: WafPageProps) {
 		}, autoRefresh);
 		return () => clearInterval(timer);
 	}, [autoRefresh, session.token, session.accountId, zoneId, minutes, load]);
+
+	// Publish the latest load for the Findings page, which reads a snapshot
+	// rather than duplicating this fetch (see lib/sectionSnapshot.ts).
+	useEffect(() => {
+		if (waf.loaded) publishWafSnapshot({ events: waf.events, ruleMeta: waf.ruleMeta });
+	}, [waf.loaded, waf.events, waf.ruleMeta]);
 
 	const rulesetRows = useMemo(() => aggregateRulesets(waf.events, waf.ruleMeta), [waf.events, waf.ruleMeta]);
 

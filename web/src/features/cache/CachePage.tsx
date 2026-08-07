@@ -3,6 +3,7 @@ import { useHashSyncedState } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
 import { AlertIcon, AppsIcon, GlobeIcon, KeyIcon, RefreshIcon } from "../../components/Icons";
 import { ProgressBar } from "../../components/ProgressBar";
+import { publishCacheSnapshot } from "../../lib/sectionSnapshot";
 import { CountsLine, RatioBar, RuleCard } from "./RuleCard";
 import { TrendChart } from "./TrendChart";
 import { UrlTester, type TestResults } from "./UrlTester";
@@ -52,6 +53,12 @@ export function CachePage({ session, zoneId, onAuthError }: CachePageProps) {
 	}, [session.token, zoneId, rangeHours, load]);
 
 	const data = cache.data;
+
+	// Publish the latest load for the Findings page, which reads a snapshot
+	// rather than duplicating this fetch (see lib/sectionSnapshot.ts).
+	useEffect(() => {
+		if (data) publishCacheSnapshot(data);
+	}, [data]);
 
 	const stats = useMemo(() => {
 		if (!data) return null;

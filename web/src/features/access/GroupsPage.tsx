@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { SearchIcon, UsersIcon } from "../../components/Icons";
 import { ProgressBar } from "../../components/ProgressBar";
+import { groupUsedBy } from "../../lib/findings";
 import { formatLocalDateTime, type RuleContext } from "../../lib/rules";
-import type { CfApp, CfGroup, CfPolicy } from "../../types";
+import type { CfApp, CfGroup } from "../../types";
 import { Tag } from "./PolicyChip";
 import { RuleList } from "./RuleList";
 
@@ -17,38 +18,11 @@ interface GroupsPageProps {
 	ctx: RuleContext;
 }
 
-// Does any rule in this policy reference the group id?
-function policyReferencesGroup(policy: CfPolicy, groupId: string): boolean {
-	for (const field of ["include", "exclude", "require"] as const) {
-		for (const rule of policy[field] || []) {
-			if (
-				typeof rule === "object" && rule !== null &&
-				(rule as { group?: { id?: string } }).group?.id === groupId
-			) {
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
 export function GroupsPage({ groups, groupsError, apps, loading, error, progressPercent, progressRunning, ctx }: GroupsPageProps) {
 	const [search, setSearch] = useState("");
 
 	// group id → app names whose policies reference it
-	const usedBy = useMemo(() => {
-		const map = new Map<string, string[]>();
-		for (const group of groups) {
-			const names: string[] = [];
-			for (const app of apps) {
-				if (app.policies.some((p) => policyReferencesGroup(p, group.id))) {
-					names.push(app.name || app.id);
-				}
-			}
-			map.set(group.id, names);
-		}
-		return map;
-	}, [groups, apps]);
+	const usedBy = useMemo(() => groupUsedBy(groups, apps), [groups, apps]);
 
 	const filtered = useMemo(() => {
 		const q = search.trim().toLowerCase();

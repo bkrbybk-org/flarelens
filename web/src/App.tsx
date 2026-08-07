@@ -5,6 +5,7 @@ import { ConnectPage } from "./components/connect/ConnectPage";
 import { Dashboard } from "./features/access/Dashboard";
 import { GroupsPage } from "./features/access/GroupsPage";
 import { CachePage } from "./features/cache/CachePage";
+import { FindingsPage } from "./features/findings/FindingsPage";
 import { WafPage } from "./features/waf/WafPage";
 import { Sidebar } from "./components/shell/Sidebar";
 import { Topbar } from "./components/shell/Topbar";
@@ -21,6 +22,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	groups: "Access Groups",
 	waf: "WAF Analytics",
 	cache: "Cache Rules",
+	findings: "Findings",
 };
 
 export default function App() {
@@ -114,7 +116,7 @@ export default function App() {
 					onToggleTheme={() => updatePrefs({ theme: prefs.theme === "dark" ? "light" : "dark" })}
 					onSync={() => load(session.token, session.accountId)}
 					syncing={data.loading}
-					showSync={route === "access" || route === "groups"}
+					showSync={route === "access" || route === "groups" || route === "findings"}
 					zonePicker={
 						route === "waf"
 							? {
@@ -164,6 +166,20 @@ export default function App() {
 					)}
 					{route === "waf" && <WafPage session={session} zoneId={prefs.wafZone} onAuthError={disconnect} />}
 					{route === "cache" && <CachePage session={session} zoneId={prefs.cacheZone} onAuthError={disconnect} />}
+					{route === "findings" && (
+						<FindingsPage
+							apps={data.data?.apps || []}
+							groups={data.data?.groups || []}
+							reusableMap={data.reusableMap}
+							loading={data.loading}
+							error={data.error}
+							progressPercent={data.progress.percent}
+							progressRunning={data.progress.running}
+							onNavigate={(href) => {
+								window.location.hash = href.replace(/^#/, "");
+							}}
+						/>
+					)}
 				</main>
 			</div>
 		</div>
