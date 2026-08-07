@@ -12,6 +12,7 @@ import {
 	type VisibilityState,
 } from "@tanstack/react-table";
 import type { CfApp, CfPolicy } from "../../types";
+import { downloadCsv, toCsv } from "../../lib/csv";
 import { formatColumnLabel, formatLocalDateTime, resolvePolicy, type RuleContext } from "../../lib/rules";
 import { ChevronDownIcon, ChevronUpIcon, ColumnsIcon, FilterIcon, SearchIcon } from "../../components/Icons";
 import {
@@ -375,6 +376,22 @@ export function AppsTable({
 					className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
 				>
 					{density === "compact" ? "Comfortable" : "Compact"}
+				</button>
+
+				<button
+					type="button"
+					onClick={() => {
+						const visibleColumns = table.getVisibleLeafColumns();
+						const csv = toCsv(table.getFilteredRowModel().rows, visibleColumns.map((col) => ({
+							header: formatColumnLabel(col.id),
+							value: (row) => row.getValue(col.id),
+						})));
+						downloadCsv(`flarelens-access-apps-${new Date().toISOString().slice(0, 10)}.csv`, csv);
+					}}
+					disabled={loading}
+					className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+				>
+					Export CSV
 				</button>
 			</div>
 
