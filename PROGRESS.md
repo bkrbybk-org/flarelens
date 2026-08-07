@@ -45,6 +45,9 @@ All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, mis
 | [web/src/lib/expr.ts](web/src/lib/expr.ts) | **Wirefilter evaluator — single source.** Worker imports it for attribution (strict boolean); client imports it for the URL tester (Kleene tri-state). Pulled into the Worker build via the `web/src/lib/expr.ts` entry in `tsconfig.worker.json` |
 | [web/src/lib/waf/](web/src/lib/waf/) | `aggregate` (correlation, action drift, per-rule detail), `chart` (bucketing), `format`, `constants`, `types` |
 | [web/src/lib/rules.ts](web/src/lib/rules.ts) | Access rule vocabulary (`describeRule`, ~20 rule types), `resolvePolicy`, decision tones |
+| [web/src/lib/findings.ts](web/src/lib/findings.ts) | Pure audit checks per source (`accessFindings`, `groupsFindings`, `wafFindings`, `cacheFindings`), plus the shared `groupUsedBy` cross-reference |
+| [web/src/lib/csv.ts](web/src/lib/csv.ts) | RFC 4180 `toCsv` + `downloadCsv` (quotes fields containing commas/quotes/newlines) |
+| [web/src/lib/sectionSnapshot.ts](web/src/lib/sectionSnapshot.ts) | Account-scoped cross-page store carrying the last WAF/Cache load to Findings — see the note under Frontend |
 
 ### Frontend
 
@@ -79,6 +82,20 @@ Disconnect clears the store.
 | `cf_api_token`, `cf_account_id`, `cf_account_name` | sessionStorage | Cleared on tab close; never persisted to disk |
 | `cf_zt_prefs` | localStorage | `PREFS_VERSION = 2`; a version bump discards saved column order/visibility so new defaults apply |
 | `cf_zt_last_load_ms`, `cf_waf_last_load_ms`, `cf_cache_last_load_ms` | sessionStorage | Rolling load-duration estimates for the progress bar |
+
+### Tests
+
+`npm test` (Vitest, `environment: "node"` — pure logic only, no DOM).
+
+| File | Covers |
+|---|---|
+| `tests/expr.test.ts` | Wirefilter evaluator: operators, functions, Kleene tri-state laws, `forAttribution` query-field rejection |
+| `tests/cache-analysis.test.ts` | Last-match attribution, unattributed block, `topUrls` ranking, insights, A–F grade thresholds |
+| `tests/waf-aggregate.test.ts` | Ruleset/rule correlation, action drift, zero-traffic + disabled rules, id/ref dedupe |
+| `tests/waf-meta.test.ts` | Merge order survives the concurrent scope fetch |
+| `tests/findings.test.ts` | Every audit check, plus the snapshot account-scoping guard |
+| `tests/rules.test.ts` | `describeRule` per rule type, `resolvePolicy`, decision tones |
+| `tests/csv.test.ts` | RFC 4180 escaping edge cases |
 
 ---
 
@@ -115,6 +132,7 @@ Disconnect clears the store.
 - `cdac5e0` WAF ruleset scopes fetched concurrently, merged in scope order (per-scope maps so completion order can't race last-write-wins); first tests for `waf-meta.ts`
 - `31c6a5e` **Findings** section — severity-ranked audit view aggregating Access/Groups/WAF/Cache signals, with explicit per-source "not loaded" status lines
 - `20dfd05` CSV export (filtered + visible rows only) and a print stylesheet for PDF export
+- `9a747ea` Docs brought back in line with the shipped app
 - `8c2f04d` Fixed cross-account leakage in the new cross-page snapshot store — see below
 
 **Docs / review**
@@ -130,6 +148,7 @@ Disconnect clears the store.
 | P1 | **Never deployed.** `npm run deploy` has not been run, so `flarelens.example.com` has no DNS record or edge cert yet | App is not reachable by anyone | Run `npm run deploy`. Requires the `example.com` zone to live in the target account |
 | P1 | **No `account_id` in [wrangler.jsonc](wrangler.jsonc)** and the token sees 2 accounts | `wrangler deploy` will prompt interactively, and fails outright in CI | Add `"account_id": "<id>"` — pick the account holding `example.com` |
 | P2 | **No git remote** — `git remote -v` is empty | Single copy on this machine; no backup, no PR flow, blocks CI/CD | `git remote add origin …` + push |
+| P2 | **CSV export dumps raw JSON, not the rendered values.** Tags export as `["prod"]`, Policies as the full policy object, Updated as a raw ISO string — the table shows `prod`, `P1 (allow)`, `01-Jul-2026 17:00`. Filters and columns ARE respected; only the cell content is wrong | The export is the audit hand-over artifact, and it ships exactly the raw JSON this app exists to translate. Verified 2026-08-02 | Give [AppsTable](web/src/features/access/AppsTable.tsx) a text formatter mirroring `renderCell`, and have `toCsv` use it. Findings CSV is already plain text and unaffected |
 | P2 | **Never run against a real token.** All verification used mocked `window.fetch` fixtures | Real-world API shape drift would go unnoticed | Smoke test each section with a scoped token |
 | P3 | **[src/lib/waf-meta.ts](src/lib/waf-meta.ts) is only lightly tested** — `cdac5e0` added merge-order coverage, but the managed-`execute` and entrypoint paths are still uncovered | A regression in the uncovered paths still mislabels rules in WAF Analytics | Extend `tests/waf-meta.test.ts` with fixtures for managed rulesets and the custom firewall entrypoint |
 | P3 | Old `cf-zt-policy-dashboard` Worker likely still deployed | Stale duplicate serving old code | `npx wrangler delete --name cf-zt-policy-dashboard` |
@@ -140,7 +159,7 @@ Disconnect clears the store.
 | P4 | Worker's `CfGroup` interface ([src/index.ts](src/index.ts)) declares only `id`/`name`, but the endpoint passes the full group object through to the client | None at runtime — TS interfaces don't strip fields — but it misleads anyone reading the Worker in isolation | Widen it to match [web/src/types.ts](web/src/types.ts) |
 | P4 | Local directory still named `cf-zt-policy-dashboard/` | Cosmetic mismatch with the Flarelens name | Rename the folder |
 
-### Resolved in this review
+### Recently resolved
 
 - ~~Section snapshots leaked across accounts~~ — the cross-page WAF/Cache store was untagged module
   state that was never cleared, so after switching customers the Findings page showed the previous
@@ -161,13 +180,22 @@ Disconnect clears the store.
 | **Cache range comparison** — current vs previous equivalent window (hit-ratio and volume delta) | Turns a point-in-time number into a trend signal | M | — |
 | **Close the remaining unit-test gaps** — `chart.ts` and `useHashParams.ts` | Both are pure and still uncovered | S | — |
 | **Component / integration tests** | Current suite covers pure logic only; UI regressions rely on manual preview checks | M | Testing-library + jsdom setup |
-| **Snapshot diff / audit trail** — persist policy snapshots, show what changed between syncs | Biggest product differentiator; answers "who changed what, when" | L | Needs a KV binding — first stateful component in the app |
+| **Snapshot diff / audit trail** — capture policy snapshots, diff them (and diff the newest against live) | Biggest product differentiator; answers "what changed since the last review" | L | Nothing — **designed and ready to build** |
+| **Fix the CSV cell content** (P2 above) | The export is the deliverable in an audit; raw JSON defeats it | S | — |
+
+**Snapshot storage decision (2026-08-02):** client-side **IndexedDB**, not Worker KV. KV would
+put customer Access/WAF config at rest in our own account and would force every read to
+live-verify the caller's token against the account — trusting the `account_id` in a request
+would be a tenant-isolation bug. IndexedDB keeps the "Worker stores nothing" property intact and
+ships sooner; the store sits behind an interface so a later move to KV touches one module.
+Snapshots are keyed by account, capped at 20 each, with per-item and purge-all deletion, and the
+diff reuses `describeRule` so rule changes read as sentences rather than JSON.
 
 ---
 
 ## Conventions
 
 - **Commits:** Conventional Commits, imperative subject ≤50 chars, body only when the *why* isn't obvious.
-- **Gate:** `npm run check` (tsc project build → 64 tests → Vite build → wrangler dry-run) must pass before commit. `npm run lint` should show 0 errors (2 known warnings are expected — see P3 above).
+- **Gate:** `npm run check` (tsc project build → 91 tests → Vite build → wrangler dry-run) must pass before commit. `npm run lint` should show 0 errors (2 known warnings are expected — see P3 above).
 - **Verification pattern:** drive the real UI in a preview browser with `window.fetch` stubbed to fixture data, then assert on rendered DOM. Established across every feature in this repo; mobile (375px) and both themes checked for new surfaces.
 - **Data honesty (Cache section):** never redistribute unattributed traffic with synthetic weights, never present mock data unlabeled, and let a genuinely quiet zone show zeros. See the note at the end of [README.md](README.md).
