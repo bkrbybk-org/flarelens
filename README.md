@@ -10,8 +10,13 @@ Ops dashboard for Cloudflare: a single pane of glass for reviewing an account's 
 | `#/groups` | Access Groups | account | Reusable Access Groups with their rules, cross-referenced to the applications whose policies use them |
 | `#/waf` | WAF Analytics | account or zone | `firewallEventsAdaptive` telemetry correlated against ruleset metadata: KPIs, events-over-time, per-ruleset/rule tables, action-drift detection, per-rule drill-down |
 | `#/cache` | Cache Rules | zone | Cache rules with last-match traffic attribution, hit-ratio health grade, insights, URL tester (client-side wirefilter evaluation) |
+| `#/findings` | Findings | account (+ loaded sections) | Severity-ranked audit view: publicly-reachable apps, apps with no policy, `bypass` decisions, unreferenced groups, WAF action drift, cache insights and health grade |
 
 Sections carry deep-linkable state, e.g. `#/waf?zone=<id>&lookback=1440&tab=rules` or `#/cache?zone=<id>&range=168`.
+
+Findings always covers Access and Groups. WAF and Cache are zone-scoped and fetched by their own pages, so their findings fold in only once you have opened those sections — the page says so explicitly per source rather than implying a clean bill of health it has not checked.
+
+**Export:** the Access table and the Findings page export CSV (respecting the active filters and visible columns), and Findings has a print stylesheet for Save-as-PDF.
 
 ## Architecture
 

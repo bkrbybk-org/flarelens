@@ -2,7 +2,7 @@
 
 Status snapshot, last reviewed **2026-08-02** against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
 
-**TL;DR** — Feature-complete across all four sections, 64 unit tests green, `npm run check` clean, 0 lint errors. **Not yet deployed:** `flarelens.example.com` is configured but `wrangler deploy` has never run, and the app has never been exercised against a real API token.
+**TL;DR** — Feature-complete across all five sections, 91 unit tests green, `npm run check` clean, 0 lint errors. **Not yet deployed:** `flarelens.example.com` is configured but `wrangler deploy` has never run, and the app has never been exercised against a real API token.
 
 ---
 
@@ -33,6 +33,8 @@ browser ──► Worker (Hono, src/index.ts) ──► api.cloudflare.com
 
 All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, missing/bad token → 401/403, upstream failure → 502.
 
+`/api/waf/rulesets` fetches its scopes (account + one per zone) with bounded concurrency, each into its own map, then merges them in original scope order — so zone entries still override account entries for the same rule id regardless of which request finishes first.
+
 ### Modules
 
 | Path | Role |
@@ -46,9 +48,9 @@ All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, mis
 
 ### Frontend
 
-React 19 + Vite 8 + Tailwind 4 + TanStack Table 8. Feature-folder layout under `web/src/features/{access,waf,cache}/`, shared UI in `web/src/components/` (`ProgressBar`, `table/ColumnFilterPopover`, `Icons`, `shell/{Sidebar,Topbar}`).
+React 19 + Vite 8 + Tailwind 4 + TanStack Table 8. Feature-folder layout under `web/src/features/{access,waf,cache,findings}/`, shared UI in `web/src/components/` (`ProgressBar`, `table/ColumnFilterPopover`, `Icons`, `shell/{Sidebar,Topbar}`).
 
-Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/useRoute.ts) parses the path segment, [useHashParams.ts](web/src/hooks/useHashParams.ts) syncs query params. Four sections: `#/access`, `#/groups`, `#/waf`, `#/cache`. Deep links like `#/waf?zone=…&lookback=1440&tab=rules` win over saved prefs on load, then mirror state back via `replaceState`.
+Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/useRoute.ts) parses the path segment, [useHashParams.ts](web/src/hooks/useHashParams.ts) syncs query params. Five sections: `#/access`, `#/groups`, `#/waf`, `#/cache`, `#/findings`. Deep links like `#/waf?zone=…&lookback=1440&tab=rules` win over saved prefs on load, then mirror state back via `replaceState`.
 
 **Hooks**
 
@@ -60,6 +62,13 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 | [useZones](web/src/hooks/useZones.ts) | Lazy zone list, cached per account |
 | [useZeroTrustData](web/src/hooks/useZeroTrustData.ts) / [useWafData](web/src/features/waf/useWafData.ts) / [useCacheData](web/src/features/cache/useCacheData.ts) | Per-section fetch + state |
 | [useEstimatedProgress](web/src/hooks/useEstimatedProgress.ts) | Progress bar estimated from the last real load duration |
+
+**Cross-page snapshots.** WAF and Cache data lives in their pages' hooks, which unmount on
+navigation, so [sectionSnapshot.ts](web/src/lib/sectionSnapshot.ts) carries the last load
+across to the Findings page without lifting state into `App` or re-fetching. Snapshots are
+**stamped with the account that captured them** and readers pass the account they expect —
+without that guard a snapshot keeps being reported under the next customer you switch to.
+Disconnect clears the store.
 
 > **Hook contract:** the three data hooks keep `load` referentially stable (callbacks held in refs, progress fns destructured) so page effects can list it in their dependency arrays. Don't reintroduce `onAuthError` into a `useCallback` dep list — it re-fires the effect on every parent render.
 
@@ -102,6 +111,12 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 **Branding / deploy config**
 - `60db24b` Renamed to Flarelens · `6636210` Custom domain `flarelens.example.com`, `workers_dev: false`
 
+**Findings, export, performance** (2026-08-02)
+- `cdac5e0` WAF ruleset scopes fetched concurrently, merged in scope order (per-scope maps so completion order can't race last-write-wins); first tests for `waf-meta.ts`
+- `31c6a5e` **Findings** section — severity-ranked audit view aggregating Access/Groups/WAF/Cache signals, with explicit per-source "not loaded" status lines
+- `20dfd05` CSV export (filtered + visible rows only) and a print stylesheet for PDF export
+- `8c2f04d` Fixed cross-account leakage in the new cross-page snapshot store — see below
+
 **Docs / review**
 - `faf1348` PROGRESS.md created
 - Codebase review (2026-08-02): fixed the `engines.node` / Wrangler 4 mismatch and the missing Sync button on Access Groups; reconciled README with the shipped feature set
@@ -116,7 +131,7 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 | P1 | **No `account_id` in [wrangler.jsonc](wrangler.jsonc)** and the token sees 2 accounts | `wrangler deploy` will prompt interactively, and fails outright in CI | Add `"account_id": "<id>"` — pick the account holding `example.com` |
 | P2 | **No git remote** — `git remote -v` is empty | Single copy on this machine; no backup, no PR flow, blocks CI/CD | `git remote add origin …` + push |
 | P2 | **Never run against a real token.** All verification used mocked `window.fetch` fixtures | Real-world API shape drift would go unnoticed | Smoke test each section with a scoped token |
-| P2 | **[src/lib/waf-meta.ts](src/lib/waf-meta.ts) has no tests** — the ruleset-flattening logic every WAF view depends on (managed `execute` resolution, entrypoint merging, id/ref aliasing) | A regression here silently mislabels every rule in WAF Analytics | Add unit tests with fixture ruleset payloads; the logic is pure apart from `cfFetch` |
+| P3 | **[src/lib/waf-meta.ts](src/lib/waf-meta.ts) is only lightly tested** — `cdac5e0` added merge-order coverage, but the managed-`execute` and entrypoint paths are still uncovered | A regression in the uncovered paths still mislabels rules in WAF Analytics | Extend `tests/waf-meta.test.ts` with fixtures for managed rulesets and the custom firewall entrypoint |
 | P3 | Old `cf-zt-policy-dashboard` Worker likely still deployed | Stale duplicate serving old code | `npx wrangler delete --name cf-zt-policy-dashboard` |
 | P3 | 2 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 | P3 | [.claude/launch.json](.claude/launch.json) hardcodes the nvm `v24.16.0` binary path | Breaks when Node is upgraded | Default Node is now v24, so this can revert to plain `npx` |
@@ -126,6 +141,11 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 | P4 | Local directory still named `cf-zt-policy-dashboard/` | Cosmetic mismatch with the Flarelens name | Rename the folder |
 
 ### Resolved in this review
+
+- ~~Section snapshots leaked across accounts~~ — the cross-page WAF/Cache store was untagged module
+  state that was never cleared, so after switching customers the Findings page showed the previous
+  customer's rules *and* reported that section as "checked". Snapshots are now account-scoped
+  (`8c2f04d`); verified end to end, and removing the guard fails two of the four new tests.
 
 - ~~`engines.node` said `>=20.19.0` while Wrangler 4 requires `>=22`~~ — corrected to `>=22.0.0`. This mismatch already caused a real `Wrangler requires at least Node.js v22.0.0` failure; README repeated the wrong figure and is now fixed too.
 - ~~Access Groups had no Sync button~~ — `showSync` now covers `access` and `groups`, the two routes that render the `/api/data` payload. WAF and Cache keep their own in-page Refresh controls.
@@ -138,9 +158,8 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 | Task | Why | Size | Blocked by |
 |---|---|---|---|
 | **CI/CD** — GitHub Actions: `npm run check` on PR, deploy on merge to main | Tests and lint exist but nothing enforces them | S | Git remote + `CLOUDFLARE_API_TOKEN` repo secret (deploy-scoped, separate from a browsing token) |
-| **Export CSV/JSON** of the filtered view | Deferred twice; the natural "give me this for an audit" ask. Frontend-only, no Worker changes | S | — |
 | **Cache range comparison** — current vs previous equivalent window (hit-ratio and volume delta) | Turns a point-in-time number into a trend signal | M | — |
-| **Close the unit-test gaps** — `waf-meta.ts` first, then `chart.ts` and `useHashParams.ts` | Three pure-logic modules currently ride on zero coverage; `waf-meta` underpins all of WAF Analytics | S | — |
+| **Close the remaining unit-test gaps** — `chart.ts` and `useHashParams.ts` | Both are pure and still uncovered | S | — |
 | **Component / integration tests** | Current suite covers pure logic only; UI regressions rely on manual preview checks | M | Testing-library + jsdom setup |
 | **Snapshot diff / audit trail** — persist policy snapshots, show what changed between syncs | Biggest product differentiator; answers "who changed what, when" | L | Needs a KV binding — first stateful component in the app |
 
