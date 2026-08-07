@@ -16,6 +16,7 @@ import { useSession, type Session } from "./hooks/useSession";
 import { useZeroTrustData } from "./hooks/useZeroTrustData";
 import { useZones } from "./hooks/useZones";
 import type { RuleContext } from "./lib/rules";
+import { clearSectionSnapshots } from "./lib/sectionSnapshot";
 
 const PAGE_TITLES: Record<Route, string> = {
 	access: "Access Applications",
@@ -31,9 +32,14 @@ export default function App() {
 	const [route, navigate] = useRoute();
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-	const handleAuthError = useCallback(() => {
+	// Disconnecting must not leave one customer's telemetry in memory for
+	// whoever connects next on this browser.
+	const handleDisconnect = useCallback(() => {
+		clearSectionSnapshots();
 		disconnect();
 	}, [disconnect]);
+
+	const handleAuthError = handleDisconnect;
 
 	const data = useZeroTrustData(handleAuthError);
 	const { load } = data;
@@ -105,7 +111,7 @@ export default function App() {
 				}}
 				route={route}
 				onNavigate={navigate}
-				onDisconnect={disconnect}
+				onDisconnect={handleDisconnect}
 				mobileOpen={mobileMenuOpen}
 				onMobileClose={() => setMobileMenuOpen(false)}
 			/>
@@ -164,10 +170,11 @@ export default function App() {
 							ctx={ctx}
 						/>
 					)}
-					{route === "waf" && <WafPage session={session} zoneId={prefs.wafZone} onAuthError={disconnect} />}
-					{route === "cache" && <CachePage session={session} zoneId={prefs.cacheZone} onAuthError={disconnect} />}
+					{route === "waf" && <WafPage session={session} zoneId={prefs.wafZone} onAuthError={handleDisconnect} />}
+					{route === "cache" && <CachePage session={session} zoneId={prefs.cacheZone} onAuthError={handleDisconnect} />}
 					{route === "findings" && (
 						<FindingsPage
+							accountId={session.accountId}
 							apps={data.data?.apps || []}
 							groups={data.data?.groups || []}
 							reusableMap={data.reusableMap}

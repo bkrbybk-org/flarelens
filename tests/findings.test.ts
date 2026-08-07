@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+	clearSectionSnapshots, publishCacheSnapshot, publishWafSnapshot,
+	readCacheSnapshot, readWafSnapshot,
+} from "../web/src/lib/sectionSnapshot";
 import {
 	accessFindings,
 	cacheFindings,
@@ -162,5 +166,39 @@ describe("sortFindings / countBySeverity", () => {
 			{ id: "3", severity: "low", title: "", detail: "", source: "groups", href: "" },
 		];
 		expect(countBySeverity(findings)).toEqual({ high: 2, medium: 0, low: 1 });
+	});
+});
+
+describe("section snapshots are scoped by account", () => {
+	beforeEach(() => clearSectionSnapshots());
+
+	const snap = { events: [], ruleMeta: {} };
+
+	it("returns a snapshot to the account that captured it", () => {
+		publishWafSnapshot("acc-A", snap);
+		expect(readWafSnapshot("acc-A")).toBe(snap);
+	});
+
+	it("withholds it from a different account", () => {
+		// Regression: switching customers used to keep serving the previous
+		// customer's telemetry, and Findings reported that section as checked.
+		publishWafSnapshot("acc-A", snap);
+		expect(readWafSnapshot("acc-B")).toBeNull();
+	});
+
+	it("republishing for another account replaces rather than accumulates", () => {
+		publishWafSnapshot("acc-A", snap);
+		const next = { events: [], ruleMeta: {} };
+		publishWafSnapshot("acc-B", next);
+		expect(readWafSnapshot("acc-B")).toBe(next);
+		expect(readWafSnapshot("acc-A")).toBeNull();
+	});
+
+	it("clearing drops everything", () => {
+		publishWafSnapshot("acc-A", snap);
+		publishCacheSnapshot("acc-A", { zoneName: "z" } as never);
+		clearSectionSnapshots();
+		expect(readWafSnapshot("acc-A")).toBeNull();
+		expect(readCacheSnapshot("acc-A")).toBeNull();
 	});
 });

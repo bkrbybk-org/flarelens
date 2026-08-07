@@ -55,8 +55,8 @@ export function WafPage({ session, zoneId, onAuthError }: WafPageProps) {
 	// Publish the latest load for the Findings page, which reads a snapshot
 	// rather than duplicating this fetch (see lib/sectionSnapshot.ts).
 	useEffect(() => {
-		if (waf.loaded) publishWafSnapshot({ events: waf.events, ruleMeta: waf.ruleMeta });
-	}, [waf.loaded, waf.events, waf.ruleMeta]);
+		if (waf.loaded) publishWafSnapshot(session.accountId, { events: waf.events, ruleMeta: waf.ruleMeta });
+	}, [waf.loaded, waf.events, waf.ruleMeta, session.accountId]);
 
 	const rulesetRows = useMemo(() => aggregateRulesets(waf.events, waf.ruleMeta), [waf.events, waf.ruleMeta]);
 

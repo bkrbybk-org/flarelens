@@ -10,6 +10,7 @@ import { aggregateRules } from "../../lib/waf/aggregate";
 import type { CfApp, CfGroup, CfPolicy } from "../../types";
 
 interface FindingsPageProps {
+	accountId: string;
 	apps: CfApp[];
 	groups: CfGroup[];
 	reusableMap: Record<string, CfPolicy>;
@@ -50,9 +51,11 @@ function exportFindingsCsv(findings: Finding[]) {
 	downloadCsv(`flarelens-findings-${new Date().toISOString().slice(0, 10)}.csv`, csv);
 }
 
-export function FindingsPage({ apps, groups, reusableMap, loading, error, progressPercent, progressRunning, onNavigate }: FindingsPageProps) {
-	const wafSnapshot = useWafSnapshot();
-	const cacheSnapshot = useCacheSnapshot();
+export function FindingsPage({ accountId, apps, groups, reusableMap, loading, error, progressPercent, progressRunning, onNavigate }: FindingsPageProps) {
+	// Scoped by account: a snapshot captured for a different customer must not
+	// be reported here, nor counted as that section having been checked.
+	const wafSnapshot = useWafSnapshot(accountId);
+	const cacheSnapshot = useCacheSnapshot(accountId);
 
 	const findings = useMemo(() => {
 		const all: Finding[] = [

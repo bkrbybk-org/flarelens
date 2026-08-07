@@ -57,8 +57,8 @@ export function CachePage({ session, zoneId, onAuthError }: CachePageProps) {
 	// Publish the latest load for the Findings page, which reads a snapshot
 	// rather than duplicating this fetch (see lib/sectionSnapshot.ts).
 	useEffect(() => {
-		if (data) publishCacheSnapshot(data);
-	}, [data]);
+		if (data) publishCacheSnapshot(session.accountId, data);
+	}, [data, session.accountId]);
 
 	const stats = useMemo(() => {
 		if (!data) return null;
