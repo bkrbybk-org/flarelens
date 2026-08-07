@@ -464,8 +464,18 @@ app.get("/api/waf/rulesets", async (c) => {
 
 	const meta: RuleMetaMap = {};
 	try {
-		for (const scope of scopes) {
-			await collectRulesetsForScope(scope, token, meta);
+		// Each scope gets its own map so completion order can't race the
+		// last-write-wins merge below; scopes run concurrently, but the merge
+		// walks `scopes` in original (account-first-then-zones) order so a
+		// zone entry still overrides an account entry for the same rule id,
+		// exactly as the old sequential loop did.
+		const perScope = await mapWithConcurrency(scopes, 5, async (scope) => {
+			const scopeMeta: RuleMetaMap = {};
+			await collectRulesetsForScope(scope, token, scopeMeta);
+			return scopeMeta;
+		});
+		for (const scopeMeta of perScope) {
+			Object.assign(meta, scopeMeta);
 		}
 	} catch (err) {
 		if (err instanceof UpstreamError) {
