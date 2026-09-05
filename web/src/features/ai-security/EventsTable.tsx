@@ -12,6 +12,7 @@ import { downloadCsv, toCsv } from "../../lib/csv";
 import type { RawEvent, Severity } from "../../lib/ai-sec/types";
 import { ChevronDownIcon, ChevronUpIcon, SearchIcon } from "../../components/Icons";
 import { CARD_CLS } from "./charts";
+import { DecryptKeyPanel, PromptPayload } from "./PromptPayload";
 
 /**
  * Flagged requests.
@@ -68,6 +69,11 @@ const list = (values: string[]) => (values.length ? values.join(", ") : "—");
 export function EventsTable({ events, truncated }: { events: RawEvent[]; truncated: boolean }) {
 	const [sorting, setSorting] = useState<SortingState>([{ id: "datetime", desc: true }]);
 	const [search, setSearch] = useState("");
+	/**
+	 * Payload-decryption key. Deliberately component state: it is gone on reload or when the
+	 * section unmounts, and it is never written to storage or sent to the Worker.
+	 */
+	const [privateKey, setPrivateKey] = useState("");
 	const [openRay, setOpenRay] = useState<string | null>(null);
 
 	const columns = useMemo<ColumnDef<RawEvent>[]>(
@@ -174,6 +180,8 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 				</span>
 			</div>
 
+			<DecryptKeyPanel privateKey={privateKey} onChange={setPrivateKey} />
+
 			{truncated && (
 				<p className="mb-3 rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
 					The event list was truncated for this window — narrow the range for a complete set.
@@ -252,10 +260,12 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 															<dt className="text-zinc-500 dark:text-zinc-400">Matched fields</dt>
 															<dd className="break-all font-mono text-xs">{list(e.payload.matchedVars)}</dd>
 															<dt className="text-zinc-500 dark:text-zinc-400">Prompt payload</dt>
-															<dd className="text-zinc-500 dark:text-zinc-400">
-																{e.payload.encrypted
-																	? "Encrypted. Decryption needs the zone's private key and is not available in this view."
-																	: "Not logged."}
+															<dd>
+																{e.payload.encrypted ? (
+																	<PromptPayload ciphertext={e.payload.encrypted} privateKey={privateKey} />
+																) : (
+																	<span className="text-zinc-500 dark:text-zinc-400">Not logged.</span>
+																)}
 															</dd>
 														</>
 													)}
