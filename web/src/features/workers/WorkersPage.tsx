@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
+import type { TimeRange } from "../../hooks/useTimeRange";
 import { MetricsChart, type ChartType, type Series } from "./MetricsChart";
 import { useWorkersData } from "./useWorkersData";
 import {
 	WORKER_METRICS,
-	WORKER_PRESETS,
 	errorRate,
 	formatCount,
 	formatCpu,
@@ -16,17 +16,17 @@ import {
 	workerColor,
 	type Granularity,
 	type WorkerMetric,
-	type WorkerPreset,
 } from "./types";
 
 interface WorkersPageProps {
 	session: Session;
+	timeRange: TimeRange;
 	onAuthError: () => void;
 }
 
-/** Long ranges default to daily buckets, matching the upstream dashboard's auto-switch. */
-function defaultGranularity(preset: WorkerPreset): Granularity {
-	return preset === "30d" ? "daily" : "hourly";
+/** Beyond a week, hourly buckets are too many to read; the upstream dashboard switches too. */
+function granularityFor(minutes: number): Granularity {
+	return minutes > 7 * 24 * 60 ? "daily" : "hourly";
 }
 
 function Segmented<T extends string>({
@@ -71,9 +71,8 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 	);
 }
 
-export function WorkersPage({ session, onAuthError }: WorkersPageProps) {
-	const [preset, setPreset] = useState<WorkerPreset>("24h");
-	const [granularity, setGranularity] = useState<Granularity>("hourly");
+export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProps) {
+	const [granularityOverride, setGranularityOverride] = useState<Granularity | null>(null);
 	const [metric, setMetric] = useState<WorkerMetric>("requests");
 	const [chartType, setChartType] = useState<ChartType>("line");
 	const [excluded, setExcluded] = useState<Set<string>>(new Set());
@@ -81,11 +80,15 @@ export function WorkersPage({ session, onAuthError }: WorkersPageProps) {
 
 	const { result, scripts, loading, error, progress, load } = useWorkersData(onAuthError);
 
+	// The shared window picks the default bucket size; an explicit choice overrides it until
+	// the window changes again.
+	const granularity = granularityOverride ?? granularityFor(timeRange.minutes);
+	const { from, to } = timeRange.bounds();
+
 	useEffect(() => {
-		const to = new Date();
-		const from = new Date(to.getTime() - WORKER_PRESETS[preset].ms);
-		load(session.token, session.accountId, from.toISOString(), to.toISOString(), granularity);
-	}, [session.token, session.accountId, preset, granularity, reloadKey, load]);
+		load(session.token, session.accountId, from, to, granularity);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [session.token, session.accountId, timeRange.minutes, granularity, reloadKey, load]);
 
 	// Memoised so the `?? []` fallback does not hand the memos below a new array each render.
 	const records = useMemo(() => result?.data ?? [], [result]);
@@ -148,21 +151,9 @@ export function WorkersPage({ session, onAuthError }: WorkersPageProps) {
 		<div className="h-full overflow-auto p-4 md:p-6">
 			<div className="mb-4 flex flex-wrap items-center gap-3">
 				<Segmented
-					label="Time range"
-					value={preset}
-					onChange={(next) => {
-						setPreset(next);
-						setGranularity(defaultGranularity(next));
-					}}
-					options={(Object.keys(WORKER_PRESETS) as WorkerPreset[]).map((key) => ({
-						value: key,
-						label: WORKER_PRESETS[key].label,
-					}))}
-				/>
-				<Segmented
 					label="Granularity"
 					value={granularity}
-					onChange={setGranularity}
+					onChange={setGranularityOverride}
 					options={[
 						{ value: "hourly", label: "Hourly" },
 						{ value: "daily", label: "Daily" },

@@ -4,8 +4,8 @@ import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
 import { useAccessUsage } from "./useAccessUsage";
+import type { TimeRange } from "../../hooks/useTimeRange";
 import {
-	ACCESS_PRESETS,
 	FAILURE_COLOR,
 	SUCCESS_COLOR,
 	accessBucketLabel,
@@ -13,9 +13,11 @@ import {
 	successRate,
 	type AccessBreakdownRow,
 	type AccessGranularity,
-	type AccessPreset,
 	type AccessUsagePoint,
 } from "./types";
+
+/** Cloudflare refuses a window wider than one week on the login dataset. */
+const MAX_MINUTES = 7 * 24 * 60 - 1;
 
 const CARD = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
@@ -150,43 +152,42 @@ function BreakdownCard({ title, rows, emptyText }: { title: string; rows: Access
 	);
 }
 
-export function AccessUsagePage({ session, onAuthError }: { session: Session; onAuthError: () => void }) {
-	const [preset, setPreset] = useState<AccessPreset>("7d");
+export function AccessUsagePage({
+	session,
+	timeRange,
+	onAuthError,
+}: {
+	session: Session;
+	timeRange: TimeRange;
+	onAuthError: () => void;
+}) {
 	const [reloadKey, setReloadKey] = useState(0);
 	const { result, loading, error, progress, load } = useAccessUsage(onAuthError);
 
-	// 7 days hourly is 168 narrow columns; daily reads better at that width.
-	const granularity: AccessGranularity = preset === "7d" ? "daily" : "hourly";
+	const { minutes, clamped } = timeRange.clamp(MAX_MINUTES);
+	// A day or more of data is unreadable hour by hour at this width.
+	const granularity: AccessGranularity = minutes > 24 * 60 ? "daily" : "hourly";
+	const { from, to } = timeRange.bounds(MAX_MINUTES);
 
 	useEffect(() => {
-		const to = new Date();
-		const from = new Date(to.getTime() - ACCESS_PRESETS[preset].ms);
-		load(session.token, session.accountId, from.toISOString(), to.toISOString(), granularity);
-	}, [session.token, session.accountId, preset, granularity, reloadKey, load]);
+		load(session.token, session.accountId, from, to, granularity);
+		// `from`/`to` are recomputed per render; the window itself is what should retrigger.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [session.token, session.accountId, minutes, granularity, reloadKey, load]);
 
 	const totals = result?.totals ?? { success: 0, failure: 0, total: 0 };
 
 	return (
 		<div className="h-full overflow-auto p-4 md:p-6">
 			<div className="mb-4 flex flex-wrap items-center gap-3">
-				<div className="flex items-center gap-1" role="group" aria-label="Time range">
-					{(Object.keys(ACCESS_PRESETS) as AccessPreset[]).map((key) => (
-						<button
-							key={key}
-							type="button"
-							onClick={() => setPreset(key)}
-							aria-pressed={preset === key}
-							className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-								preset === key
-									? "bg-cf text-white"
-									: "border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-							}`}
-						>
-							{ACCESS_PRESETS[key].label}
-						</button>
-					))}
-				</div>
-				<span className="text-xs text-zinc-500 dark:text-zinc-400">{granularity === "daily" ? "Daily buckets" : "Hourly buckets"}</span>
+				<span className="text-xs text-zinc-500 dark:text-zinc-400">
+					{granularity === "daily" ? "Daily buckets" : "Hourly buckets"}
+				</span>
+				{clamped && (
+					<span className="rounded-md bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-400">
+						Cloudflare caps Access login data at 7 days — showing the last week.
+					</span>
+				)}
 				<button
 					type="button"
 					onClick={() => setReloadKey((k) => k + 1)}

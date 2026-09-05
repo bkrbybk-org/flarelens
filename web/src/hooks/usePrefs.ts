@@ -19,6 +19,8 @@ export interface Prefs {
 	aiSecZone: string;
 	/** Sidebar collapsed to icons only. Persisted: it is a workspace preference, not view state. */
 	sidebarCollapsed: boolean;
+	/** Shared analytics window in minutes; see hooks/useTimeRange.ts. */
+	rangeMinutes: number;
 }
 
 const DEFAULT_PREFS: Prefs = {
@@ -32,6 +34,7 @@ const DEFAULT_PREFS: Prefs = {
 	cacheZone: "",
 	aiSecZone: "",
 	sidebarCollapsed: false,
+	rangeMinutes: 1440,
 };
 
 function readPrefs(): Prefs {

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { useHashSyncedState } from "../../hooks/useHashParams";
+import { useEffect, useMemo } from "react";
 import type { Session } from "../../hooks/useSession";
+import type { TimeRange } from "../../hooks/useTimeRange";
 import { ProgressBar } from "../../components/ProgressBar";
 import { AlertIcon, RefreshIcon } from "../../components/Icons";
 import type { Kpi } from "../../lib/ai-sec/types";
@@ -52,19 +52,29 @@ function KpiCard({ kpi, spark }: { kpi: Kpi; spark?: number[] }) {
 
 interface Props {
 	session: Session;
+	timeRange: TimeRange;
 	zoneId: string;
 	onAuthError: () => void;
 }
 
-export function AiSecurityPage({ session, zoneId, onAuthError }: Props) {
+const AI_RANGE_STEPS = [
+	{ key: "1h", minutes: 60 },
+	{ key: "6h", minutes: 360 },
+	{ key: "24h", minutes: 1440 },
+	{ key: "7d", minutes: 10_080 },
+	{ key: "30d", minutes: 43_200 },
+];
+
+export function AiSecurityPage({ session, zoneId, timeRange, onAuthError }: Props) {
 	const ai = useAiSecurityData(onAuthError);
 	const { load } = ai;
-	const [range, setRange] = useState("24h");
+	/**
+	 * The section's own range vocabulary, chosen as the largest preset the shared window covers.
+	 * Its 30m option has no equivalent in the shared picker, so it is simply never selected.
+	 */
+	const range = AI_RANGE_STEPS.reduce((best, step) => (timeRange.minutes >= step.minutes ? step.key : best), "1h");
 
 	// Deep-linkable, matching how #/waf carries its lookback.
-	useHashSyncedState("range", range, (v) => {
-		if (RANGE_OPTIONS.some(([value]) => value === v)) setRange(v);
-	});
 
 	useEffect(() => {
 		load(session.token, session.accountId, zoneId, range);
@@ -107,9 +117,6 @@ export function AiSecurityPage({ session, zoneId, onAuthError }: Props) {
 		return `Detections over ${data.window.label}: prompt injection ${sum("injection")}, PII ${sum("pii")}, unsafe topic ${sum("unsafe")}, custom topic ${sum("custom")}.`;
 	}, [data]);
 
-	const selectCls =
-		"rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900";
-
 	return (
 		<div className="h-full overflow-y-auto">
 			<div className="space-y-4 p-4 md:p-6">
@@ -122,11 +129,11 @@ export function AiSecurityPage({ session, zoneId, onAuthError }: Props) {
 				)}
 
 				<div className="flex flex-wrap items-center gap-2">
-					<select value={range} onChange={(e) => setRange(e.target.value)} aria-label="Time range" className={selectCls}>
-						{RANGE_OPTIONS.map(([value, label]) => (
-							<option key={value} value={value}>{label}</option>
-						))}
-					</select>
+					{/* Window comes from the shared picker in the top bar; shown here so the page
+					    still states what it is looking at. */}
+					<span className="rounded-lg border border-zinc-200 px-2.5 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+						{RANGE_OPTIONS.find(([value]) => value === range)?.[1] ?? range}
+					</span>
 					<button
 						type="button"
 						onClick={() => load(session.token, session.accountId, zoneId, range)}

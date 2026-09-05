@@ -99,6 +99,43 @@ function DefaultCell({ value }: { value: unknown }) {
 	return <>{String(value)}</>;
 }
 
+// Plain-text mirror of renderCell: CSV export needs the same human-readable
+// value the table shows, but renderCell returns JSX so it can't be reused
+// directly. Keep these two in lockstep — any new column case in renderCell
+// needs the matching case here, or the export will regress back to raw JSON.
+export function formatCellText(col: string, app: CfApp, ctx: RuleContext, reusableMap: Record<string, CfPolicy>): string {
+	const value = app[col];
+	if (col === "policies") {
+		if (app.policies_error) return "Policies unavailable";
+		return app.policies
+			.map((raw) => {
+				const p = resolvePolicy(raw, reusableMap);
+				const decision = (p.decision || "unknown").replaceAll("_", " ");
+				return `${p.name || "Unnamed Policy"} (${decision})`;
+			})
+			.join(", ");
+	}
+	if ((col === "tags" || col === "self_hosted_domains") && Array.isArray(value)) {
+		return (value as string[]).join(", ");
+	}
+	if (col === "allowed_idps" && Array.isArray(value)) {
+		return (value as string[]).map((id) => ctx.idpName(id)).join(", ");
+	}
+	if (col === "destinations" && Array.isArray(value)) {
+		return (value as Record<string, string>[])
+			.map((d) => d.uri || d.cidr || d.hostname || d.ip || JSON.stringify(d))
+			.join(", ");
+	}
+	if ((col === "updated_at" || col === "created_at") && value != null) {
+		return formatLocalDateTime(value);
+	}
+	if (value === null || value === undefined) return "";
+	if (typeof value === "boolean") return value ? "True" : "False";
+	if (Array.isArray(value)) return value.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join(", ");
+	if (typeof value === "object") return JSON.stringify(value);
+	return String(value);
+}
+
 function renderCell(col: string, app: CfApp, ctx: RuleContext, reusableMap: Record<string, CfPolicy>) {
 	const value = app[col];
 	if (col === "policies") {
@@ -384,7 +421,9 @@ export function AppsTable({
 						const visibleColumns = table.getVisibleLeafColumns();
 						const csv = toCsv(table.getFilteredRowModel().rows, visibleColumns.map((col) => ({
 							header: formatColumnLabel(col.id),
-							value: (row) => row.getValue(col.id),
+							// Use the same text the table renders (not the raw row value)
+							// so exported cells match what's on screen.
+							value: (row) => formatCellText(col.id, row.original, ctx, reusableMap),
 						})));
 						downloadCsv(`flarelens-access-apps-${new Date().toISOString().slice(0, 10)}.csv`, csv);
 					}}

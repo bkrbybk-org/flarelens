@@ -20,10 +20,14 @@ export function setHashParam(key: string, value: string | null): void {
 		params.set(key, value);
 	}
 	const qs = params.toString();
-	const next = qs ? `${route}?${qs}` : route;
+	// With no fragment at all (a fresh load of "/"), `route` is empty and a bare `?key=value`
+	// would be read by replaceState as the page's QUERY STRING, rewriting the real URL and
+	// dropping the path. Anchor to the default route instead.
+	const base = route.startsWith("#") ? route : "#/";
+	const next = qs ? `${base}?${qs}` : base;
 	if (next !== hash) {
 		// replaceState avoids polluting history on every control change
-		history.replaceState(null, "", next || "#/");
+		history.replaceState(null, "", next);
 	}
 }
 

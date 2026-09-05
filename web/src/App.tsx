@@ -15,6 +15,7 @@ import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
 import { Topbar } from "./components/shell/Topbar";
 import { useHashSyncedState } from "./hooks/useHashParams";
 import { usePrefs } from "./hooks/usePrefs";
+import { TIME_RANGE_ROUTES, useTimeRange } from "./hooks/useTimeRange";
 import { useRoute, type Route } from "./hooks/useRoute";
 import { useSession, type Session } from "./hooks/useSession";
 import { useZeroTrustData } from "./hooks/useZeroTrustData";
@@ -37,6 +38,7 @@ const PAGE_TITLES: Record<Route, string> = {
 export default function App() {
 	const { session, connect, disconnect } = useSession();
 	const { prefs, updatePrefs } = usePrefs();
+	const timeRange = useTimeRange(prefs, updatePrefs);
 	const [route, navigate] = useRoute();
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -222,6 +224,11 @@ export default function App() {
 									}
 									: undefined
 					}
+					rangePicker={
+						TIME_RANGE_ROUTES.has(route) ? { value: timeRange.preset, onChange: timeRange.setPreset } : undefined
+					}
+					onDisconnect={handleDisconnect}
+					mode={session.mode}
 					onMobileMenu={() => setMobileMenuOpen(true)}
 				/>
 				<main className="min-h-0 min-w-0 flex-1">
@@ -251,14 +258,14 @@ export default function App() {
 							ctx={ctx}
 						/>
 					)}
-					{route === "waf" && <WafPage session={session} zoneId={prefs.wafZone} onAuthError={handleDisconnect} />}
-					{route === "cache" && <CachePage session={session} zoneId={prefs.cacheZone} onAuthError={handleDisconnect} />}
+					{route === "waf" && <WafPage session={session} zoneId={prefs.wafZone} timeRange={timeRange} onAuthError={handleDisconnect} />}
+					{route === "cache" && <CachePage session={session} zoneId={prefs.cacheZone} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "ai-security" && (
-						<AiSecurityPage session={session} zoneId={prefs.aiSecZone} onAuthError={handleDisconnect} />
+						<AiSecurityPage session={session} zoneId={prefs.aiSecZone} timeRange={timeRange} onAuthError={handleDisconnect} />
 					)}
-					{route === "workers" && <WorkersPage session={session} onAuthError={handleDisconnect} />}
-					{route === "access-usage" && <AccessUsagePage session={session} onAuthError={handleDisconnect} />}
-					{route === "workers-ai" && <WorkersAiPage session={session} onAuthError={handleDisconnect} />}
+					{route === "workers" && <WorkersPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
+					{route === "access-usage" && <AccessUsagePage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
+					{route === "workers-ai" && <WorkersAiPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "findings" && (
 						<FindingsPage
 							accountId={session.accountId}

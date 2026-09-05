@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useHashSyncedState } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
+import type { TimeRange } from "../../hooks/useTimeRange";
 import { aggregateRulesets, countEventsByActions } from "../../lib/waf/aggregate";
-import { AUTO_REFRESH_OPTIONS, DEFAULT_LOOKBACK_MINUTES, EVENT_LIMIT, LOOKBACK_OPTIONS } from "../../lib/waf/constants";
+import { AUTO_REFRESH_OPTIONS, EVENT_LIMIT, LOOKBACK_OPTIONS } from "../../lib/waf/constants";
 import { relativeTime } from "../../lib/waf/format";
 import { publishWafSnapshot } from "../../lib/sectionSnapshot";
 import { AlertIcon, AppsIcon, KeyIcon, RefreshIcon, SearchIcon, ShieldIcon, UsersIcon } from "../../components/Icons";
@@ -15,16 +16,19 @@ import { useWafData } from "./useWafData";
 
 interface WafPageProps {
 	session: Session;
+	timeRange: TimeRange;
 	zoneId: string;
 	onAuthError: () => void;
 }
 
 type Tab = "overview" | "rules";
 
-export function WafPage({ session, zoneId, onAuthError }: WafPageProps) {
+export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProps) {
 	const waf = useWafData(onAuthError);
 	const { load } = waf;
-	const [minutes, setMinutes] = useState(DEFAULT_LOOKBACK_MINUTES);
+	// The worker clamps the lookback to [5, 43200]; the shared window is already inside that,
+	// so it maps straight through.
+	const minutes = timeRange.minutes;
 	const [autoRefresh, setAutoRefresh] = useState(0);
 	const [tab, setTab] = useState<Tab>("overview");
 	const [globalSearch, setGlobalSearch] = useState("");
@@ -32,10 +36,6 @@ export function WafPage({ session, zoneId, onAuthError }: WafPageProps) {
 	const [drawerRule, setDrawerRule] = useState<DrawerRule | null>(null);
 
 	// Deep-linkable state: #/waf?lookback=1440&tab=rules
-	useHashSyncedState("lookback", String(minutes), (v) => {
-		const n = Number(v);
-		if (LOOKBACK_OPTIONS.some(([value]) => value === n)) setMinutes(n);
-	});
 	useHashSyncedState("tab", tab, (v) => {
 		if (v === "overview" || v === "rules") setTab(v);
 	});
@@ -99,9 +99,10 @@ export function WafPage({ session, zoneId, onAuthError }: WafPageProps) {
 
 				{/* Controls */}
 				<div className="flex flex-wrap items-center gap-2">
-					<select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} aria-label="Lookback window" className={selectCls}>
-						{LOOKBACK_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-					</select>
+					{/* Lookback follows the shared window in the top bar. */}
+					<span className="rounded-lg border border-zinc-200 px-2.5 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+						{LOOKBACK_OPTIONS.find(([value]) => value === minutes)?.[1] ?? `Last ${minutes} min`}
+					</span>
 					<select value={autoRefresh} onChange={(e) => setAutoRefresh(Number(e.target.value))} aria-label="Auto refresh" className={selectCls}>
 						{AUTO_REFRESH_OPTIONS.map(([value, label]) => <option key={value} value={value}>Auto: {label}</option>)}
 					</select>

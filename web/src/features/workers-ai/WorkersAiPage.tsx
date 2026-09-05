@@ -3,10 +3,10 @@ import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
+import type { TimeRange } from "../../hooks/useTimeRange";
 import { useWorkersAi } from "./useWorkersAi";
 import {
 	AI_METRICS,
-	AI_PRESETS,
 	aiBucketLabel,
 	formatCompact,
 	formatLatency,
@@ -14,7 +14,6 @@ import {
 	shortModel,
 	type AiGranularity,
 	type AiMetric,
-	type AiPreset,
 	type AiSeriesPoint,
 } from "./types";
 
@@ -119,19 +118,26 @@ function InferenceChart({
 	);
 }
 
-export function WorkersAiPage({ session, onAuthError }: { session: Session; onAuthError: () => void }) {
-	const [preset, setPreset] = useState<AiPreset>("7d");
+export function WorkersAiPage({
+	session,
+	timeRange,
+	onAuthError,
+}: {
+	session: Session;
+	timeRange: TimeRange;
+	onAuthError: () => void;
+}) {
 	const [metric, setMetric] = useState<AiMetric>("requests");
 	const [reloadKey, setReloadKey] = useState(0);
 	const { result, loading, error, progress, load } = useWorkersAi(onAuthError);
 
-	const granularity: AiGranularity = preset === "30d" ? "daily" : "hourly";
+	const granularity: AiGranularity = timeRange.minutes > 7 * 24 * 60 ? "daily" : "hourly";
+	const { from, to } = timeRange.bounds();
 
 	useEffect(() => {
-		const to = new Date();
-		const from = new Date(to.getTime() - AI_PRESETS[preset].ms);
-		load(session.token, session.accountId, from.toISOString(), to.toISOString(), granularity);
-	}, [session.token, session.accountId, preset, granularity, reloadKey, load]);
+		load(session.token, session.accountId, from, to, granularity);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [session.token, session.accountId, timeRange.minutes, granularity, reloadKey, load]);
 
 	const totals = result?.totals ?? {
 		requests: 0, neurons: 0, inputTokens: 0, outputTokens: 0, inferenceTimeMs: 0, errors: 0,
@@ -141,23 +147,6 @@ export function WorkersAiPage({ session, onAuthError }: { session: Session; onAu
 	return (
 		<div className="h-full overflow-auto p-4 md:p-6">
 			<div className="mb-4 flex flex-wrap items-center gap-3">
-				<div className="flex items-center gap-1" role="group" aria-label="Time range">
-					{(Object.keys(AI_PRESETS) as AiPreset[]).map((key) => (
-						<button
-							key={key}
-							type="button"
-							onClick={() => setPreset(key)}
-							aria-pressed={preset === key}
-							className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-								preset === key
-									? "bg-cf text-white"
-									: "border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-							}`}
-						>
-							{AI_PRESETS[key].label}
-						</button>
-					))}
-				</div>
 				<div className="flex items-center gap-1" role="group" aria-label="Metric">
 					{(Object.keys(AI_METRICS) as AiMetric[]).map((key) => (
 						<button

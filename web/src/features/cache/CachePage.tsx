@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useHashSyncedState } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
+import type { TimeRange } from "../../hooks/useTimeRange";
 import { AlertIcon, AppsIcon, GlobeIcon, KeyIcon, RefreshIcon } from "../../components/Icons";
 import { ProgressBar } from "../../components/ProgressBar";
 import { publishCacheSnapshot } from "../../lib/sectionSnapshot";
@@ -12,8 +12,12 @@ import { useCacheData } from "./useCacheData";
 interface CachePageProps {
 	session: Session;
 	zoneId: string;
+	timeRange: TimeRange;
 	onAuthError: () => void;
 }
+
+/** Mirrors ALLOWED_RANGES in src/lib/cache-analysis.ts; anything else is rejected upstream. */
+const ALLOWED_CACHE_HOURS = [24, 168, 720];
 
 const RANGE_OPTIONS: [number, string][] = [
 	[24, "Last 24 hours"],
@@ -29,16 +33,19 @@ const GRADE_COLORS: Record<string, string> = {
 	F: "bg-red-500/15 text-red-600 dark:text-red-400",
 };
 
-export function CachePage({ session, zoneId, onAuthError }: CachePageProps) {
+export function CachePage({ session, zoneId, timeRange, onAuthError }: CachePageProps) {
 	const cache = useCacheData(onAuthError);
 	const { load } = cache;
-	const [rangeHours, setRangeHours] = useState(24);
+	/**
+	 * The analyzer only accepts 24h, 7d or 30d, so the shared window snaps to the largest of
+	 * those it covers rather than being rejected server-side.
+	 */
+	const rangeHours = ALLOWED_CACHE_HOURS.reduce(
+		(best, hours) => (timeRange.minutes >= hours * 60 ? hours : best),
+		ALLOWED_CACHE_HOURS[0],
+	);
 
 	// Deep-linkable: #/cache?range=168
-	useHashSyncedState("range", String(rangeHours), (v) => {
-		const n = Number(v);
-		if (RANGE_OPTIONS.some(([value]) => value === n)) setRangeHours(n);
-	});
 
 	// Results are stamped with the scope they were computed for; a scope change
 	// invalidates them implicitly (no reset-in-effect needed).
@@ -115,14 +122,11 @@ export function CachePage({ session, zoneId, onAuthError }: CachePageProps) {
 
 				{/* Controls */}
 				<div className="flex flex-wrap items-center gap-2">
-					<select
-						value={rangeHours}
-						onChange={(e) => setRangeHours(Number(e.target.value))}
-						aria-label="Analytics window"
-						className="rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
-					>
-						{RANGE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-					</select>
+					{/* Cloudflare's cache analytics only answers for 24h, 7d or 30d, so the shared
+					    window snaps to one of those and the page says which. */}
+					<span className="rounded-lg border border-zinc-200 px-2.5 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+						{RANGE_OPTIONS.find(([value]) => value === rangeHours)?.[1] ?? `Last ${rangeHours}h`}
+					</span>
 					<button
 						type="button"
 						onClick={() => load(session.token, zoneId, rangeHours)}
