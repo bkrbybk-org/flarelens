@@ -52,6 +52,21 @@ WAF to the worker's own bounds. The range is deep-linkable as `#/<route>?range=<
 Charts are inline SVG rather than a charting library: the CSP allows scripts from `'self'` only,
 so a CDN-loaded chart library could not run here.
 
+### Layout invariants
+
+The shell is a fixed-height flex column: the sidebar and top bar stay put, and each section
+scrolls inside `<main>`. Three classes on `<main>` hold that together, and all three are pinned by
+[tests/shell-layout.test.ts](tests/shell-layout.test.ts) because none of them fail loudly:
+
+| Class | Why |
+|---|---|
+| `min-h-0` | A flex item defaults to `min-height: auto`, so without it the column grows to fit its content instead of the viewport, and no section can become a scroll container |
+| `overflow-hidden` | Nothing may spill past the region that owns the scrolling |
+| `relative` | **`overflow` does not create a containing block.** Without it, every `sr-only` label and every icon absolutely positioned inside an input anchors to the initial containing block rather than the scroller. Deep in a long page those sit past the fold — one landed at 1444px against a 900px viewport — stretching `<html>` until the *document* scrolls, which drags the sidebar and top bar out of view |
+
+Each section root carries its own `h-full overflow-auto`. A section that loses it is clipped by
+`<main>` with no way to reach the rest of its content.
+
 Credentials resolve at one choke point, [src/lib/auth.ts](src/lib/auth.ts). In BYOT mode the
 browser keeps the API token in `sessionStorage` and sends it per request as `Authorization:
 Bearer`, and the worker forwards it to `api.cloudflare.com` within the same invocation, holding
@@ -205,11 +220,49 @@ Cloudflare API quota, which is why it never runs as part of `npm test`.
 
 | Script | Purpose |
 |---|---|
-| `npm test` | Vitest unit suite (expression evaluator, WAF aggregation, cache attribution/insights, rule descriptions) |
+| `npm test` | Vitest suite — unit, integration, system, compatibility, security and regression layers (see [Tests](#tests)). Excludes the opt-in live E2E suite |
 | `npm run check` | tsc project build + tests + vite build + wrangler dry-run |
 | `npm run lint` | ESLint |
 | `npm run build` | Vite production build → `web/dist` |
 | `npm run deploy` | Build then `wrangler deploy` |
+
+## Debugging the UI against real data
+
+The app is behind Cloudflare Access, so a browser cannot reach the deployed API without an
+interactive login, and the local Worker has no credentials. To drive the real SPA against real
+account data, point the dev server's proxy at the deployment and authenticate with the Access
+service token from `.dev.vars`:
+
+```ts
+// vite.config.ts — temporary, revert when finished
+server: {
+  proxy: {
+    "/api": {
+      target: "https://flarelens.example.com",
+      changeOrigin: true,
+      headers: {
+        "CF-Access-Client-Id": devVar("CF_ACCESS_CLIENT_ID"),
+        "CF-Access-Client-Secret": devVar("CF_ACCESS_CLIENT_SECRET"),
+      },
+    },
+  },
+}
+```
+
+Seed a session so the shell renders rather than the connect screen, then measure:
+
+```js
+sessionStorage.setItem("cf_api_token", "probe");
+sessionStorage.setItem("cf_account_id", "<account id>");
+```
+
+**Measure layout, do not reason about it.** Two consecutive fixes for the shell-scrolling bug were
+shipped on plausible CSS reasoning and neither was the cause; reading `document.documentElement.scrollHeight`
+against `window.innerHeight` in the running app found it in one step. Useful probes:
+`html.scrollHeight` vs `innerHeight`, each container's `scrollHeight > clientHeight`, and the
+computed `position` of every absolutely positioned node.
+
+Never commit the proxy: it sends a live credential from a config file that is not gitignored.
 
 ## Data-honesty notes (Cache section)
 

@@ -2,8 +2,8 @@
 
 Status snapshot, last reviewed **2026-09-05** (second pass, against a full read of the tree) against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
 
-**TL;DR** — Eleven sections, 456 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
-Running version `ef314f19`, deployed 2026-09-05 11:01 UTC.
+**TL;DR** — Eleven sections, 457 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
+Running version `a6bb0120`, deployed 2026-09-05 13:21 UTC.
 
 ---
 
@@ -194,6 +194,10 @@ Disconnect clears the store.
 - `9a747ea` Docs brought back in line with the shipped app
 - `8c2f04d` Fixed cross-account leakage in the new cross-page snapshot store — see below
 
+**Layout**
+- `51bde1a` `min-h-0` on the shell column — a flex item defaults to `min-height: auto`, so the column grew to fit its content instead of the viewport and no section could become its own scroll container. Real bug, but not the one being chased.
+- `1ddc364` `relative` on `<main>` — the actual cause of the shell scrolling. `overflow` does **not** create a containing block, so every `sr-only` label and every icon absolutely positioned inside an input anchored to the initial containing block rather than the scroller. Deep in a long page they sit past the fold: the `sr-only` span for the events-table expander landed at 1444px against a 900px viewport, stretching `<html>` until the document itself scrolled — taking the sidebar and top bar with it. Measured before/after in the running app: `html.scrollHeight` 1444 → 900, `documentScrolls` true → false, page keeps its own 2796px scroll.
+
 **Docs / review**
 - `faf1348` PROGRESS.md created
 - Codebase review (2026-08-02): fixed the `engines.node` / Wrangler 4 mismatch and the missing Sync button on Access Groups; reconciled README with the shipped feature set
@@ -259,6 +263,7 @@ diff reuses `describeRule` so rule changes read as sentences rather than JSON.
 ## Conventions
 
 - **Commits:** Conventional Commits, imperative subject ≤50 chars, body only when the *why* isn't obvious.
-- **Gate:** `npm run check` (tsc project build → 91 tests → Vite build → wrangler dry-run) must pass before commit. `npm run lint` should show 0 errors (2 known warnings are expected — see P3 above).
-- **Verification pattern:** drive the real UI in a preview browser with `window.fetch` stubbed to fixture data, then assert on rendered DOM. Established across every feature in this repo; mobile (375px) and both themes checked for new surfaces.
+- **Gate:** `npm run check` (tsc project build → tests → Vite build → wrangler dry-run) must pass before commit. `npm run lint` should show 0 errors (3 known warnings are expected — see P3 above).
+- **Verification pattern:** for anything visual or layout-related, **measure, do not reason**. Two consecutive shell-scrolling fixes were shipped on plausible CSS reasoning before the cause was found by reading `html.scrollHeight` in the running app. The harness is described under Development in [README.md](README.md).
+- **Layout invariants:** the shell is a fixed-height flex column and each section owns its scrolling. `<main>` must keep `relative` (containing block), `overflow-hidden` (clipping) and `min-h-0` (shrinkable), and every section root needs its own `h-full overflow-auto`. [tests/shell-layout.test.ts](tests/shell-layout.test.ts) pins all of it — none of these fail loudly.
 - **Data honesty (Cache section):** never redistribute unattributed traffic with synthetic weights, never present mock data unlabeled, and let a genuinely quiet zone show zeros. See the note at the end of [README.md](README.md).
