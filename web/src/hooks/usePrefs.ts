@@ -21,6 +21,12 @@ export interface Prefs {
 	sidebarCollapsed: boolean;
 	/** Shared analytics window in minutes; see hooks/useTimeRange.ts. */
 	rangeMinutes: number;
+	/**
+	 * Unit rates for the Cost & Usage section, entered by the operator. Deliberately not
+	 * seeded with Cloudflare list prices: they change, they differ per contract, and a wrong
+	 * number presented as an estimate is worse than no number.
+	 */
+	costRates: { requestsPerMillion: number; subrequestsPerMillion: number; neuron: number };
 }
 
 const DEFAULT_PREFS: Prefs = {
@@ -35,6 +41,7 @@ const DEFAULT_PREFS: Prefs = {
 	aiSecZone: "",
 	sidebarCollapsed: false,
 	rangeMinutes: 1440,
+	costRates: { requestsPerMillion: 0, subrequestsPerMillion: 0, neuron: 0 },
 };
 
 function readPrefs(): Prefs {

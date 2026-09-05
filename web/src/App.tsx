@@ -10,6 +10,8 @@ import { WafPage } from "./features/waf/WafPage";
 import { WorkersPage } from "./features/workers/WorkersPage";
 import { AccessUsagePage } from "./features/access-usage/AccessUsagePage";
 import { WorkersAiPage } from "./features/workers-ai/WorkersAiPage";
+import { GatewayPage } from "./features/gateway/GatewayPage";
+import { CostPage } from "./features/cost/CostPage";
 import { AiSecurityPage } from "./features/ai-security/AiSecurityPage";
 import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
 import { Topbar } from "./components/shell/Topbar";
@@ -32,6 +34,8 @@ const PAGE_TITLES: Record<Route, string> = {
 	workers: "Workers Analytics",
 	"access-usage": "Access Usage",
 	"workers-ai": "Workers AI",
+	gateway: "Gateway Usage",
+	cost: "Cost & Usage",
 	findings: "Findings",
 };
 
@@ -266,6 +270,16 @@ export default function App() {
 					{route === "workers" && <WorkersPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "access-usage" && <AccessUsagePage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "workers-ai" && <WorkersAiPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
+					{route === "gateway" && <GatewayPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
+					{route === "cost" && (
+						<CostPage
+							session={session}
+							timeRange={timeRange}
+							prefs={prefs}
+							updatePrefs={updatePrefs}
+							onAuthError={handleDisconnect}
+						/>
+					)}
 					{route === "findings" && (
 						<FindingsPage
 							accountId={session.accountId}

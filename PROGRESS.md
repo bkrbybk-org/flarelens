@@ -1,8 +1,31 @@
 # Flarelens — Progress
 
-Status snapshot, last reviewed **2026-08-02** against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
+Status snapshot, last reviewed **2026-09-05** against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
 
-**TL;DR** — Feature-complete across all five sections, 91 unit tests green, `npm run check` clean, 0 lint errors. **Not yet deployed:** `flarelens.example.com` is configured but `wrangler deploy` has never run, and the app has never been exercised against a real API token.
+**TL;DR** — Eleven sections, 437 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
+
+---
+
+## Sections
+
+Eleven routes, grouped in the sidebar by Cloudflare product area:
+
+| Group | Routes |
+|---|---|
+| Zero Trust | `#/access`, `#/groups`, `#/access-usage` |
+| Security | `#/waf`, `#/ai-security` |
+| Performance | `#/cache` |
+| Developer Platform | `#/workers`, `#/workers-ai`, `#/cost` |
+| Network | `#/gateway` |
+| Audit | `#/findings` |
+
+All time-windowed sections share one range picker in the top bar (`hooks/useTimeRange.ts`),
+stored in minutes and clamped per section to whatever its upstream dataset allows — Access Usage
+to 7 days, Cache to 24h/7d/30d, WAF to the Worker's own bounds.
+
+The analytics sections that read login, Gateway or AI telemetry are **aggregate only**: the
+datasets expose `userUuid`, `email`, `ipAddress` and `deviceId`, and none of them are queried.
+Tests assert those field names never appear in an outgoing GraphQL document.
 
 ---
 
@@ -145,16 +168,16 @@ Disconnect clears the store.
 
 | # | Issue | Impact | Fix |
 |---|---|---|---|
-| P1 | **Never deployed.** `npm run deploy` has not been run, so `flarelens.example.com` has no DNS record or edge cert yet | App is not reachable by anyone | Run `npm run deploy`. Requires the `example.com` zone to live in the target account |
-| P1 | **No `account_id` in [wrangler.jsonc](wrangler.jsonc)** and the token sees 2 accounts | `wrangler deploy` will prompt interactively, and fails outright in CI | Add `"account_id": "<id>"` — pick the account holding `example.com` |
-| P2 | **No git remote** — `git remote -v` is empty | Single copy on this machine; no backup, no PR flow, blocks CI/CD | `git remote add origin …` + push |
-| P2 | **CSV export dumps raw JSON, not the rendered values.** Tags export as `["prod"]`, Policies as the full policy object, Updated as a raw ISO string — the table shows `prod`, `P1 (allow)`, `01-Jul-2026 17:00`. Filters and columns ARE respected; only the cell content is wrong | The export is the audit hand-over artifact, and it ships exactly the raw JSON this app exists to translate. Verified 2026-08-02 | Give [AppsTable](web/src/features/access/AppsTable.tsx) a text formatter mirroring `renderCell`, and have `toCsv` use it. Findings CSV is already plain text and unaffected |
-| P2 | **Never run against a real token.** All verification used mocked `window.fetch` fixtures | Real-world API shape drift would go unnoticed | Smoke test each section with a scoped token |
+| P1 | **No git remote** — `git remote -v` is empty | Single copy on this machine; no backup, no PR flow, and nothing enforces `npm run check` before a deploy | `git remote add origin …`, push, then a GitHub Actions workflow running `npm run check` on PR and deploying on merge |
+| P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules |
+| P2 | **Bound token lacks `Workers Scripts: Read`** | Workers Analytics lists only workers that had traffic in the window; idle ones are missing from the filter | Add the scope in the Cloudflare dashboard, then `wrangler secret put CF_API_TOKEN`. No code change needed |
+| P2 | **AI Security telemetry is cached at the edge** — [queries.ts](src/lib/ai-sec/cf/queries.ts) writes `ZoneResult` to `caches.default`, keyed by a SHA-256 fingerprint of the token, while every other section is `no-store` | Not a leak (per-token namespacing is deliberate and commented), but detection rows including client IPs and payload ciphertext persist at the edge for the TTL | Decide whether that posture is wanted here, and write the decision down either way |
+| P3 | **`buildMitigations` doc/code mismatch** — its comment says a fully blocked critical signal sinks below an unblocked high one; the sort is severity-first, so it does not | Mitigation ranking may not match what the panel claims to recommend | Product decision: reword the comment, or make unmitigated volume outrank severity. `tests/ai-sec-catalog.test.ts` pins current behaviour |
+| P3 | **`graphBuckets` clamps out-of-window events into the edge buckets** rather than excluding them ([chart.ts](web/src/lib/waf/chart.ts)) | An event outside the requested window is silently counted in the first or last bucket. Low impact — events are already fetched for the same window | Exclude instead of clamp; `tests/waf-chart.test.ts` pins the current behaviour and will need updating |
 | P3 | **[src/lib/waf-meta.ts](src/lib/waf-meta.ts) is only lightly tested** — `cdac5e0` added merge-order coverage, but the managed-`execute` and entrypoint paths are still uncovered | A regression in the uncovered paths still mislabels rules in WAF Analytics | Extend `tests/waf-meta.test.ts` with fixtures for managed rulesets and the custom firewall entrypoint |
 | P3 | Old `cf-zt-policy-dashboard` Worker likely still deployed | Stale duplicate serving old code | `npx wrangler delete --name cf-zt-policy-dashboard` |
-| P3 | 2 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
+| P3 | 3 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 | P3 | [.claude/launch.json](.claude/launch.json) hardcodes the nvm `v24.16.0` binary path | Breaks when Node is upgraded | Default Node is now v24, so this can revert to plain `npx` |
-| P3 | [web/src/lib/waf/chart.ts](web/src/lib/waf/chart.ts) and [useHashParams.ts](web/src/hooks/useHashParams.ts) untested | Bucketing maths and deep-link parsing are regression-prone and cheap to cover | Both are pure functions — straightforward unit tests |
 | P4 | `useHashSyncedState` adopts URL params on mount only. Editing the hash to a *different route* while the app is open (e.g. `#/waf?zone=A` → `#/cache?zone=B`) does not adopt the new param, because `App` never unmounts — the write-back then overwrites it | Hand-edited cross-route deep links lose their param. Fresh loads and in-app navigation are unaffected | Key the adoption on `route` as well as mount |
 | P4 | Worker's `CfGroup` interface ([src/index.ts](src/index.ts)) declares only `id`/`name`, but the endpoint passes the full group object through to the client | None at runtime — TS interfaces don't strip fields — but it misleads anyone reading the Worker in isolation | Widen it to match [web/src/types.ts](web/src/types.ts) |
 | P4 | Local directory still named `cf-zt-policy-dashboard/` | Cosmetic mismatch with the Flarelens name | Rename the folder |

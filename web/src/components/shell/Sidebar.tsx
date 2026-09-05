@@ -6,6 +6,7 @@ import {
 	BoltIcon,
 	ChartIcon,
 	DatabaseIcon,
+	GlobeIcon,
 	KeyIcon,
 	PanelLeftIcon,
 	ShieldIcon,
@@ -47,6 +48,7 @@ const NAV_GROUPS: { label: string; items: { route: Route; label: string; icon: t
 			{ route: "access", label: "Access Applications", icon: AppsIcon },
 			{ route: "groups", label: "Access Groups", icon: UsersIcon },
 			{ route: "access-usage", label: "Access Usage", icon: ChartIcon },
+			{ route: "gateway", label: "Gateway Usage", icon: GlobeIcon },
 		],
 	},
 	{
@@ -65,6 +67,7 @@ const NAV_GROUPS: { label: string; items: { route: Route; label: string; icon: t
 		items: [
 			{ route: "workers", label: "Workers Analytics", icon: BoltIcon },
 			{ route: "workers-ai", label: "Workers AI", icon: SparkIcon },
+			{ route: "cost", label: "Cost & Usage", icon: ChartIcon },
 		],
 	},
 	{

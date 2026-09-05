@@ -173,3 +173,10 @@ export function fetchWorkersAiUsage<T>(
 ): Promise<T> {
 	return postJson<T>("/api/workers-ai/usage", token, body);
 }
+
+export function fetchGatewayUsage<T>(
+	token: string,
+	body: { accountId: string; from: string; to: string; granularity: string },
+): Promise<T> {
+	return postJson<T>("/api/gateway/usage", token, body);
+}
