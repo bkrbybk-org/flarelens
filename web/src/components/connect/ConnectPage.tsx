@@ -6,6 +6,10 @@ import { CheckIcon, EyeIcon, EyeOffIcon, RefreshIcon, ShieldIcon, XIcon } from "
 
 interface ConnectPageProps {
 	onConnect: (session: Session) => void;
+	/** Server mode with more than one allowlisted account: the operator picks, no token needed. */
+	serverAccounts?: { id: string; name: string }[];
+	serverError?: string;
+	onPickServerAccount?: (account: { id: string; name: string }) => void;
 }
 
 type CheckStatus = "idle" | "checking" | "granted" | "missing" | "skipped";
@@ -35,11 +39,15 @@ const INITIAL_REQUIRED: RequiredCheck[] = [
 
 const OPTIONAL_PERMISSIONS = [
 	{ label: "Access: Organizations, Identity Providers, and Groups", description: "Resolves group names inside policies and populates the Access Groups section." },
-	{ label: "Zone: Read", description: "Lists zones for the zone picker in WAF Analytics and Cache Rules." },
+	{ label: "Zone: Read", description: "Lists zones for the zone picker in WAF Analytics, Cache Rules and AI Security." },
 	{ label: "Account WAF: Read", description: "Account-wide WAF rulesets in WAF Analytics." },
 	{ label: "Zone WAF: Read", description: "Zone-level WAF rulesets in WAF Analytics." },
 	{ label: "Cache Rules: Read", description: "Cache Rules section." },
-	{ label: "Zone Analytics: Read", description: "Traffic and hit-ratio data in Cache Rules." },
+	{ label: "Zone Analytics: Read", description: "Traffic and hit-ratio data in Cache Rules, and the request/detection telemetry behind AI Security." },
+	// AI Security reads the firewallForAi* fields on httpRequestsAdaptive, which sit behind the
+	// zone-scoped analytics permissions rather than a permission of their own. Called out so a
+	// token that opens every other section but returns nothing here has a stated reason.
+	{ label: "Analytics: Read", description: "Prompt injection, PII and topic detections in AI Security. Without it that section loads empty." },
 ] as const;
 
 function StatusBadge({ status }: { status: CheckStatus }) {
@@ -56,7 +64,7 @@ function StatusBadge({ status }: { status: CheckStatus }) {
 	return <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600" />;
 }
 
-export function ConnectPage({ onConnect }: ConnectPageProps) {
+export function ConnectPage({ onConnect, serverAccounts = [], serverError = "", onPickServerAccount }: ConnectPageProps) {
 	const [token, setToken] = useState("");
 	const [accountIdInput, setAccountIdInput] = useState("");
 	const [showToken, setShowToken] = useState(false);
@@ -124,7 +132,7 @@ export function ConnectPage({ onConnect }: ConnectPageProps) {
 			}
 			setCheck("access", "granted");
 
-			onConnect({ token: trimmedToken, accountId, accountName });
+			onConnect({ token: trimmedToken, accountId, accountName, mode: "byot" });
 		} catch (err) {
 			if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
 				setError(`${err.message} — check the token's permissions below.`);
@@ -148,6 +156,24 @@ export function ConnectPage({ onConnect }: ConnectPageProps) {
 					</p>
 				</div>
 
+				{serverAccounts.length > 0 && onPickServerAccount ? (
+					<div className="space-y-3">
+						<p className="text-sm text-zinc-500 dark:text-zinc-400">
+							Signed in through Cloudflare Access. Choose an account to continue.
+						</p>
+						{serverAccounts.map((account) => (
+							<button
+								key={account.id}
+								type="button"
+								onClick={() => onPickServerAccount(account)}
+								className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-left text-sm transition hover:border-cf hover:bg-cf/5 dark:border-zinc-700"
+							>
+								<div className="font-medium">{account.name}</div>
+								<div className="font-mono text-xs text-zinc-400">{account.id}</div>
+							</button>
+						))}
+					</div>
+				) : (
 				<form onSubmit={handleSubmit} className="space-y-4">
 					<div>
 						<label htmlFor="api-token" className="mb-1.5 block text-sm font-medium">Cloudflare API Token</label>
@@ -218,6 +244,13 @@ export function ConnectPage({ onConnect }: ConnectPageProps) {
 						{busy ? "Connecting…" : "Connect"}
 					</button>
 				</form>
+				)}
+
+				{serverError && (
+					<div role="alert" className="mt-4 rounded-lg border border-red-300/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+						{serverError}
+					</div>
+				)}
 
 				<div className="mt-6 space-y-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
 					<div>

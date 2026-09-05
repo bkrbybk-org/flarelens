@@ -1,5 +1,23 @@
 import { Hono } from "hono";
+import { assertAllowedScope, resolveAuth, type AuthEnv } from "./lib/auth";
+import { MAX_AI_RANGE_MS, WorkersAiError, fetchWorkersAi, isAiGranularity } from "./lib/workers-ai";
+import {
+	MAX_ACCESS_RANGE_MS,
+	AccessUsageError,
+	fetchAccessUsage,
+	isAccessGranularity,
+} from "./lib/access-usage";
+import {
+	MAX_RANGE_MS,
+	WorkersAnalyticsError,
+	fetchWorkerMetrics,
+	isGranularity,
+	listWorkerScripts,
+	parseInstant,
+} from "./lib/workers-analytics";
 import { collectRulesetsForScope, UpstreamError, type RuleMetaMap, type RulesetScope } from "./lib/waf-meta";
+import { loadAiSecurity, type AiSecRequest } from "./lib/ai-sec";
+import { CfApiError } from "./lib/ai-sec/cf/types";
 import {
 	ALLOWED_RANGES,
 	assembleAnalytics,
@@ -10,8 +28,16 @@ import {
 	type CacheCredentials,
 } from "./lib/cache-analysis";
 
-interface Env {
+interface Env extends AuthEnv {
 	ASSETS: Fetcher;
+	/** Populated by the version_metadata binding; absent under `wrangler dev` without it. */
+	CF_VERSION_METADATA?: { id: string; tag?: string; timestamp?: string };
+	/**
+	 * "0" lets AI Security run under the bound token like every other section. Default is the
+	 * restrictive one: that section's rows carry client IPs and encrypted request payloads, and
+	 * reading them under a shared credential collapses the Cloudflare audit trail to one identity.
+	 */
+	AI_REQUIRES_BYOT?: string;
 }
 
 interface CfResultInfo {
@@ -62,6 +88,24 @@ interface CfZone {
 	name?: string;
 }
 
+interface CfAccount {
+	id: string;
+	name?: string;
+}
+
+/** Accounts on the deployment allowlist, mapped down to what the client actually needs. */
+function filterAllowedAccounts(accounts: CfAccount[], env: Env): { id: string; name: string }[] {
+	const allowed = new Set(
+		(env.ALLOWED_ACCOUNT_IDS || "")
+			.split(",")
+			.map((entry) => entry.trim().toLowerCase())
+			.filter(Boolean),
+	);
+	return accounts
+		.filter((account) => allowed.has(account.id.toLowerCase()))
+		.map((account) => ({ id: account.id, name: account.name || account.id }));
+}
+
 const SECURITY_HEADERS: Record<string, string> = {
 	"X-Content-Type-Options": "nosniff",
 	"X-Frame-Options": "DENY",
@@ -79,13 +123,6 @@ const SECURITY_HEADERS: Record<string, string> = {
 		"form-action 'self'",
 	].join("; "),
 };
-
-function getAuthToken(authorization: string | undefined): string | null {
-	if (!authorization || !authorization.startsWith("Bearer ")) {
-		return null;
-	}
-	return authorization.substring(7).trim();
-}
 
 async function fetchCloudflare<T>(path: string, token: string): Promise<{ status: number; data: CfListResponse<T> }> {
 	const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
@@ -165,23 +202,65 @@ app.use("*", async (c, next) => {
 
 app.get("/health", (c) => c.json({ status: "ok" }));
 
+/** Accounts the caller may use. In server mode the deployment allowlist narrows the list. */
 app.get("/api/accounts", async (c) => {
-	const token = getAuthToken(c.req.header("Authorization"));
-	if (!token) {
-		return c.json({ success: false, errors: [{ message: "Authorization token is missing or invalid" }] }, 401);
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
 	}
-	const { status, data } = await fetchCloudflare("/accounts", token);
-	return c.json(data, status as 200);
+	const token = auth.auth.token;
+	const { status, data } = await fetchCloudflare<CfAccount>("/accounts", token);
+	if (status !== 200 || !data.success || auth.auth.mode !== "server") {
+		return c.json(data, status as 200);
+	}
+	// Offering an account the allowlist would refuse just produces a 403 one click later.
+	return c.json({ ...data, result: filterAllowedAccounts(data.result || [], c.env) });
+});
+
+/**
+ * Bootstrap for the SPA: which credential model is in play, and which accounts are on offer.
+ *
+ * Deliberately returns `byot` rather than 401 when the Access gate does not pass, so an
+ * unauthenticated caller learns nothing about whether this deployment binds a token. The token
+ * itself is never part of the response — only the mode and the account list it can reach.
+ */
+app.get("/api/config", async (c) => {
+	const auth = await resolveAuth(c.req.raw, c.env);
+	const version = c.env.CF_VERSION_METADATA
+		? { id: c.env.CF_VERSION_METADATA.id, tag: c.env.CF_VERSION_METADATA.tag, timestamp: c.env.CF_VERSION_METADATA.timestamp }
+		: undefined;
+
+	if (!auth.ok || auth.auth.mode !== "server") {
+		return c.json({ success: true, result: { mode: "byot", version } });
+	}
+
+	const { status, data } = await fetchCloudflare<CfAccount>("/accounts", auth.auth.token);
+	if (status !== 200 || !data.success) {
+		return c.json({
+			success: true,
+			result: { mode: "server", accounts: [], accountsError: "Failed to list accounts for the configured token", version },
+		});
+	}
+
+	return c.json({
+		success: true,
+		result: { mode: "server", accounts: filterAllowedAccounts(data.result || [], c.env), version },
+	});
 });
 
 app.get("/api/zones", async (c) => {
-	const token = getAuthToken(c.req.header("Authorization"));
-	if (!token) {
-		return c.json({ success: false, errors: [{ message: "Authorization token is missing or invalid" }] }, 401);
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
 	}
+	const token = auth.auth.token;
 	const accountId = c.req.query("account_id");
 	if (!accountId) {
 		return c.json({ success: false, errors: [{ message: "Missing account_id query parameter" }] }, 400);
+	}
+	const scope = assertAllowedScope(auth.auth, c.env, { accountId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
 	}
 	const res = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`, token);
 	if (res.status !== 200) {
@@ -191,13 +270,18 @@ app.get("/api/zones", async (c) => {
 });
 
 app.get("/api/data", async (c) => {
-	const token = getAuthToken(c.req.header("Authorization"));
-	if (!token) {
-		return c.json({ success: false, errors: [{ message: "Authorization token is missing or invalid" }] }, 401);
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
 	}
+	const token = auth.auth.token;
 	const accountId = c.req.query("account_id");
 	if (!accountId) {
 		return c.json({ success: false, errors: [{ message: "Missing account_id query parameter" }] }, 400);
+	}
+	const scope = assertAllowedScope(auth.auth, c.env, { accountId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
 	}
 
 	// 1. Fetch apps, identity providers, groups, and reusable policies
@@ -342,11 +426,63 @@ function validHexId(value: string | undefined | null): string | null {
 	return HEX_ID_PATTERN.test(normalized) ? normalized : null;
 }
 
-app.post("/api/waf/events", async (c) => {
-	const token = getAuthToken(c.req.header("Authorization"));
-	if (!token) {
-		return c.json({ success: false, errors: [{ message: "Authorization token is missing or invalid" }] }, 401);
+/**
+ * AI Security for Apps: KPIs, detection breakdowns and flagged requests for a window.
+ *
+ * One endpoint rather than several, because the ported aggregation builds every section from a
+ * single fan-out across zones — splitting it would re-run the same GraphQL queries per section.
+ * The response is the whole Dashboard object; the client picks what each panel needs.
+ *
+ * Errors from the ported layer are surfaced with their own status where they carry one (a 403
+ * from a token missing Analytics scope is not a 500 and should not read like one).
+ */
+app.post("/api/ai-security/analyze", async (c) => {
+	const auth = await resolveAuth(c.req.raw, c.env, { allowServerMode: c.env.AI_REQUIRES_BYOT === "0" });
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
 	}
+	const token = auth.auth.token;
+	let body: AiSecRequest & { accountId?: string; zoneId?: string };
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json({ success: false, errors: [{ message: "Request body must be valid JSON" }] }, 400);
+	}
+	const accountId = validHexId(body.accountId);
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Invalid accountId" }] }, 400);
+	}
+	const zoneId = body.zoneId ? validHexId(body.zoneId) : null;
+	if (body.zoneId && !zoneId) {
+		return c.json({ success: false, errors: [{ message: "Invalid zoneId" }] }, 400);
+	}
+	const scope = assertAllowedScope(auth.auth, c.env, { accountId, zoneId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
+	}
+
+	try {
+		const result = await loadAiSecurity(
+			token,
+			{ ...body, accountId, zoneId: zoneId || undefined },
+			(p) => c.executionCtx.waitUntil(p),
+		);
+		return c.json({ success: true, result });
+	} catch (err) {
+		const status = err instanceof CfApiError ? err.status : 502;
+		const message = err instanceof Error ? err.message : "Failed to load AI Security telemetry";
+		// 401/403 must reach the client intact: useAiSecurityData treats them as an expired
+		// session and disconnects, which a blanket 502 would turn into a stuck error banner.
+		return c.json({ success: false, errors: [{ message }] }, status === 401 || status === 403 ? status : 502);
+	}
+});
+
+app.post("/api/waf/events", async (c) => {
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
+	}
+	const token = auth.auth.token;
 	let body: { accountId?: string; zoneId?: string; minutes?: number };
 	try {
 		body = await c.req.json();
@@ -360,6 +496,10 @@ app.post("/api/waf/events", async (c) => {
 	const zoneId = body.zoneId ? validHexId(body.zoneId) : null;
 	if (body.zoneId && !zoneId) {
 		return c.json({ success: false, errors: [{ message: "Invalid zoneId" }] }, 400);
+	}
+	const scope = assertAllowedScope(auth.auth, c.env, { accountId, zoneId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
 	}
 	const requested = Number(body.minutes || 360);
 	const minutes = Math.min(MAX_LOOKBACK_MINUTES, Math.max(MIN_LOOKBACK_MINUTES, Number.isFinite(requested) ? requested : 360));
@@ -438,10 +578,11 @@ app.post("/api/waf/events", async (c) => {
 });
 
 app.get("/api/waf/rulesets", async (c) => {
-	const token = getAuthToken(c.req.header("Authorization"));
-	if (!token) {
-		return c.json({ success: false, errors: [{ message: "Authorization token is missing or invalid" }] }, 401);
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
 	}
+	const token = auth.auth.token;
 	const accountId = validHexId(c.req.query("account_id"));
 	if (!accountId) {
 		return c.json({ success: false, errors: [{ message: "Invalid account_id" }] }, 400);
@@ -449,6 +590,10 @@ app.get("/api/waf/rulesets", async (c) => {
 	const zoneId = c.req.query("zone_id") ? validHexId(c.req.query("zone_id")) : null;
 	if (c.req.query("zone_id") && !zoneId) {
 		return c.json({ success: false, errors: [{ message: "Invalid zone_id" }] }, 400);
+	}
+	const scope = assertAllowedScope(auth.auth, c.env, { accountId, zoneId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
 	}
 	const includeZones = c.req.query("include_zones") === "1";
 
@@ -489,13 +634,207 @@ app.get("/api/waf/rulesets", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Workers AI (inference volume, neurons, tokens, models)
+
+app.post("/api/workers-ai/usage", async (c) => {
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
+	}
+	let body: { accountId?: string; from?: string; to?: string; granularity?: string };
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json({ success: false, errors: [{ message: "Request body must be valid JSON" }] }, 400);
+	}
+	const accountId = validHexId(body.accountId);
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Invalid accountId" }] }, 400);
+	}
+	const since = parseInstant(body.from);
+	const until = parseInstant(body.to);
+	if (!since || !until) {
+		return c.json({ success: false, errors: [{ message: "from and to must be ISO-8601 UTC instants" }] }, 400);
+	}
+	if (Date.parse(until) <= Date.parse(since)) {
+		return c.json({ success: false, errors: [{ message: "to must be later than from" }] }, 400);
+	}
+	if (Date.parse(until) - Date.parse(since) > MAX_AI_RANGE_MS) {
+		return c.json({ success: false, errors: [{ message: "Range is longer than the supported 30 days" }] }, 400);
+	}
+	const granularity = isAiGranularity(body.granularity) ? body.granularity : "hourly";
+	const scope = assertAllowedScope(auth.auth, c.env, { accountId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
+	}
+
+	try {
+		const result = await fetchWorkersAi(accountId, auth.auth.token, { since, until, granularity });
+		return c.json({ success: true, result });
+	} catch (err) {
+		const status = err instanceof WorkersAiError ? err.status : 502;
+		const message = err instanceof Error ? err.message : "Failed to load Workers AI usage";
+		return c.json({ success: false, errors: [{ message }] }, status as 502);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Access usage (login telemetry for Access-protected apps)
+
+/**
+ * Login volume, success/failure split and top apps, identity providers and countries.
+ *
+ * Deliberately aggregate-only: the dataset can break logins down per user identity, and this
+ * endpoint does not ask for that. Everything here answers "is Access working and who is it
+ * serving" without the response becoming a per-person access log.
+ */
+app.post("/api/access/usage", async (c) => {
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
+	}
+	let body: { accountId?: string; from?: string; to?: string; granularity?: string };
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json({ success: false, errors: [{ message: "Request body must be valid JSON" }] }, 400);
+	}
+	const accountId = validHexId(body.accountId);
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Invalid accountId" }] }, 400);
+	}
+	// Same instant parser as the Workers section: both bounds land in a GraphQL document.
+	const since = parseInstant(body.from);
+	const until = parseInstant(body.to);
+	if (!since || !until) {
+		return c.json({ success: false, errors: [{ message: "from and to must be ISO-8601 UTC instants" }] }, 400);
+	}
+	if (Date.parse(until) <= Date.parse(since)) {
+		return c.json({ success: false, errors: [{ message: "to must be later than from" }] }, 400);
+	}
+	if (Date.parse(until) - Date.parse(since) > MAX_ACCESS_RANGE_MS) {
+		// Cloudflare refuses anything wider than 1w on this dataset.
+		return c.json({ success: false, errors: [{ message: "Access usage supports a range of at most 7 days" }] }, 400);
+	}
+	const granularity = isAccessGranularity(body.granularity) ? body.granularity : "hourly";
+	const scope = assertAllowedScope(auth.auth, c.env, { accountId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
+	}
+
+	try {
+		// Names are best-effort enrichment: a token without the Access read scopes still gets
+		// the usage numbers, just labelled by uuid.
+		const [appsRes, idpsRes] = await Promise.all([
+			fetchCloudflareAll<CfApp>(`/accounts/${accountId}/access/apps`, auth.auth.token),
+			fetchCloudflareAll<CfIdp>(`/accounts/${accountId}/access/identity_providers`, auth.auth.token),
+		]);
+		const appNames = Object.fromEntries(
+			(appsRes.status === 200 ? appsRes.result : []).map((a) => [a.id, a.name || a.id]),
+		);
+		const idpNames = Object.fromEntries(
+			(idpsRes.status === 200 ? idpsRes.result : []).map((i) => [i.id, i.name || i.id]),
+		);
+
+		const result = await fetchAccessUsage(accountId, auth.auth.token, {
+			since,
+			until,
+			granularity,
+			appNames,
+			idpNames,
+		});
+		return c.json({ success: true, result });
+	} catch (err) {
+		const status = err instanceof AccessUsageError ? err.status : 502;
+		const message = err instanceof Error ? err.message : "Failed to load Access usage";
+		return c.json({ success: false, errors: [{ message }] }, status as 502);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Workers analytics (per-script requests, errors, subrequests, CPU time)
+
+/** Script names on the account, for the Workers section's per-worker filter. */
+app.get("/api/workers/scripts", async (c) => {
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
+	}
+	const accountId = validHexId(c.req.query("account_id"));
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Invalid account_id" }] }, 400);
+	}
+	const scope = assertAllowedScope(auth.auth, c.env, { accountId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
+	}
+
+	try {
+		return c.json({ success: true, result: await listWorkerScripts(accountId, auth.auth.token) });
+	} catch (err) {
+		const status = err instanceof WorkersAnalyticsError ? err.status : 502;
+		const message = err instanceof Error ? err.message : "Failed to list Workers scripts";
+		return c.json({ success: false, errors: [{ message }] }, status as 502);
+	}
+});
+
+/**
+ * Per-script invocation metrics for a window.
+ *
+ * Both bounds are required and must be full UTC instants: they are interpolated into a GraphQL
+ * document, so the parse is the boundary that keeps caller text out of the query.
+ */
+app.post("/api/workers/metrics", async (c) => {
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
+	}
+	let body: { accountId?: string; from?: string; to?: string; granularity?: string };
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json({ success: false, errors: [{ message: "Request body must be valid JSON" }] }, 400);
+	}
+	const accountId = validHexId(body.accountId);
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Invalid accountId" }] }, 400);
+	}
+	const since = parseInstant(body.from);
+	const until = parseInstant(body.to);
+	if (!since || !until) {
+		return c.json({ success: false, errors: [{ message: "from and to must be ISO-8601 UTC instants" }] }, 400);
+	}
+	if (Date.parse(until) <= Date.parse(since)) {
+		return c.json({ success: false, errors: [{ message: "to must be later than from" }] }, 400);
+	}
+	if (Date.parse(until) - Date.parse(since) > MAX_RANGE_MS) {
+		return c.json({ success: false, errors: [{ message: "Range is longer than the supported 30 days" }] }, 400);
+	}
+	const granularity = isGranularity(body.granularity) ? body.granularity : "hourly";
+	const scope = assertAllowedScope(auth.auth, c.env, { accountId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
+	}
+
+	try {
+		const result = await fetchWorkerMetrics(accountId, auth.auth.token, { since, until, granularity });
+		return c.json({ success: true, result });
+	} catch (err) {
+		const status = err instanceof WorkersAnalyticsError ? err.status : 502;
+		const message = err instanceof Error ? err.message : "Failed to load Workers metrics";
+		return c.json({ success: false, errors: [{ message }] }, status as 502);
+	}
+});
+
+// ---------------------------------------------------------------------------
 // Cache rules analysis (ported from cf-cache-analyzer)
 
 app.post("/api/cache/analyze", async (c) => {
-	const token = getAuthToken(c.req.header("Authorization"));
-	if (!token) {
-		return c.json({ success: false, errors: [{ message: "Authorization token is missing or invalid" }] }, 401);
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
 	}
+	const token = auth.auth.token;
 	let body: { zoneId?: string; rangeHours?: number };
 	try {
 		body = await c.req.json();
@@ -505,6 +844,10 @@ app.post("/api/cache/analyze", async (c) => {
 	const zoneId = validHexId(body.zoneId);
 	if (!zoneId) {
 		return c.json({ success: false, errors: [{ message: "Invalid zoneId" }] }, 400);
+	}
+	const scope = assertAllowedScope(auth.auth, c.env, { zoneId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
 	}
 	const requestedRange = Number(body.rangeHours);
 	const rangeHours = ALLOWED_RANGES.includes(requestedRange) ? requestedRange : 24;

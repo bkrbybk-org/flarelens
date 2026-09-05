@@ -2,6 +2,8 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "flarelens",
   "main": "src/index.ts",
+  // Explicit so `wrangler deploy` never prompts, and works unattended in CI.
+  "account_id": "11111111111111111111111111111111",
   "compatibility_date": "2025-03-07",
   "compatibility_flags": ["nodejs_compat"],
   // Serve only on the custom domain; no <name>.workers.dev URL
@@ -17,6 +19,28 @@
     "binding": "ASSETS",
     "run_worker_first": true,
   },
+  // Server-mode configuration. Inert until the CF_API_TOKEN secret exists:
+  // `wrangler secret put CF_API_TOKEN`. Never put that token here — vars are plaintext
+  // in this file and in the dashboard. Values verified against the live Access login
+  // redirect for flarelens.example.com.
+  "vars": {
+    "CF_ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "dd10a468df66d2840d11177cac49d0416897f8c34e55d61daa53205b15ca05b2",
+    "ALLOWED_ACCOUNT_IDS": "11111111111111111111111111111111",
+    // Zone-only routes (/api/cache/analyze) carry no account id, so without this list they
+    // would either run ungated or refuse outright. These are the four zones on the allowlisted
+    // account: cfx.example.net, example.org, example.com, example.test.
+    "ALLOWED_ZONE_IDS": "22222222222222222222222222222222,33333333333333333333333333333333,44444444444444444444444444444444,55555555555555555555555555555555",
+    // The UI carries no token in server mode, so AI Security has to run under the bound
+    // one like every other section. Trade-off: reads of client IPs and payload ciphertext
+    // show as the bound token in Cloudflare's audit log rather than a named operator.
+    // Set to "1" (or remove) to make that section require a pasted token again.
+    "AI_REQUIRES_BYOT": "0",
+  },
+
+  // Surfaces the deployed version id and timestamp to the app itself, for the sidebar footer.
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
