@@ -79,59 +79,68 @@ export function DecryptKeyPanel({
 	onChange: (next: string) => void;
 }) {
 	const [draft, setDraft] = useState("");
-
-	if (privateKey) {
-		return (
-			<div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-300/50 bg-emerald-500/10 px-3 py-2 text-xs dark:border-emerald-500/30">
-				<span className="font-medium text-emerald-700 dark:text-emerald-400">Decryption key loaded — held in memory only</span>
-				<button
-					type="button"
-					onClick={() => {
-						onChange("");
-						setDraft("");
-					}}
-					className="ml-auto rounded-md border border-zinc-300 px-2 py-1 font-medium transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-				>
-					Forget key
-				</button>
-			</div>
-		);
-	}
+	const loaded = Boolean(privateKey);
 
 	return (
 		<form
-			className="mb-3 rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800"
+			className="mb-3 rounded-lg border border-zinc-200 px-3 py-3 dark:border-zinc-800"
+			autoComplete="off"
 			onSubmit={(e) => {
 				e.preventDefault();
-				onChange(draft.trim());
+				const next = draft.trim();
+				if (next) onChange(next);
 			}}
-			autoComplete="off"
 		>
+			<h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+				Decrypt prompts (browser only)
+			</h3>
 			<div className="flex flex-wrap items-center gap-2">
-				<label htmlFor="payload-key" className="text-xs font-medium">
-					Payload-logging private key
+				<label htmlFor="payload-key" className="sr-only">
+					Payload-logging private key (base64)
 				</label>
 				<input
 					id="payload-key"
 					type="password"
-					value={draft}
+					value={loaded ? "" : draft}
+					disabled={loaded}
 					onChange={(e) => setDraft(e.target.value)}
-					placeholder="base64 X25519 private key"
+					placeholder="Payload-logging private key (base64)"
 					autoComplete="off"
 					spellCheck={false}
-					className="min-w-[18rem] flex-1 rounded-md border border-zinc-300 bg-transparent px-2 py-1 font-mono text-xs outline-none focus:border-cf dark:border-zinc-700"
+					className="min-w-[20rem] flex-1 rounded-md border border-zinc-300 bg-transparent px-2.5 py-1.5 font-mono text-xs outline-none transition focus:border-cf disabled:opacity-50 dark:border-zinc-700"
 				/>
 				<button
 					type="submit"
-					disabled={!draft.trim()}
-					className="rounded-md bg-cf px-3 py-1 text-xs font-semibold text-white transition hover:bg-cf-hover disabled:opacity-60"
+					disabled={loaded || !draft.trim()}
+					className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
 				>
-					Use key
+					Decrypt
 				</button>
+				<button
+					type="button"
+					disabled={!loaded && !draft}
+					onClick={() => {
+						onChange("");
+						setDraft("");
+					}}
+					className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+				>
+					Forget key
+				</button>
+				<span
+					className={`rounded-md px-2 py-1 text-xs font-medium ${
+						loaded
+							? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+							: "bg-zinc-500/10 text-zinc-500 dark:text-zinc-400"
+					}`}
+				>
+					{loaded ? "Key held in memory" : "Key not entered"}
+				</span>
 			</div>
-			<p className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-				Used in this browser only — never sent to the server and never stored. Decrypted prompts contain the data that
-				was flagged, including PII. Select <strong>Forget key</strong> when you are done.
+			<p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+				Your private key is used in this browser only — never sent to the server, never stored, and gone when this
+				page reloads, so it has to be entered again each session. Decrypted prompts contain the data that was
+				flagged, including PII; close the tab or select <strong>Forget key</strong> when finished.
 			</p>
 		</form>
 	);

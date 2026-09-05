@@ -144,3 +144,23 @@ describe("exposure boundaries", () => {
 		}
 	});
 });
+
+describe("session-only key handling", () => {
+	it("holds the key in component state and nowhere else", () => {
+		// Requirement: the operator re-enters the key every session. Any storage API here would
+		// break that, so this is asserted against code rather than left to review.
+		const panel = codeOf("web/src/features/ai-security/PromptPayload.tsx");
+		const table = codeOf("web/src/features/ai-security/EventsTable.tsx");
+		for (const [name, source] of [["PromptPayload", panel], ["EventsTable", table]] as const) {
+			expect(source, name).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie/);
+		}
+	});
+
+	it("does not put the key in the URL that Copy link produces", () => {
+		// The link carries the search filter and the range; a key in a shared URL would defeat
+		// the whole point of never storing it.
+		const table = codeOf("web/src/features/ai-security/EventsTable.tsx");
+		const copyBlock = table.slice(table.indexOf("Copy link") - 2000, table.indexOf("Copy link"));
+		expect(copyBlock).not.toMatch(/privateKey/);
+	});
+});

@@ -66,25 +66,60 @@ function Badge({ severity }: { severity: Severity | "none" }) {
 
 const list = (values: string[]) => (values.length ? values.join(", ") : "—");
 
+/** e.g. "UTC+7" — timestamps render in the viewer's zone, Cloudflare's logs are UTC. */
+function localOffsetLabel(): string {
+	const minutes = -new Date().getTimezoneOffset();
+	if (minutes === 0) return "UTC";
+	const sign = minutes > 0 ? "+" : "-";
+	const abs = Math.abs(minutes);
+	const hours = Math.floor(abs / 60);
+	const rest = abs % 60;
+	return `UTC${sign}${hours}${rest ? `:${String(rest).padStart(2, "0")}` : ""}`;
+}
+
 export function EventsTable({ events, truncated }: { events: RawEvent[]; truncated: boolean }) {
 	const [sorting, setSorting] = useState<SortingState>([{ id: "datetime", desc: true }]);
-	const [search, setSearch] = useState("");
+	const [search, setSearch] = useState(() => {
+		// Reproduces the view a "Copy link" URL was taken from.
+		const query = window.location.hash.split("?")[1];
+		return query ? (new URLSearchParams(query).get("q") ?? "") : "";
+	});
 	/**
 	 * Payload-decryption key. Deliberately component state: it is gone on reload or when the
 	 * section unmounts, and it is never written to storage or sent to the Worker.
 	 */
 	const [privateKey, setPrivateKey] = useState("");
+	const [copied, setCopied] = useState(false);
 	const [openRay, setOpenRay] = useState<string | null>(null);
 
 	const columns = useMemo<ColumnDef<RawEvent>[]>(
 		() => [
 			{
 				id: "datetime",
-				header: "Date / time",
+				header: () => <span>Date / time <span className="font-normal normal-case text-zinc-400">{localOffsetLabel()}</span></span>,
 				accessorFn: (e) => e.datetime,
 				cell: (ctx) => <span className="font-mono text-xs">{new Date(ctx.getValue<string>()).toLocaleString()}</span>,
 			},
 			{ id: "action", header: "Action", accessorFn: (e) => e.securityAction ?? "—" },
+			{
+				id: "payloadLog",
+				header: "Payload log",
+				accessorFn: (e) => (e.payload?.encrypted ? "True" : "False"),
+				cell: (ctx) => {
+					const on = ctx.getValue<string>() === "True";
+					return (
+						<span
+							className={`rounded-md px-1.5 py-0.5 text-xs font-medium ${
+								on
+									? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+									: "bg-zinc-500/10 text-zinc-500 dark:text-zinc-400"
+							}`}
+						>
+							{on ? "True" : "False"}
+						</span>
+					);
+				},
+			},
 			{
 				id: "severity",
 				header: "Severity",
@@ -169,6 +204,36 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 				</div>
 				<button
 					type="button"
+					onClick={() => setSearch("")}
+					disabled={!search}
+					className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+				>
+					Reset
+				</button>
+				<button
+					type="button"
+					onClick={() => {
+						// The search text can name an IP or a host, so it is only put in the link
+						// when it is actually set — a shared link should not carry a filter the
+						// sender did not deliberately apply.
+						const url = new URL(window.location.href);
+						const [route, query] = url.hash.replace(/^#/, "").split("?");
+						const params = new URLSearchParams(query ?? "");
+						if (search.trim()) params.set("q", search.trim());
+						else params.delete("q");
+						const qs = params.toString();
+						url.hash = `#${route}${qs ? `?${qs}` : ""}`;
+						void navigator.clipboard?.writeText(url.toString()).then(
+							() => setCopied(true),
+							() => setCopied(false),
+						);
+					}}
+					className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+				>
+					{copied ? "Copied" : "Copy link"}
+				</button>
+				<button
+					type="button"
 					onClick={exportCsv}
 					disabled={!rows.length}
 					className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
@@ -179,6 +244,11 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 					{rows.length.toLocaleString()} of {events.length.toLocaleString()}
 				</span>
 			</div>
+
+			<p className="mb-3 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
+				Showing {events.length.toLocaleString()} flagged request(s). Every event lists the rule that fired and the
+				fields it matched — often enough to judge a false positive without reading the prompt at all.
+			</p>
 
 			<DecryptKeyPanel privateKey={privateKey} onChange={setPrivateKey} />
 
@@ -227,7 +297,7 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 												type="button"
 												onClick={() => setOpenRay(open ? null : key)}
 												aria-expanded={open}
-												className="grid w-full grid-cols-[repeat(11,minmax(0,1fr))] gap-2 px-2 py-2 text-left transition hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+												className="grid w-full grid-cols-[repeat(12,minmax(0,1fr))] gap-2 px-2 py-2 text-left transition hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
 											>
 												{row.getVisibleCells().map((cell) => (
 													<span key={cell.id} className="truncate">
@@ -236,40 +306,55 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 												))}
 											</button>
 											{open && (
-												<dl className="grid grid-cols-[170px_1fr] gap-x-3 gap-y-1 rounded-lg bg-zinc-50 px-3 py-3 text-sm dark:bg-zinc-800/50">
-													<dt className="text-zinc-500 dark:text-zinc-400">Zone</dt>
-													<dd>{e.zoneName}</dd>
-													<dt className="text-zinc-500 dark:text-zinc-400">Request</dt>
-													<dd className="break-all font-mono text-xs">
-														{e.method ?? "?"} {e.host ?? ""}{e.path ?? ""} → {e.status ?? "?"}
-													</dd>
-													<dt className="text-zinc-500 dark:text-zinc-400">Source</dt>
-													<dd>{[e.clientIP, e.country, e.asnDescription].filter(Boolean).join(" · ") || "—"}</dd>
-													<dt className="text-zinc-500 dark:text-zinc-400">JA4</dt>
-													<dd className="font-mono text-xs">{e.ja4 ?? "—"}</dd>
-													<dt className="text-zinc-500 dark:text-zinc-400">Injection score</dt>
-													<dd>{e.injectionScore ?? "—"} <span className="text-zinc-500">(1–99, lower is more dangerous; 100 = not scored)</span></dd>
-													<dt className="text-zinc-500 dark:text-zinc-400">PII categories</dt>
-													<dd>{list(e.piiCategories)}</dd>
-													<dt className="text-zinc-500 dark:text-zinc-400">Unsafe topics</dt>
-													<dd>{list(e.unsafeTopicCategories)}</dd>
-													<dt className="text-zinc-500 dark:text-zinc-400">Custom topics</dt>
-													<dd>{e.customTopics.length ? e.customTopics.map((c) => `${c.topicLabel} (${c.score})`).join(", ") : "—"}</dd>
-													{e.payload && (
-														<>
-															<dt className="text-zinc-500 dark:text-zinc-400">Matched fields</dt>
-															<dd className="break-all font-mono text-xs">{list(e.payload.matchedVars)}</dd>
-															<dt className="text-zinc-500 dark:text-zinc-400">Prompt payload</dt>
-															<dd>
-																{e.payload.encrypted ? (
-																	<PromptPayload ciphertext={e.payload.encrypted} privateKey={privateKey} />
-																) : (
-																	<span className="text-zinc-500 dark:text-zinc-400">Not logged.</span>
-																)}
-															</dd>
-														</>
+											<dl className="grid grid-cols-[170px_1fr] gap-x-3 gap-y-1 rounded-lg bg-zinc-50 px-3 py-3 text-sm dark:bg-zinc-800/50">
+												<dt className="text-zinc-500 dark:text-zinc-400">Zone</dt>
+												<dd>{e.zoneName}</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Ray ID</dt>
+												<dd className="font-mono text-xs">{e.rayName ?? "—"}</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Severity</dt>
+												<dd><Badge severity={severityOf(e)} /></dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Injection score</dt>
+												<dd>{e.injectionScore ?? "—"} <span className="text-zinc-500">(1–99, lower is more likely an attack; 100 = not scored)</span></dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">PII categories</dt>
+												<dd>{list(e.piiCategories)}</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Unsafe topics</dt>
+												<dd>{list(e.unsafeTopicCategories)}</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Custom topics</dt>
+												<dd>
+													{e.customTopics.length ? e.customTopics.map((c) => `${c.topicLabel} (${c.score})`).join(", ") : "—"}{" "}
+													<span className="text-zinc-500">(1–99, lower is a stronger match; 100 = no match)</span>
+												</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Token count</dt>
+												<dd>{e.tokenCount ?? "—"}</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Request</dt>
+												<dd className="break-all">{e.method ?? "?"} {e.host ?? ""}{e.path ?? ""} → {e.status ?? "?"}</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Endpoint ID</dt>
+												<dd className="break-all font-mono text-xs">
+													{e.operationId ?? "—"}{e.operationId && <span className="ml-1 font-sans text-zinc-500">(API Shield operation ID, for correlation only)</span>}
+												</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Source</dt>
+												<dd className="break-all">{[e.clientIP, e.country, e.asnDescription].filter(Boolean).join(" · ") || "—"}</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">JA4</dt>
+												<dd className="font-mono text-xs">{e.ja4 ?? "—"}</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Security action</dt>
+												<dd>{e.securityAction ?? "—"}</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Sample interval</dt>
+												<dd>
+													{e.sampleInterval} <span className="text-zinc-500">(this row represents {e.sampleInterval} request(s))</span>
+												</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Rules fired</dt>
+												<dd>{e.payload ? list(e.payload.rules) : "—"}</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Matched fields</dt>
+												<dd className="break-all font-mono text-xs">{e.payload ? list(e.payload.matchedVars) : "—"}</dd>
+												<dt className="text-zinc-500 dark:text-zinc-400">Prompt payload</dt>
+												<dd>
+													{e.payload?.encrypted ? (
+														<PromptPayload ciphertext={e.payload.encrypted} privateKey={privateKey} />
+													) : (
+														<span className="text-zinc-500 dark:text-zinc-400">Not logged.</span>
 													)}
-												</dl>
+												</dd>
+											</dl>
 											)}
 										</td>
 									</tr>
