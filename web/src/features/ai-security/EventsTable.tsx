@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
 	flexRender,
 	getCoreRowModel,
@@ -262,10 +262,13 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 				<p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">No flagged requests in this window.</p>
 			) : (
 				<div className="overflow-x-auto">
-					<table className="w-full min-w-[1100px] border-collapse text-sm">
+					<table className="w-full min-w-[1240px] border-collapse text-sm">
 						<thead>
 							{table.getHeaderGroups().map((group) => (
 								<tr key={group.id} className="border-b border-zinc-200 dark:border-zinc-800">
+									<th className="w-6 px-1 py-2">
+										<span className="sr-only">Expand row</span>
+									</th>
 									{group.headers.map((header) => {
 										const sorted = header.column.getIsSorted();
 										return (
@@ -291,21 +294,41 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 								const key = e.rayName ?? `${e.datetime}|${e.clientIP}`;
 								const open = openRay === key;
 								return (
-									<tr key={key} className="border-b border-zinc-100 align-top dark:border-zinc-800/60">
-										<td colSpan={columns.length} className="p-0">
+									<Fragment key={key}>
+									<tr
+										onClick={() => setOpenRay(open ? null : key)}
+										className={`cursor-pointer border-b border-zinc-100 transition dark:border-zinc-800/60 ${
+											open ? "bg-zinc-50 dark:bg-zinc-800/50" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+										}`}
+									>
+										<td className="px-1 py-2 align-middle">
+											{/* The button carries the semantics: a clickable <tr> is not focusable, so
+											    keyboard users would otherwise have no way to open a row. */}
 											<button
 												type="button"
-												onClick={() => setOpenRay(open ? null : key)}
+												onClick={(event) => {
+													event.stopPropagation();
+													setOpenRay(open ? null : key);
+												}}
 												aria-expanded={open}
-												className="grid w-full grid-cols-[repeat(12,minmax(0,1fr))] gap-2 px-2 py-2 text-left transition hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+												aria-label={open ? "Collapse event details" : "Expand event details"}
+												className="rounded p-0.5 text-zinc-400 transition hover:text-zinc-700 dark:hover:text-zinc-200"
 											>
-												{row.getVisibleCells().map((cell) => (
-													<span key={cell.id} className="truncate">
-														{flexRender(cell.column.columnDef.cell ?? ((c) => String(c.getValue() ?? "")), cell.getContext())}
-													</span>
-												))}
+												{open ? <ChevronUpIcon size={14} /> : <ChevronDownIcon size={14} />}
 											</button>
-											{open && (
+										</td>
+										{row.getVisibleCells().map((cell) => (
+											<td
+												key={cell.id}
+												className="max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap px-2 py-2 align-middle"
+											>
+												{flexRender(cell.column.columnDef.cell ?? ((c) => String(c.getValue() ?? "")), cell.getContext())}
+											</td>
+										))}
+									</tr>
+									{open && (
+										<tr className="border-b border-zinc-100 dark:border-zinc-800/60">
+											<td colSpan={columns.length + 1} className="p-0">
 											<dl className="grid grid-cols-[170px_1fr] gap-x-3 gap-y-1 rounded-lg bg-zinc-50 px-3 py-3 text-sm dark:bg-zinc-800/50">
 												<dt className="text-zinc-500 dark:text-zinc-400">Zone</dt>
 												<dd>{e.zoneName}</dd>
@@ -355,9 +378,10 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 													)}
 												</dd>
 											</dl>
-											)}
-										</td>
-									</tr>
+											</td>
+										</tr>
+									)}
+									</Fragment>
 								);
 							})}
 						</tbody>
