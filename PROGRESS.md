@@ -1,8 +1,9 @@
 # Flarelens — Progress
 
-Status snapshot, last reviewed **2026-09-05** against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
+Status snapshot, last reviewed **2026-09-05** (second pass, against a full read of the tree) against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
 
-**TL;DR** — Eleven sections, 437 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
+**TL;DR** — Eleven sections, 456 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
+Running version `ef314f19`, deployed 2026-09-05 11:01 UTC.
 
 ---
 
@@ -12,11 +13,10 @@ Eleven routes, grouped in the sidebar by Cloudflare product area:
 
 | Group | Routes |
 |---|---|
-| Zero Trust | `#/access`, `#/groups`, `#/access-usage` |
+| Zero Trust | `#/access`, `#/groups`, `#/access-usage`, `#/gateway` |
 | Security | `#/waf`, `#/ai-security` |
 | Performance | `#/cache` |
 | Developer Platform | `#/workers`, `#/workers-ai`, `#/cost` |
-| Network | `#/gateway` |
 | Audit | `#/findings` |
 
 All time-windowed sections share one range picker in the top bar (`hooks/useTimeRange.ts`),
@@ -26,6 +26,10 @@ to 7 days, Cache to 24h/7d/30d, WAF to the Worker's own bounds.
 The analytics sections that read login, Gateway or AI telemetry are **aggregate only**: the
 datasets expose `userUuid`, `email`, `ipAddress` and `deviceId`, and none of them are queried.
 Tests assert those field names never appear in an outgoing GraphQL document.
+
+The one place prompt content is shown is the AI Security events table, and it is decrypted in the
+browser with a payload-logging private key the operator supplies per session — never stored, never
+sent to the Worker, which only ever handles ciphertext.
 
 ---
 
@@ -39,7 +43,18 @@ browser ──► Worker (Hono, src/index.ts) ──► api.cloudflare.com
               └─► ASSETS binding ──► web/dist (Vite build)
 ```
 
-`assets.run_worker_first: true` means the Worker sees every request first, so security headers and CSP land on the HTML document too — not just API responses. The Worker holds no credentials: the browser sends the user's token per request as `Authorization: Bearer`, and the Worker forwards it upstream within the same invocation. Nothing is stored server-side (no KV/D1/secrets).
+`assets.run_worker_first: true` means the Worker sees every request first, so security headers and CSP land on the HTML document too — not just API responses.
+
+Credentials resolve at one choke point, [src/lib/auth.ts](src/lib/auth.ts). A request carrying
+`Authorization: Bearer` is BYOT: the Worker forwards that token upstream within the same
+invocation and holds nothing. A request without one is server mode, which this deployment uses:
+the Worker's own read-only `CF_API_TOKEN` secret is used, but only after a Cloudflare Access JWT
+verifies and only for accounts and zones on the deploy-time allowlist. A Bearer header always
+wins, so a caller's own token can never be silently upgraded to the bound one.
+
+Storage is therefore not quite "nothing": a `CF_API_TOKEN` secret (no KV, no D1), and the AI
+Security layer writes per-zone results to the edge Cache API, namespaced by a SHA-256 fingerprint
+of the calling token — see the P2 entry below.
 
 ### API routes ([src/index.ts](src/index.ts))
 
@@ -52,9 +67,21 @@ browser ──► Worker (Hono, src/index.ts) ──► api.cloudflare.com
 | `POST /api/waf/events` | account or zone | WAF Analytics (firewallEventsAdaptive, cursor-paginated 5×10k, deduped) |
 | `GET /api/waf/rulesets` | account or zone | WAF Analytics (ruleset metadata) |
 | `POST /api/cache/analyze` | zone | Cache Rules (rules + GraphQL analytics + attribution + insights) |
+| `GET /api/config` | — | SPA bootstrap: credential mode, allowlisted accounts, running version. Answers `byot` rather than 401 when the Access gate does not pass, so an unauthenticated caller learns nothing about the deployment |
+| `POST /api/ai-security/analyze` | account or zone | AI Security (one fan-out builds every panel) |
+| `POST /api/access/usage` | account | Access Usage. Upstream caps this dataset at 1 week |
+| `POST /api/gateway/usage` | account | Gateway Usage (DNS resolver + Gateway HTTP) |
+| `GET /api/workers/scripts` | account | Workers Analytics filter — needs `Workers Scripts: Read`, degrades if absent |
+| `POST /api/workers/metrics` | account | Workers Analytics; also half of Cost & Usage |
+| `POST /api/workers-ai/usage` | account | Workers AI; also half of Cost & Usage |
 | `app.all("*")` | — | static asset fallback |
 
-All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, missing/bad token → 401/403, upstream failure → 502.
+All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, missing/bad token →
+401/403, disallowed account or zone → 403 before any upstream call, upstream failure → 502.
+
+Every route that takes a time window parses both bounds into ISO instants and re-emits them
+through `toISOString()`. That is the injection boundary: the bounds are interpolated into GraphQL
+documents, so no caller text reaches a query.
 
 `/api/waf/rulesets` fetches its scopes (account + one per zone) with bounded concurrency, each into its own map, then merges them in original scope order — so zone entries still override account entries for the same rule id regardless of which request finishes first.
 
@@ -65,6 +92,15 @@ All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, mis
 | [src/lib/waf-meta.ts](src/lib/waf-meta.ts) | Flattens rulesets (account + zone scopes, managed `execute` targets, custom firewall entrypoint) into a rule-id/ref keyed map |
 | [src/lib/cache-analysis.ts](src/lib/cache-analysis.ts) | Cache GraphQL queries, last-match attribution, insights, A–F health grade, labeled mock fallback |
 | [src/lib/cache-cf-types.ts](src/lib/cache-cf-types.ts) | Cloudflare REST/GraphQL response shapes for the cache path |
+| [src/lib/auth.ts](src/lib/auth.ts) | Credential resolution for every route: Access JWT verification against the team JWKS, BYOT-wins precedence, account/zone allowlist |
+| [src/lib/access-usage.ts](src/lib/access-usage.ts) | Access login telemetry; folds success/failure rows and resolves app/IdP uuids to names |
+| [src/lib/gateway-usage.ts](src/lib/gateway-usage.ts) | Gateway DNS + HTTP telemetry; conservative block classification, multi-value category handling |
+| [src/lib/workers-analytics.ts](src/lib/workers-analytics.ts) | Workers invocation metrics; script list degrades when the scope is absent |
+| [src/lib/workers-ai.ts](src/lib/workers-ai.ts) | Workers AI inference metrics; folds rows split by `errorCode` |
+| [src/lib/ai-sec/](src/lib/ai-sec/) | AI Security: zone fan-out, schema-capability probing, per-token edge caching, and the `buildDashboard` aggregation |
+| [web/src/hooks/useTimeRange.ts](web/src/hooks/useTimeRange.ts) | Shared analytics window in minutes, hash-synced, clamped per section |
+| [web/src/components/chart/ChartHover.tsx](web/src/components/chart/ChartHover.tsx) | Hover readout for every inline-SVG chart: bucket hit-testing and measured, clamped placement |
+| [web/src/features/ai-security/matchedData.ts](web/src/features/ai-security/matchedData.ts) | HPKE decryption of logged prompts. Browser-only; the key never reaches the Worker or storage |
 | [web/src/lib/expr.ts](web/src/lib/expr.ts) | **Wirefilter evaluator — single source.** Worker imports it for attribution (strict boolean); client imports it for the URL tester (Kleene tri-state). Pulled into the Worker build via the `web/src/lib/expr.ts` entry in `tsconfig.worker.json` |
 | [web/src/lib/waf/](web/src/lib/waf/) | `aggregate` (correlation, action drift, per-rule detail), `chart` (bucketing), `format`, `constants`, `types` |
 | [web/src/lib/rules.ts](web/src/lib/rules.ts) | Access rule vocabulary (`describeRule`, ~20 rule types), `resolvePolicy`, decision tones |
@@ -170,12 +206,14 @@ Disconnect clears the store.
 |---|---|---|---|
 | P1 | **No git remote** — `git remote -v` is empty | Single copy on this machine; no backup, no PR flow, and nothing enforces `npm run check` before a deploy | `git remote add origin …`, push, then a GitHub Actions workflow running `npm run check` on PR and deploying on merge |
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules |
-| P2 | **Bound token lacks `Workers Scripts: Read`** | Workers Analytics lists only workers that had traffic in the window; idle ones are missing from the filter | Add the scope in the Cloudflare dashboard, then `wrangler secret put CF_API_TOKEN`. No code change needed |
+| P2 | **Bound token lacks `Workers Scripts: Read`** — re-verified 2026-09-05, `/api/workers/scripts` still returns 403 | Workers Analytics lists only workers that had traffic in the window; idle ones are missing from the filter | Add the scope in the Cloudflare dashboard, then `wrangler secret put CF_API_TOKEN`. No code change needed |
 | P2 | **AI Security telemetry is cached at the edge** — [queries.ts](src/lib/ai-sec/cf/queries.ts) writes `ZoneResult` to `caches.default`, keyed by a SHA-256 fingerprint of the token, while every other section is `no-store` | Not a leak (per-token namespacing is deliberate and commented), but detection rows including client IPs and payload ciphertext persist at the edge for the TTL | Decide whether that posture is wanted here, and write the decision down either way |
 | P3 | **`buildMitigations` doc/code mismatch** — its comment says a fully blocked critical signal sinks below an unblocked high one; the sort is severity-first, so it does not | Mitigation ranking may not match what the panel claims to recommend | Product decision: reword the comment, or make unmitigated volume outrank severity. `tests/ai-sec-catalog.test.ts` pins current behaviour |
 | P3 | **`graphBuckets` clamps out-of-window events into the edge buckets** rather than excluding them ([chart.ts](web/src/lib/waf/chart.ts)) | An event outside the requested window is silently counted in the first or last bucket. Low impact — events are already fetched for the same window | Exclude instead of clamp; `tests/waf-chart.test.ts` pins the current behaviour and will need updating |
+| P3 | **Connect screen does not list the scopes the newer sections need** — [ConnectPage](web/src/components/connect/ConnectPage.tsx) names seven optional permissions, none covering Workers Analytics, Workers AI, Gateway Usage, Access Usage or Cost & Usage | A BYOT operator sees those sections return nothing with no stated reason. Server mode is unaffected | Add them to `OPTIONAL_PERMISSIONS`, matching the table now in the README |
+| P3 | **Prompt decryption is unverified against a real payload** — the blob parse is proven against live ciphertext, but the HPKE open path has only ever run against blobs the test suite seals itself | A format difference in the real payloads would surface as "could not decrypt" and read as a wrong key | Decrypt one live event with the zone's payload-logging private key. If Cloudflare hands the key out as hex rather than base64, `matchedData.ts` needs to accept both |
+| P3 | **Gateway block classification has never seen a block** — every window queried returned `blocked: 0`, so `isBlockedVerdict` has only run against allowed traffic | A verdict string that names a block in some other form would be counted as allowed, understating the block rate | Check against a window containing a real Gateway block, or confirm the resolver/action vocabulary against Cloudflare's docs |
 | P3 | **[src/lib/waf-meta.ts](src/lib/waf-meta.ts) is only lightly tested** — `cdac5e0` added merge-order coverage, but the managed-`execute` and entrypoint paths are still uncovered | A regression in the uncovered paths still mislabels rules in WAF Analytics | Extend `tests/waf-meta.test.ts` with fixtures for managed rulesets and the custom firewall entrypoint |
-| P3 | Old `cf-zt-policy-dashboard` Worker likely still deployed | Stale duplicate serving old code | `npx wrangler delete --name cf-zt-policy-dashboard` |
 | P3 | 3 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 | P3 | [.claude/launch.json](.claude/launch.json) hardcodes the nvm `v24.16.0` binary path | Breaks when Node is upgraded | Default Node is now v24, so this can revert to plain `npx` |
 | P4 | `useHashSyncedState` adopts URL params on mount only. Editing the hash to a *different route* while the app is open (e.g. `#/waf?zone=A` → `#/cache?zone=B`) does not adopt the new param, because `App` never unmounts — the write-back then overwrites it | Hand-edited cross-route deep links lose their param. Fresh loads and in-app navigation are unaffected | Key the adoption on `route` as well as mount |
@@ -201,10 +239,12 @@ Disconnect clears the store.
 |---|---|---|---|
 | **CI/CD** — GitHub Actions: `npm run check` on PR, deploy on merge to main | Tests and lint exist but nothing enforces them | S | Git remote + `CLOUDFLARE_API_TOKEN` repo secret (deploy-scoped, separate from a browsing token) |
 | **Cache range comparison** — current vs previous equivalent window (hit-ratio and volume delta) | Turns a point-in-time number into a trend signal | M | — |
-| **Close the remaining unit-test gaps** — `chart.ts` and `useHashParams.ts` | Both are pure and still uncovered | S | — |
 | **Component / integration tests** | Current suite covers pure logic only; UI regressions rely on manual preview checks | M | Testing-library + jsdom setup |
+| **AI Gateway section** — `aiGatewayRequestsAdaptiveGroups`, `…ErrorsAdaptiveGroups`, `…CacheAdaptiveGroups`, `…SpendSessionsAdaptiveGroups` all exist on this account | Requests, cache hit rate, errors and spend. The only spend signal Cloudflare exposes directly, and Cost & Usage currently has to be priced by hand | M | — |
+| **Findings covers the newer sections** | Findings folds in Access, Groups, WAF and Cache only; AI detections, Workers error rates, Gateway blocks and Access login failures never reach the audit view | M | — |
+| **Lazy-load the HPKE bundle** | `hpke-js` costs ~130 KB on every page load for a feature used on one tab, by one role | S | — |
+| **Per-user Access and Gateway breakdowns** | `userUuid`, `email`, `deviceId` are available and deliberately unqueried | S | **A privacy decision, not a technical one** — and under a shared bound token those reads are attributable to nobody |
 | **Snapshot diff / audit trail** — capture policy snapshots, diff them (and diff the newest against live) | Biggest product differentiator; answers "what changed since the last review" | L | Nothing — **designed and ready to build** |
-| **Fix the CSV cell content** (P2 above) | The export is the deliverable in an audit; raw JSON defeats it | S | — |
 
 **Snapshot storage decision (2026-08-02):** client-side **IndexedDB**, not Worker KV. KV would
 put customer Access/WAF config at rest in our own account and would force every read to

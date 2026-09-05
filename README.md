@@ -8,11 +8,14 @@ Ops dashboard for Cloudflare: a single pane of glass for reviewing an account's 
 |---|---|---|---|
 | `#/access` | Access Applications | account | Apps and their policies, with include/require/exclude rules rendered as readable sentences; filterable/sortable table, per-app detail drawer |
 | `#/groups` | Access Groups | account | Reusable Access Groups with their rules, cross-referenced to the applications whose policies use them |
+| `#/access-usage` | Access Usage | account | Access login telemetry from `accessLoginRequestsAdaptiveGroups`: volume with a success/failure split, and top applications, identity providers and countries. Cloudflare caps this dataset at a 1-week window |
+| `#/gateway` | Gateway Usage | account | Zero Trust Gateway: DNS resolver queries and Gateway HTTP requests over time, split allowed/blocked, with top categories, policies, hosts and actions |
 | `#/waf` | WAF Analytics | account or zone | `firewallEventsAdaptive` telemetry correlated against ruleset metadata: KPIs, events-over-time, per-ruleset/rule tables, action-drift detection, per-rule drill-down |
+| `#/ai-security` | AI Security for Apps | account or zone | Prompt-injection, PII, unsafe-topic and custom-topic detections on LLM traffic: KPIs, detections over time, endpoint/country/session breakdowns, ranked mitigations, and a flagged-request table with per-row prompt decryption |
 | `#/cache` | Cache Rules | zone | Cache rules with last-match traffic attribution, hit-ratio health grade, insights, URL tester (client-side wirefilter evaluation) |
-| `#/access-usage` | Access Usage | account | Access login telemetry from `accessLoginRequestsAdaptiveGroups`: login volume with a success/failure split, and top applications, identity providers and countries. Aggregate only — per-user identity dimensions are deliberately not queried. Cloudflare caps this dataset at a 1-week window |
 | `#/workers` | Workers Analytics | account | Per-script invocation telemetry from `workersInvocationsAdaptive`: requests, errors, subrequests and CPU P50, as summary cards, a line/bar chart by worker, and a per-worker table with error rates |
-| `#/workers-ai` | Workers AI | account | Inference analytics from `aiInferenceAdaptiveGroups`: requests, neurons, input/output tokens, average latency and errors, charted over time with a per-model table plus request-source and error-code breakdowns |
+| `#/workers-ai` | Workers AI | account | Inference analytics from `aiInferenceAdaptiveGroups`: requests, neurons, input/output tokens, average latency and errors, with a per-model table plus request-source and error-code breakdowns |
+| `#/cost` | Cost & Usage | account | Billable units across Workers and Workers AI for the window, priced with rates you enter. No Cloudflare list prices ship with the app |
 | `#/findings` | Findings | account (+ loaded sections) | Severity-ranked audit view: publicly-reachable apps, apps with no policy, `bypass` decisions, unreferenced groups, WAF action drift, cache insights and health grade |
 
 Sections carry deep-linkable state, e.g. `#/waf?zone=<id>&lookback=1440&tab=rules` or `#/cache?zone=<id>&range=168`.
@@ -24,15 +27,37 @@ Findings always covers Access and Groups. WAF and Cache are zone-scoped and fetc
 ## Architecture
 
 ```
-src/index.ts              Hono worker: API proxy + static asset serving
-src/lib/waf-meta.ts       Ruleset metadata flattening (managed/custom, entrypoints)
-src/lib/cache-analysis.ts GraphQL analytics, last-match attribution, insights, grade
-web/                      Vite + React 19 + Tailwind 4 + TanStack Table SPA
-web/src/lib/expr.ts       Wirefilter expression evaluator (single source; the
-                          worker imports it for attribution, the client for the URL tester)
+src/index.ts                 Hono worker: every /api route, security headers, asset serving
+src/lib/auth.ts              Credential resolution: Access JWT verification, account/zone allowlist
+src/lib/waf-meta.ts          Ruleset metadata flattening (managed/custom, entrypoints)
+src/lib/cache-analysis.ts    GraphQL analytics, last-match attribution, insights, grade
+src/lib/access-usage.ts      Access login telemetry
+src/lib/gateway-usage.ts     Zero Trust Gateway DNS + HTTP telemetry
+src/lib/workers-analytics.ts Workers invocation metrics
+src/lib/workers-ai.ts        Workers AI inference metrics
+src/lib/ai-sec/              AI Security: zone fan-out, schema probing, domain aggregation
+web/                         Vite + React 19 + Tailwind 4 + TanStack Table SPA
+web/src/hooks/useTimeRange.ts   Shared analytics window, clamped per section
+web/src/components/chart/       Inline-SVG hover readout used by every chart
+web/src/features/ai-security/matchedData.ts
+                             HPKE decryption of logged prompts, browser-side only
+web/src/lib/expr.ts          Wirefilter expression evaluator (single source; the
+                             worker imports it for attribution, the client for the URL tester)
 ```
 
-By default the worker holds no credentials: the browser keeps the API token in `sessionStorage` and sends it per request as `Authorization: Bearer`; the worker forwards it to `api.cloudflare.com` within the same invocation. A deployment may instead bind a token and authenticate operators with Cloudflare Access — see [Deployment modes](#deployment-modes). Strict CSP (`'self'` only, no inline), security headers on every response (`run_worker_first`), `Cache-Control: no-store` on all `/api/*`.
+All time-windowed sections share one range picker in the top bar, stored in minutes and clamped
+per section to what its upstream dataset allows — Access Usage to 7 days, Cache to 24h/7d/30d,
+WAF to the worker's own bounds. The range is deep-linkable as `#/<route>?range=<preset>`.
+
+Charts are inline SVG rather than a charting library: the CSP allows scripts from `'self'` only,
+so a CDN-loaded chart library could not run here.
+
+Credentials resolve at one choke point, [src/lib/auth.ts](src/lib/auth.ts). In BYOT mode the
+browser keeps the API token in `sessionStorage` and sends it per request as `Authorization:
+Bearer`, and the worker forwards it to `api.cloudflare.com` within the same invocation, holding
+nothing. In server mode the worker uses its own bound `CF_API_TOKEN`, but only behind Cloudflare
+Access and only for allowlisted accounts — see [Deployment modes](#deployment-modes). **This
+deployment runs in server mode.** Strict CSP (`'self'` only, no inline), security headers on every response (`run_worker_first`), `Cache-Control: no-store` on all `/api/*`.
 
 See [PROGRESS.md](PROGRESS.md) for the full route table, hook inventory, storage keys, open issues, and roadmap.
 
@@ -50,10 +75,29 @@ See [PROGRESS.md](PROGRESS.md) for the full route table, hook inventory, storage
 | Scope | Unlocks |
 |---|---|
 | Access: Organizations, Identity Providers, and Groups | Group names inside policy rules; the Access Groups section |
-| Zone: Read | Zone picker for WAF Analytics and Cache Rules |
+| Zone: Read | Zone picker for WAF Analytics, Cache Rules and AI Security |
 | Account WAF: Read · Zone WAF: Read | Ruleset metadata in WAF Analytics |
 | Cache Rules: Read | Cache Rules section |
-| Zone Analytics: Read | Traffic and hit-ratio data in Cache Rules |
+| Zone Analytics: Read | Traffic and hit-ratio data in Cache Rules, and the request/detection telemetry behind AI Security |
+| Analytics: Read | Prompt injection, PII and topic detections in AI Security; Access Usage, Gateway Usage, Workers Analytics, Workers AI and Cost & Usage all read account-scoped GraphQL datasets behind this |
+| Workers Scripts: Read | Adds workers with no traffic in the window to the Workers Analytics filter. Without it that section still works, listing only workers that were invoked |
+
+### Reading logged prompts
+
+AI Security can show the prompt behind a flagged request, which is usually what decides whether a
+detection is a false positive. That is **not** an API token scope: Cloudflare encrypts logged
+payloads to a public key you generate when enabling payload logging, and the matching private key
+decrypts them.
+
+Paste that key into the Events tab. It is used in the browser only — never sent to the Worker,
+which only ever handles ciphertext, and never written to storage, so it has to be entered again
+each session. Decryption is per row and on demand, because reading a prompt means reading whatever
+the user typed, including the PII that flagged it.
+
+The format is Cloudflare's "matched data" blob: HPKE base mode over DHKEM(X25519, HKDF-SHA256)
+with AES-256-GCM, framed as `version || enc(32) || plaintext length (uint64 LE) || ciphertext`.
+It is not published anywhere we control, so it was derived from live payloads and is pinned by a
+round-trip test in [tests/matched-data.test.ts](tests/matched-data.test.ts).
 
 ## Deployment modes
 
@@ -82,8 +126,14 @@ wrangler secret put CF_API_TOKEN
   "CF_ACCESS_TEAM_DOMAIN": "<team>.cloudflareaccess.com",
   "CF_ACCESS_AUD": "<Access application AUD tag>",
   "ALLOWED_ACCOUNT_IDS": "<account id>[,<account id>]",
-  "ALLOWED_ZONE_IDS": "<zone id>[,<zone id>]"
+  "ALLOWED_ZONE_IDS": "<zone id>[,<zone id>]",
+  "AI_REQUIRES_BYOT": "0"
 }
+```
+
+```jsonc
+// wrangler.jsonc — reports the running version and deploy time in the sidebar footer
+"version_metadata": { "binding": "CF_VERSION_METADATA" }
 ```
 
 `CF_API_TOKEN` goes in a **secret**, never in `vars` — `vars` is plaintext in this file and in the
@@ -110,22 +160,16 @@ empty account allowlist means server mode reaches nothing.
 
 ### AI Security and the shared credential
 
-`/api/ai-security/analyze` opts out of server mode by default and requires a Bearer token even
-where server mode is enabled: its rows carry client IPs and encrypted request payloads, and
-reading them under a shared credential is exactly where collapsed attribution hurts most. Set
-`AI_REQUIRES_BYOT: "0"` in `vars` to let that section run under the bound token like the others.
+`/api/ai-security/analyze` can opt out of server mode and require a Bearer token even where
+server mode is enabled: its rows carry client IPs and encrypted request payloads, and reading them
+under a shared credential is where collapsed attribution hurts most. Set `AI_REQUIRES_BYOT` to
+`"1"` (or remove it) for that behaviour.
 
-## Development
-
-Requires **Node ≥ 22** — Wrangler 4 enforces this, and it is stricter than Vite 8's own `≥ 20.19`. With nvm: `nvm use 24`.
-
-```sh
-npm install
-npm run dev:worker   # wrangler dev on :8787 (API + built assets)
-npm run dev          # vite on :5173, proxies /api → :8787 (frontend iteration)
-```
-
-For a production-like run: `npm run build && npm run dev:worker` and open :8787.
+**This deployment sets `"0"`**, so AI Security runs under the bound token like every other
+section. That is deliberate: the UI carries no token in server mode, so requiring one would make
+the section unreachable, and the sensitive part — the prompt itself — is gated on holding the
+zone's payload-logging private key rather than on the API token. The Worker only ever handles
+ciphertext.
 
 ## Tests
 
@@ -134,12 +178,18 @@ network unless you ask it to.
 
 | Layer | Files | What it covers |
 |---|---|---|
-| Unit | `tests/{expr,rules,csv,findings,cache-analysis,waf-*,auth}.test.ts`, `tests/ai-sec-*.test.ts` | Pure logic: wirefilter evaluation, rule rendering, findings, CSV, WAF aggregation, Access JWT verification, and the AI Security domain layer (windows, bucketing, detection predicates, catalogs, mitigation ranking) |
+| Unit | `tests/{expr,rules,csv,findings,cache-analysis,waf-meta,waf-aggregate,waf-chart,hash-params,auth,chart-hover}.test.ts`, `tests/ai-sec-*.test.ts` | Pure logic: wirefilter evaluation, rule rendering, findings, CSV, WAF aggregation and bucketing, hash deep-link helpers, Access JWT verification, chart hover placement, and the AI Security domain layer including `buildDashboard` |
 | Integration | `tests/integration-ai-security.test.ts` | The AI route wired to the ported library, Cloudflare client and Cache API, with only the network mocked — including cache-key tenant isolation |
-| System | `tests/system-routes.test.ts` | Every route through the real app against one mocked Cloudflare, plus the cross-cutting header and `no-store` contract |
+| System | `tests/system-routes.test.ts`, `tests/{access-usage,gateway-usage,workers-analytics,workers-ai}.test.ts` | Every route through the real app against one mocked Cloudflare: response shapes, validation, upstream error mapping, and the cross-cutting header and `no-store` contract |
 | Compatibility | `tests/compat-upstream-shapes.test.ts` | Upstream drift the app does not control: pagination, partial-scope tokens, unknown detection categories, non-JSON responses, and the Workers globals Node lacks |
-| Security | `tests/security-boundaries.test.ts`, `tests/routes-auth.test.ts`, `tests/no-adhoc-auth.test.ts` | The adversarial half: credential confinement, allowlist evasion, input handling, and the guardrail that keeps credential resolution in one module |
+| Security | `tests/security-boundaries.test.ts`, `tests/routes-auth.test.ts`, `tests/no-adhoc-auth.test.ts`, `tests/matched-data.test.ts` | The adversarial half: credential confinement, allowlist evasion, input handling, the guardrail keeping credential resolution in one module, and the prompt-decryption boundaries — key never stored, never sent, never exported |
+| Regression | `tests/shell-layout.test.ts`, `tests/apps-export.test.ts`, `tests/error-boundary.test.ts` | Failures with no runtime error to catch them: the flex height chain that decides whether sections or the shell scroll, CSV exporting rendered text rather than raw JSON, and the error-boundary message formatter |
 | E2E | `tests/e2e-live.test.ts` | The deployed Worker through real Cloudflare Access with the bound token. **Opt-in** |
+
+Some suites assert against source text rather than behaviour — that a page has its own scroll
+container, that no module outside `src/lib/auth.ts` reads the `Authorization` header, that the
+decryption key never reaches storage. Those properties have no observable failure mode in a Node
+test environment, and reviewing for them by eye has already proved unreliable.
 
 The E2E suite needs an Access service token that the app's Access policy admits, read from the
 gitignored `.dev.vars` (or `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` in the environment):
