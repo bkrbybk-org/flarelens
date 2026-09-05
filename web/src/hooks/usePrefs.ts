@@ -15,6 +15,10 @@ export interface Prefs {
 	// Zone selection per zone-scoped feature ("" = account-wide for WAF, unselected for Cache)
 	wafZone: string;
 	cacheZone: string;
+	/** Zone scope for the AI Security section; empty means every zone the token can see. */
+	aiSecZone: string;
+	/** Sidebar collapsed to icons only. Persisted: it is a workspace preference, not view state. */
+	sidebarCollapsed: boolean;
 }
 
 const DEFAULT_PREFS: Prefs = {
@@ -26,6 +30,8 @@ const DEFAULT_PREFS: Prefs = {
 	columnOrder: [],
 	wafZone: "",
 	cacheZone: "",
+	aiSecZone: "",
+	sidebarCollapsed: false,
 };
 
 function readPrefs(): Prefs {
