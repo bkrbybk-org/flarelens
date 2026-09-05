@@ -15,5 +15,5 @@
 		"isolatedModules": true,
 		"verbatimModuleSyntax": true
 	},
-	"include": ["src/**/*.ts", "web/src/lib/expr.ts", "worker-configuration.d.ts"]
+	"include": ["src/**/*.ts", "web/src/lib/expr.ts", "web/src/lib/ai-sec/types.ts", "worker-configuration.d.ts"]
 }
