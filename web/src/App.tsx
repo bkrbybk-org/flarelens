@@ -192,7 +192,11 @@ export default function App() {
 				mobileOpen={mobileMenuOpen}
 				onMobileClose={() => setMobileMenuOpen(false)}
 			/>
-			<div className="flex min-w-0 flex-1 flex-col">
+			{/* min-h-0 is load-bearing: a flex item defaults to min-height:auto, so without it this
+			    column grows to fit its content instead of being bounded by the h-dvh shell. The
+			    page inside then never becomes the scroll container — the shell's overflow-hidden
+			    box scrolls instead, which drags the sidebar and top bar out of view. */}
+			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 				<Topbar
 					title={PAGE_TITLES[route]}
 					theme={prefs.theme}
@@ -235,7 +239,7 @@ export default function App() {
 					mode={session.mode}
 					onMobileMenu={() => setMobileMenuOpen(true)}
 				/>
-				<main className="min-h-0 min-w-0 flex-1">
+				<main className="min-h-0 min-w-0 flex-1 overflow-hidden">
 					{route === "access" && (
 						<Dashboard
 							apps={data.data?.apps || []}
