@@ -1,3 +1,4 @@
+import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 import type { TrendBucket } from "./types";
 
 // Same served/origin/bypass grouping as the analysis (cache-analysis.ts)
@@ -39,6 +40,15 @@ export function TrendChart({ buckets, rangeHours }: { buckets: TrendBucket[]; ra
 	const barWidth = Math.max(4, (width - padding * 2 - gap * (buckets.length - 1)) / Math.max(buckets.length, 1));
 	const innerHeight = height - padding * 2;
 
+	const { hover, hoverProps } = useChartHover({
+		count: buckets.length,
+		viewWidth: width,
+		viewHeight: height,
+		plotLeft: padding,
+		plotRight: padding + buckets.length * (barWidth + gap),
+		mode: "slot",
+	});
+
 	return (
 		<section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
 			<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -52,18 +62,16 @@ export function TrendChart({ buckets, rangeHours }: { buckets: TrendBucket[]; ra
 					))}
 				</div>
 			</div>
-			<svg className="h-52 w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Cache traffic trend">
+			<div className="relative">
+			<svg className="h-52 w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Cache traffic trend" {...hoverProps}>
 				<line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} className="stroke-zinc-300 dark:stroke-zinc-700" />
 				{buckets.map((bucket, i) => {
 					const g = grouped[i];
 					const total = g.served + g.origin + g.bypass;
 					const x = padding + i * (barWidth + gap);
-					const title = `${bucketLabel(bucket.t, daily)}: ${total.toLocaleString()} requests (${g.served.toLocaleString()} cached)`;
 					if (!total) {
 						return (
-							<rect key={bucket.t} x={x} y={height - padding - 1} width={barWidth} height="1" className="fill-zinc-200 dark:fill-zinc-800">
-								<title>{title}</title>
-							</rect>
+							<rect key={bucket.t} x={x} y={height - padding - 1} width={barWidth} height="1" className="fill-zinc-200 dark:fill-zinc-800" />
 						);
 					}
 					let y = height - padding;
@@ -75,9 +83,7 @@ export function TrendChart({ buckets, rangeHours }: { buckets: TrendBucket[]; ra
 								if (!segHeight) return null;
 								y -= segHeight;
 								return (
-									<rect key={group.key} x={x} y={y} width={barWidth} height={segHeight} fill={group.color} rx="1">
-										<title>{title}</title>
-									</rect>
+									<rect key={group.key} x={x} y={y} width={barWidth} height={segHeight} fill={group.color} rx="1" />
 								);
 							})}
 						</g>
@@ -93,7 +99,30 @@ export function TrendChart({ buckets, rangeHours }: { buckets: TrendBucket[]; ra
 						</text>
 					);
 				})}
+				{hover !== null && (
+					<HoverGuide
+						x={padding + hover.index * (barWidth + gap) + barWidth / 2}
+						top={padding / 2}
+						bottom={height - padding}
+					/>
+				)}
 			</svg>
+			<ChartTooltip
+				hover={hover}
+				header={hover === null ? "" : bucketLabel(buckets[hover.index].t, daily)}
+				rows={hover === null ? [] : GROUPS.map((group) => ({
+					label: group.label,
+					value: grouped[hover.index][group.key].toLocaleString(),
+					color: group.color,
+					muted: grouped[hover.index][group.key] === 0,
+				}))}
+				footer={
+					hover === null
+						? undefined
+						: `Total ${(grouped[hover.index].served + grouped[hover.index].origin + grouped[hover.index].bypass).toLocaleString()} requests`
+				}
+			/>
+			</div>
 		</section>
 	);
 }

@@ -57,6 +57,11 @@ export function formatPeakBucket(bucket: GraphBucket): string {
 	return `${formatBucketTime(bucket.start)}-${formatBucketTime(bucket.end)} / ${bucket.total.toLocaleString()} events`;
 }
 
+/** Just the time range of a bucket — the tooltip lists the per-action counts as its own rows. */
+export function graphBucketRange(bucket: GraphBucket): string {
+	return `${formatBucketTime(bucket.start)}-${formatBucketTime(bucket.end)}`;
+}
+
 export function graphBucketTitle(bucket: GraphBucket): string {
 	const counts = CHART_ACTIONS.map(
 		(action) => `${action.label}: ${(bucket.counts[action.key] || 0).toLocaleString()}`,

@@ -7,9 +7,10 @@ import {
 	HOURLY_GRAPH_THRESHOLD_MINUTES,
 	MAX_GRAPH_BUCKETS,
 } from "../../lib/waf/constants";
-import { eventsWithTime, formatPeakBucket, graphBuckets, graphBucketTitle, peakBucket } from "../../lib/waf/chart";
+import { eventsWithTime, formatPeakBucket, graphBuckets, graphBucketRange, peakBucket } from "../../lib/waf/chart";
 import { axisTimeLabel } from "../../lib/waf/format";
 import type { FirewallEvent } from "../../lib/waf/types";
+import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 
 interface EventGraphProps {
 	events: FirewallEvent[];
@@ -24,6 +25,25 @@ export function EventGraph({ events, window: win }: EventGraphProps) {
 	);
 
 	const withTime = eventsWithTime(events);
+
+	// All of this is computed before the empty-state return: useChartHover has to run on every
+	// render, so every value it depends on must exist even when there is nothing to draw.
+	const { width, height, padding, gap } = GRAPH_DIMENSIONS;
+	const spanMinutes = win?.minutes ?? 0;
+	const bucketCount =
+		spanMinutes <= HOURLY_GRAPH_THRESHOLD_MINUTES ? 24 : Math.min(MAX_GRAPH_BUCKETS, Math.ceil(spanMinutes / 1440));
+	const buckets = win && withTime.length ? graphBuckets(withTime, win.since, win.until, bucketCount, chartActions) : [];
+	const barWidth = Math.max(8, (width - padding * 2 - gap * (buckets.length - 1)) / Math.max(1, buckets.length));
+
+	const { hover, hoverProps } = useChartHover({
+		count: buckets.length,
+		viewWidth: width,
+		viewHeight: height,
+		plotLeft: padding,
+		plotRight: padding + buckets.length * (barWidth + gap),
+		mode: "slot",
+	});
+
 	if (!withTime.length || !win) {
 		return (
 			<section className={CARD_CLS}>
@@ -38,14 +58,8 @@ export function EventGraph({ events, window: win }: EventGraphProps) {
 		);
 	}
 
-	const spanMinutes = win.minutes;
-	const bucketCount =
-		spanMinutes <= HOURLY_GRAPH_THRESHOLD_MINUTES ? 24 : Math.min(MAX_GRAPH_BUCKETS, Math.ceil(spanMinutes / 1440));
-	const buckets = graphBuckets(withTime, win.since, win.until, bucketCount, chartActions);
 	const max = Math.max(1, ...buckets.map((bucket) => bucket.total));
 	const peak = peakBucket(buckets);
-	const { width, height, padding, gap } = GRAPH_DIMENSIONS;
-	const barWidth = Math.max(8, (width - padding * 2 - gap * (buckets.length - 1)) / buckets.length);
 	const innerHeight = height - padding * 2;
 	const activeActions = CHART_ACTIONS.filter((action) => chartActions[action.key]);
 
@@ -78,19 +92,17 @@ export function EventGraph({ events, window: win }: EventGraphProps) {
 					})}
 				</div>
 			</div>
-			<svg className="h-56 w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Firewall events over time">
+			<div className="relative">
+			<svg className="h-56 w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Firewall events over time" {...hoverProps}>
 				<line
 					x1={padding} y1={height - padding} x2={width - padding} y2={height - padding}
 					className="stroke-zinc-300 dark:stroke-zinc-700"
 				/>
 				{buckets.map((bucket, index) => {
 					const x = padding + index * (barWidth + gap);
-					const title = graphBucketTitle(bucket);
 					if (!bucket.total) {
 						return (
-							<rect key={index} x={x} y={height - padding - 1} width={barWidth} height="1" className="fill-zinc-200 dark:fill-zinc-800">
-								<title>{title}</title>
-							</rect>
+							<rect key={index} x={x} y={height - padding - 1} width={barWidth} height="1" className="fill-zinc-200 dark:fill-zinc-800" />
 						);
 					}
 					let y = height - padding;
@@ -101,9 +113,7 @@ export function EventGraph({ events, window: win }: EventGraphProps) {
 						if (!segHeight) continue;
 						y -= segHeight;
 						segments.push(
-							<rect key={action.key} x={x} y={y} width={barWidth} height={segHeight} fill={action.color} rx="1">
-								<title>{title}</title>
-							</rect>,
+							<rect key={action.key} x={x} y={y} width={barWidth} height={segHeight} fill={action.color} rx="1" />,
 						);
 					}
 					return <g key={index}>{segments}</g>;
@@ -121,7 +131,28 @@ export function EventGraph({ events, window: win }: EventGraphProps) {
 				<text x={padding} y="14" fontSize="11" className="fill-zinc-500 dark:fill-zinc-400">
 					Visible max bucket: {max.toLocaleString()}
 				</text>
+				{hover !== null && (
+					<HoverGuide
+						x={padding + hover.index * (barWidth + gap) + barWidth / 2}
+						top={padding}
+						bottom={height - padding}
+					/>
+				)}
 			</svg>
+			<ChartTooltip
+				hover={hover}
+				header={hover === null ? "" : graphBucketRange(buckets[hover.index])}
+				// Only the actions currently toggled on: the chart is not drawing the others, so
+				// listing them would describe bars that are not there.
+				rows={hover === null ? [] : activeActions.map((action) => ({
+					label: action.label,
+					value: (buckets[hover.index].counts[action.key] || 0).toLocaleString(),
+					color: action.color,
+					muted: !buckets[hover.index].counts[action.key],
+				}))}
+				footer={hover === null ? undefined : `Total ${buckets[hover.index].total.toLocaleString()} events`}
+			/>
+			</div>
 		</section>
 	);
 }
