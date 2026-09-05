@@ -239,7 +239,13 @@ export default function App() {
 					mode={session.mode}
 					onMobileMenu={() => setMobileMenuOpen(true)}
 				/>
-				<main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+				{/* `relative` is load-bearing. `overflow` does not create a containing block, so an
+				    absolutely positioned descendant with no positioned ancestor — every `sr-only`
+				    label, and icons inside inputs — anchors to the initial containing block instead
+				    of the scroller. Deep in a long page those sit thousands of pixels down, which
+				    stretches <html> and makes the whole document scrollable: the sidebar and top bar
+				    then slide away with the content. */}
+				<main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
 					{route === "access" && (
 						<Dashboard
 							apps={data.data?.apps || []}

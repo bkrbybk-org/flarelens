@@ -33,6 +33,15 @@ describe("app shell height chain", () => {
 		expect(main).toContain("overflow-hidden");
 	});
 
+	it("makes <main> a containing block for absolutely positioned descendants", () => {
+		// Measured, not theorised: without `relative`, sr-only labels and in-input icons anchor
+		// to the initial containing block rather than the scroller. On a long page that pushed
+		// <html> to 1444px against a 900px viewport, so the document scrolled and took the
+		// sidebar and top bar with it. `overflow` alone does not create a containing block.
+		const main = app.match(/<main className="[^"]*"/)?.[0] ?? "";
+		expect(main).toContain("relative");
+	});
+
 	it("gives every section a scroll container of its own", () => {
 		// Each page is the thing that scrolls; if one stopped doing this, its content would be
 		// clipped by <main> with no way to reach the rest.
