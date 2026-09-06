@@ -81,6 +81,32 @@ describe("policyReferencesGroup / groupUsedBy", () => {
 		expect(policyReferencesGroup(policy({}), "g1")).toBe(false);
 	});
 
+	it("finds a group referenced only through a reusable policy", () => {
+		// A reusable policy attached to an app arrives as a bare reference with no rules of its
+		// own. Matching that raw object finds nothing, so the group used to report as
+		// unreferenced — the direction that gets a live group deleted during an audit.
+		const groups = [{ id: "g1", name: "IT admins" }];
+		const apps = [{ id: "a1", name: "App One", policies: [{ id: "reusable-1" }] } as never];
+		const reusableMap = {
+			"reusable-1": { id: "reusable-1", name: "Shared", include: [{ group: { id: "g1" } }] },
+		};
+
+		expect(groupUsedBy(groups, apps, reusableMap).get("g1")).toEqual(["App One"]);
+		// Without the map the reference is invisible; kept explicit so the regression is obvious.
+		expect(groupUsedBy(groups, apps).get("g1")).toEqual([]);
+	});
+
+	it("does not report a group as unreferenced when only a reusable policy uses it", () => {
+		const groups = [{ id: "g1", name: "IT admins" }];
+		const apps = [{ id: "a1", name: "App One", policies: [{ id: "reusable-1" }] } as never];
+		const reusableMap = {
+			"reusable-1": { id: "reusable-1", include: [{ group: { id: "g1" } }] },
+		};
+
+		expect(groupsFindings(groups, apps, reusableMap)).toEqual([]);
+		expect(groupsFindings(groups, apps).map((f) => f.id)).toEqual(["groups:unreferenced:g1"]);
+	});
+
 	it("groupUsedBy maps referencing app names", () => {
 		const groups: CfGroup[] = [{ id: "g1", name: "Group 1" }];
 		const apps = [app({ policies: [policy({ include: [{ group: { id: "g1" } }] })] })];

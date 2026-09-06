@@ -265,6 +265,7 @@ export default function App() {
 							groups={data.data?.groups || []}
 							groupsError={data.data?.groups_error || false}
 							apps={data.data?.apps || []}
+							reusableMap={data.reusableMap}
 							loading={data.loading}
 							error={data.error}
 							progressPercent={data.progress.percent}

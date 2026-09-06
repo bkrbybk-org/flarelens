@@ -63,12 +63,28 @@ export function policyReferencesGroup(policy: CfPolicy, groupId: string): boolea
 }
 
 // group id → app names whose policies reference it
-export function groupUsedBy(groups: CfGroup[], apps: CfApp[]): Map<string, string[]> {
+/**
+ * Group id → names of the applications whose policies reference it.
+ *
+ * Policies are resolved through `reusableMap` first. A reusable policy attached to an app can
+ * come back as a bare reference with no include/exclude/require, and matching against that raw
+ * object finds nothing — so a group used only through a reusable policy would report as
+ * unreferenced. That is the dangerous direction to be wrong in: "unreferenced" is the signal an
+ * auditor uses to decide a group is dead and can be deleted.
+ *
+ * `reusableMap` is optional so a caller without it degrades to the old behaviour rather than
+ * throwing, but every caller in this app passes it.
+ */
+export function groupUsedBy(
+	groups: CfGroup[],
+	apps: CfApp[],
+	reusableMap: Record<string, CfPolicy> = {},
+): Map<string, string[]> {
 	const map = new Map<string, string[]>();
 	for (const group of groups) {
 		const names: string[] = [];
 		for (const app of apps) {
-			if (app.policies.some((p) => policyReferencesGroup(p, group.id))) {
+			if (app.policies.some((p) => policyReferencesGroup(resolvePolicy(p, reusableMap), group.id))) {
 				names.push(app.name || app.id);
 			}
 		}
@@ -135,8 +151,12 @@ export function accessFindings(apps: CfApp[], reusableMap: Record<string, CfPoli
 	return findings;
 }
 
-export function groupsFindings(groups: CfGroup[], apps: CfApp[]): Finding[] {
-	const usedBy = groupUsedBy(groups, apps);
+export function groupsFindings(
+	groups: CfGroup[],
+	apps: CfApp[],
+	reusableMap: Record<string, CfPolicy> = {},
+): Finding[] {
+	const usedBy = groupUsedBy(groups, apps, reusableMap);
 	const findings: Finding[] = [];
 	for (const group of groups) {
 		const refs = usedBy.get(group.id) || [];

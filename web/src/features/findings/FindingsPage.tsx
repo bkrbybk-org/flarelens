@@ -60,7 +60,7 @@ export function FindingsPage({ accountId, apps, groups, reusableMap, loading, er
 	const findings = useMemo(() => {
 		const all: Finding[] = [
 			...accessFindings(apps, reusableMap),
-			...groupsFindings(groups, apps),
+			...groupsFindings(groups, apps, reusableMap),
 		];
 		if (wafSnapshot) {
 			all.push(...wafFindings(aggregateRules(wafSnapshot.events, wafSnapshot.ruleMeta)));

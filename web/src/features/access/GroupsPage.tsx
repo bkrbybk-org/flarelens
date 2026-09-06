@@ -3,7 +3,7 @@ import { SearchIcon, UsersIcon } from "../../components/Icons";
 import { ProgressBar } from "../../components/ProgressBar";
 import { groupUsedBy } from "../../lib/findings";
 import { formatLocalDateTime, type RuleContext } from "../../lib/rules";
-import type { CfApp, CfGroup } from "../../types";
+import type { CfApp, CfGroup, CfPolicy } from "../../types";
 import { Tag } from "./PolicyChip";
 import { RuleList } from "./RuleList";
 
@@ -11,6 +11,8 @@ interface GroupsPageProps {
 	groups: CfGroup[];
 	groupsError: boolean;
 	apps: CfApp[];
+	/** Reusable policies by id, so a group used only through one is not reported as unreferenced. */
+	reusableMap: Record<string, CfPolicy>;
 	loading: boolean;
 	error: string | null;
 	progressPercent: number;
@@ -18,11 +20,11 @@ interface GroupsPageProps {
 	ctx: RuleContext;
 }
 
-export function GroupsPage({ groups, groupsError, apps, loading, error, progressPercent, progressRunning, ctx }: GroupsPageProps) {
+export function GroupsPage({ groups, groupsError, apps, reusableMap, loading, error, progressPercent, progressRunning, ctx }: GroupsPageProps) {
 	const [search, setSearch] = useState("");
 
 	// group id → app names whose policies reference it
-	const usedBy = useMemo(() => groupUsedBy(groups, apps), [groups, apps]);
+	const usedBy = useMemo(() => groupUsedBy(groups, apps, reusableMap), [groups, apps, reusableMap]);
 
 	const filtered = useMemo(() => {
 		const q = search.trim().toLowerCase();
