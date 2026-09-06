@@ -99,6 +99,11 @@ See [PROGRESS.md](PROGRESS.md) for the full route table, hook inventory, storage
 
 ### Reading logged prompts
 
+Enabling AI Security, labelling endpoints `cf-llm`, Log Mode vs Production Mode, and where the
+payload-logging key pair comes from are covered in
+[docs/ai-security-setup.md](docs/ai-security-setup.md).
+
+
 AI Security can show the prompt behind a flagged request, which is usually what decides whether a
 detection is a false positive. That is **not** an API token scope: Cloudflare encrypts logged
 payloads to a public key you generate when enabling payload logging, and the matching private key
