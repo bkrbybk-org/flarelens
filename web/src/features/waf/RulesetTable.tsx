@@ -313,7 +313,12 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 																			)}
 																		</div>
 																		<ShareBar share={row.original.total ? rule.total / row.original.total : 0} />
-																		<div className="flex flex-wrap gap-1"><ActionBadges actions={rule.actions} /></div>
+																		{/* The badge group needs a floor width: without one its width tracks the
+																		    label text ("Log 7" vs "Block 12"), which pushes the share bar left and
+																		    right by up to 18px, so the bars do not line up down the column. */}
+																		<div className="flex w-20 shrink-0 flex-wrap justify-end gap-1">
+																			<ActionBadges actions={rule.actions} />
+																		</div>
 																	</div>
 																);
 															})}
