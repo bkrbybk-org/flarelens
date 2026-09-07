@@ -63,6 +63,29 @@ const WANTED_FIELDS = [
 	"firewallForAiUnsafeTopicCategories",
 ] as const;
 
+/**
+ * Scalar-ish GraphQL kinds. Selecting an object field without a subselection makes the whole
+ * query invalid, so the all-fields sweep is restricted to types that need no subselection.
+ */
+const SELECTABLE_KINDS = new Set(["SCALAR", "ENUM"]);
+
+/**
+ * Cloudflare rejects a zone query selecting more than this many fields. The sweep can easily
+ * exceed it, so the extras are budgeted: curated fields keep their place and the remainder fill
+ * whatever is left.
+ */
+const MAX_QUERY_FIELDS = 70;
+
+const ROW_TYPE_FIELDS_QUERY = `
+query RowFields($name: String!) {
+  __type(name: $name) {
+    fields {
+      name
+      type { kind name ofType { kind name ofType { kind name } } }
+    }
+  }
+}`;
+
 const FIREWALL_FIELDS = [
 	"datetime",
 	"action",
@@ -75,6 +98,7 @@ const FIREWALL_FIELDS = [
 	"clientCountryName",
 	"clientIP",
 	"matchIndex",
+	"metadata",
 ] as const;
 
 export class RequestTraceError extends Error {
@@ -124,8 +148,39 @@ export interface RequestTraceResult {
 	 * it, while the request detail shows it perfectly well.
 	 */
 	unavailableFields: string[];
+	/** Extra row fields discovered by the schema sweep, beyond the curated groups. */
+	extraFields: string[];
+	/** Fields this zone is not entitled to, dropped so one of them cannot fail the whole query. */
+	droppedFields: string[];
 	/** Per-zone failures; a zone that errors does not fail the search. */
 	errors: { zone: string; message: string }[];
+}
+
+/**
+ * Every field on the row type that can be selected without a subselection.
+ *
+ * The curated list above is what gets laid out and labelled; this is what makes "and everything
+ * else Cloudflare has" true without hard-coding a field list that goes stale each time Cloudflare
+ * adds one. Object fields are excluded because selecting one bare invalidates the query.
+ */
+async function scalarFieldsOf(env: AiSecEnv, typeName: string): Promise<string[]> {
+	interface TypeRefNode { kind: string; name: string | null; ofType?: TypeRefNode | null }
+	const unwrapKind = (ref: TypeRefNode | null | undefined): string => {
+		let node = ref;
+		while (node && (node.kind === "NON_NULL" || node.kind === "LIST") && node.ofType) node = node.ofType;
+		return node?.kind ?? "";
+	};
+	try {
+		const data = await graphql<{ __type?: { fields?: { name: string; type: TypeRefNode }[] } }>(
+			env,
+			ROW_TYPE_FIELDS_QUERY,
+			{ name: typeName },
+		);
+		return (data.__type?.fields ?? []).filter((f) => SELECTABLE_KINDS.has(unwrapKind(f.type))).map((f) => f.name);
+	} catch {
+		// A failed sweep is not fatal: the curated selection still answers the question.
+		return [];
+	}
 }
 
 export async function traceRequest(
@@ -162,29 +217,64 @@ export async function traceRequest(
 
 	const rayField = caps.datasets.httpRequestsAdaptive?.fields.includes("rayName") ? "rayName" : "rayId";
 
+	// Everything else the row type exposes, so the page can show detail this code has never
+	// heard of rather than a fixed list that ages.
+	const httpTypeName = caps.datasets.httpRequestsAdaptive?.typeName;
+	const sweep = httpTypeName ? await scalarFieldsOf(env, httpTypeName) : [];
+	// Budget: the firewall selection, the ray field and a little headroom come off the top.
+	const budget = Math.max(0, MAX_QUERY_FIELDS - firewall.selected.length - 4 - http.selected.length);
+	const extraFields = sweep
+		.filter((field) => !http.selected.includes(field) && field !== rayField)
+		.slice(0, budget);
+	const requestSelection = [...http.selected, ...extraFields];
+
 	const errors: { zone: string; message: string }[] = [];
+	const droppedFields: string[] = [];
 	let found: { zone: { id: string; name: string }; request?: Record<string, unknown>; firewallEvents: Record<string, unknown>[] } | null = null;
+
+	/**
+	 * A field can exist in the schema and still be refused for a zone that is not entitled to it
+	 * — fraud detection fields do this — and one such field rejects the entire query. Cloudflare
+	 * names the offender, so it is dropped and the query retried rather than losing every swept
+	 * field to one of them.
+	 */
+	function offendingField(message: string): string | null {
+		const match = message.match(/does not have access to the field '([^']+)'/i);
+		return match ? match[1].toLowerCase() : null;
+	}
 
 	// Zones are searched in order and the search stops at the first hit: a Ray ID belongs to one
 	// request, so a second match would mean the id was reused, not that there is more to show.
 	for (const zone of zones) {
 		if (found) break;
-		const parts: string[] = [];
-		if (httpRayKey) {
-			parts.push(`request: httpRequestsAdaptive(
+
+		let selection = [...requestSelection];
+		let lastError = "";
+
+		// Bounded: each attempt removes exactly one refused field, and a zone that keeps
+		// refusing is reported rather than retried forever.
+		for (let attempt = 0; attempt < 12; attempt++) {
+			const parts: string[] = [];
+			if (httpRayKey) {
+				parts.push(`request: httpRequestsAdaptive(
 				filter: { ${httpRayKey}: $ray, datetime_geq: $since, datetime_leq: $until }
 				limit: 5
-			) { ${rayField} ${http.selected.join(" ")} }`);
-		}
-		if (firewallRayKey) {
-			parts.push(`firewall: firewallEventsAdaptive(
+			) { ${rayField} ${selection.join(" ")} }`);
+			}
+			if (firewallRayKey) {
+				// `metadata` is a key/value list: it carries matched_vars and, for payload-logging
+				// rules, the encrypted request body.
+				const firewallSelection = firewall.selected
+					.map((field) => (field === "metadata" ? "metadata { key value }" : field))
+					.join(" ");
+				parts.push(`firewall: firewallEventsAdaptive(
 				filter: { ${firewallRayKey}: $ray, datetime_geq: $since, datetime_leq: $until }
 				limit: 50
 				orderBy: [datetime_ASC]
-			) { ${firewall.selected.join(" ")} }`);
-		}
+			) { ${firewallSelection} }`);
+			}
 
-		const query = `
+			const query = `
 query RequestTrace($zoneTag: string!, $ray: string!, $since: Time!, $until: Time!) {
   viewer {
     zones(filter: { zoneTag: $zoneTag }) {
@@ -193,20 +283,41 @@ query RequestTrace($zoneTag: string!, $ray: string!, $since: Time!, $until: Time
   }
 }`;
 
-		try {
-			const data = await graphql<{
-				viewer?: { zones?: { request?: Record<string, unknown>[]; firewall?: Record<string, unknown>[] }[] };
-			}>(env, query, { zoneTag: zone.id, ray: options.rayId, since: window.since, until: window.until });
+			try {
+				const data = await graphql<{
+					viewer?: { zones?: { request?: Record<string, unknown>[]; firewall?: Record<string, unknown>[] }[] };
+				}>(env, query, { zoneTag: zone.id, ray: options.rayId, since: window.since, until: window.until });
 
-			const result = data.viewer?.zones?.[0];
-			const request = result?.request?.[0];
-			const firewallEvents = result?.firewall ?? [];
-			if (request || firewallEvents.length) {
-				found = { zone: { id: zone.id, name: zone.name }, request, firewallEvents };
+				const result = data.viewer?.zones?.[0];
+				const request = result?.request?.[0];
+				const firewallEvents = result?.firewall ?? [];
+				if (request || firewallEvents.length) {
+					found = { zone: { id: zone.id, name: zone.name }, request, firewallEvents };
+				}
+				lastError = "";
+				break;
+			} catch (err) {
+				lastError = err instanceof Error ? err.message : "Query failed";
+				// Cloudflare also enforces a field-count ceiling, and states it. Trim to what it
+				// asks for rather than giving up on the whole trace.
+				const ceiling = lastError.match(/can't be more than (\d+)/i);
+				if (ceiling) {
+					const limit = Math.max(10, Number(ceiling[1]) - firewall.selected.length - 4);
+					if (selection.length > limit) {
+						selection = selection.slice(0, limit);
+						continue;
+					}
+				}
+
+				const refused = offendingField(lastError);
+				const index = refused ? selection.findIndex((field) => field.toLowerCase() === refused) : -1;
+				if (index === -1) break;
+				if (!droppedFields.includes(selection[index])) droppedFields.push(selection[index]);
+				selection = selection.filter((_, i) => i !== index);
 			}
-		} catch (err) {
-			errors.push({ zone: zone.name, message: err instanceof Error ? err.message : "Query failed" });
 		}
+
+		if (lastError) errors.push({ zone: zone.name, message: lastError });
 	}
 
 	return {
@@ -217,6 +328,8 @@ query RequestTrace($zoneTag: string!, $ray: string!, $since: Time!, $until: Time
 		request: found?.request,
 		firewallEvents: found?.firewallEvents ?? [],
 		unavailableFields: http.missing,
+		extraFields,
+		droppedFields,
 		errors,
 	};
 }

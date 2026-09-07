@@ -31,6 +31,8 @@ const ROW_FIELDS: Record<string, string[]> = {
 		"clientRequestHTTPHost",
 		"clientRequestPath",
 		"edgeResponseStatus",
+		// Present in the schema but not entitled on every zone — the case the retry exists for.
+		"fraudAttack",
 	],
 	ZoneFirewallEventsAdaptive: ["datetime", "action", "source", "ruleId", "clientRequestHTTPHost", "clientRequestPath"],
 };
@@ -107,6 +109,65 @@ describe("normaliseRayId", () => {
 		expect(normaliseRayId(RAY.slice(0, 15))).toBeNull();
 		expect(normaliseRayId(`${RAY}ff`)).toBeNull();
 		expect(normaliseRayId(12345)).toBeNull();
+	});
+});
+
+describe("adapting to what a zone will actually answer", () => {
+	/** Cloudflare refuses a query naming a field the zone is not entitled to, by name. */
+	function refuseThenSucceed(refusals: string[]) {
+		let call = 0;
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input instanceof Request ? input.url : input);
+			const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+			if (url.includes("/graphql")) {
+				const parsed = JSON.parse(String(init?.body ?? "{}"));
+				const query = String(parsed.query ?? "");
+				if (query.includes("__type")) return json({ data: probeResponse(query, parsed.variables ?? {}) });
+				graphqlQueries.push(query);
+				const refusal = refusals[call];
+				if (refusal && query.includes(refusal)) {
+					call++;
+					return json({ errors: [{ message: `zone 'z' does not have access to the field '${refusal.toLowerCase()}' from the path` }] });
+				}
+				return json({ data: { viewer: { zones: [{ request: [{ rayName: RAY }] }] } } });
+			}
+			if (url.includes("/zones")) {
+				return json({ success: true, result: [{ id: ZONE_A, name: "example.com" }], result_info: { total_pages: 1 } });
+			}
+			return json({ success: true, result: [], result_info: { total_pages: 1 } });
+		}) as typeof fetch;
+	}
+
+	it("drops a field the zone is not entitled to and retries, rather than losing the trace", async () => {
+		// One unentitled field — fraud detection fields do this — used to reject the entire
+		// query, so a swept field nobody asked for cost the whole answer.
+		refuseThenSucceed(["fraudAttack"]);
+		const { result } = (await (await trace({ accountId: ACCOUNT, rayId: RAY })).json()) as {
+			result: { foundIn?: { name: string }; droppedFields: string[] };
+		};
+		expect(result.foundIn?.name).toBe("example.com");
+		expect(result.droppedFields).toContain("fraudAttack");
+	});
+
+	it("gives up on a zone rather than retrying forever", async () => {
+		// A refusal naming a field that is not in the selection cannot be acted on.
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input instanceof Request ? input.url : input);
+			const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+			if (url.includes("/graphql")) {
+				const parsed = JSON.parse(String(init?.body ?? "{}"));
+				if (String(parsed.query).includes("__type")) return json({ data: probeResponse(String(parsed.query), parsed.variables ?? {}) });
+				graphqlQueries.push(String(parsed.query));
+				return json({ errors: [{ message: "something else entirely" }] });
+			}
+			if (url.includes("/zones")) return json({ success: true, result: [{ id: ZONE_A, name: "example.com" }], result_info: { total_pages: 1 } });
+			return json({ success: true, result: [], result_info: { total_pages: 1 } });
+		}) as typeof fetch;
+		const { result } = (await (await trace({ accountId: ACCOUNT, rayId: RAY })).json()) as {
+			result: { errors: { message: string }[] };
+		};
+		expect(graphqlQueries.filter((q) => q.includes("RequestTrace"))).toHaveLength(1);
+		expect(result.errors[0].message).toContain("something else");
 	});
 });
 

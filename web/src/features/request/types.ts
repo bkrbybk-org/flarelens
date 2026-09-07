@@ -6,7 +6,25 @@ export interface RequestTraceResult {
 	request?: Record<string, unknown>;
 	firewallEvents: Record<string, unknown>[];
 	unavailableFields: string[];
+	extraFields: string[];
+	droppedFields: string[];
 	errors: { zone: string; message: string }[];
+}
+
+/** Metadata is a key/value list; these two carry the matched fields and the encrypted body. */
+export const METADATA_MATCHED_VARS = "matched_vars";
+export const METADATA_ENCRYPTED_BODY = "encrypted_matched_data";
+
+export function metadataValue(event: Record<string, unknown>, key: string): string | null {
+	const metadata = event.metadata;
+	if (!Array.isArray(metadata)) return null;
+	for (const entry of metadata) {
+		if (entry && typeof entry === "object" && (entry as { key?: string }).key === key) {
+			const value = (entry as { value?: unknown }).value;
+			return typeof value === "string" ? value : null;
+		}
+	}
+	return null;
 }
 
 /**
@@ -25,6 +43,8 @@ export const FIELD_GROUPS: { title: string; fields: [string, string][] }[] = [
 			["clientRequestQuery", "Query"],
 			["clientRequestScheme", "Scheme"],
 			["clientRequestHTTPProtocol", "Protocol"],
+			["clientRequestReferer", "Referer"],
+			["clientRequestBytes", "Request bytes"],
 		],
 	},
 	{
@@ -37,8 +57,10 @@ export const FIELD_GROUPS: { title: string; fields: [string, string][] }[] = [
 			["userAgent", "User agent"],
 			["clientRequestUserAgent", "User agent"],
 			["clientSSLProtocol", "TLS"],
-			["ja3Hash", "JA3"],
-			["ja4", "JA4"],
+			["clientSSLCipher", "Cipher"],
+			["clientDeviceType", "Device type"],
+			["ja3Hash", "JA3 fingerprint"],
+			["ja4", "JA4 fingerprint"],
 		],
 	},
 	{
@@ -50,6 +72,8 @@ export const FIELD_GROUPS: { title: string; fields: [string, string][] }[] = [
 			["securityRuleDescription", "Rule"],
 			["botScore", "Bot score"],
 			["botScoreSrcName", "Bot score source"],
+			["botManagementDecision", "Bot decision"],
+			["botTags", "Bot tags"],
 			["wafAttackScore", "WAF attack score"],
 			["wafSqliAttackScore", "WAF SQLi score"],
 			["wafXssAttackScore", "WAF XSS score"],
@@ -57,6 +81,10 @@ export const FIELD_GROUPS: { title: string; fields: [string, string][] }[] = [
 			["firewallForAiInjectionScore", "Prompt injection score"],
 			["firewallForAiPiiCategories", "PII categories"],
 			["firewallForAiUnsafeTopicCategories", "Unsafe topics"],
+			["contentScanNumObj", "Scanned objects"],
+			["contentScanNumMaliciousObj", "Malicious objects"],
+			["contentScanHasFailed", "Content scan failed"],
+			["apiGatewayMatchedEndpoint", "API Shield endpoint"],
 		],
 	},
 	{
@@ -91,7 +119,17 @@ export function formatValue(key: string, value: unknown): string {
  * A low prompt-injection score or a high bot score is the interesting case, so those get a tone.
  * Everything else renders plain — colour that means nothing is worse than none.
  */
+/**
+ * A WAF attack score runs 1–99 where **lower is more likely an attack**, the opposite of most
+ * scores on this page, so it gets its own threshold rather than sharing the bot-score rule.
+ */
 export function valueTone(key: string, value: unknown): string {
+	if (key.startsWith("waf") && key.endsWith("AttackScore") && typeof value === "number" && value > 0 && value < 40) {
+		return "text-red-600 dark:text-red-400";
+	}
+	if (key === "contentScanNumMaliciousObj" && typeof value === "number" && value > 0) {
+		return "text-red-600 dark:text-red-400";
+	}
 	if (key === "firewallForAiInjectionScore" && typeof value === "number" && value < 20) {
 		return "text-red-600 dark:text-red-400";
 	}

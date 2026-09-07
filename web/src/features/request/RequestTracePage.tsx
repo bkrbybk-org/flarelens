@@ -4,7 +4,15 @@ import { SearchIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
 import type { CfZone } from "../../types";
 import { useRequestTrace } from "./useRequestTrace";
-import { FIELD_GROUPS, formatValue, valueTone } from "./types";
+import {
+	FIELD_GROUPS,
+	METADATA_ENCRYPTED_BODY,
+	METADATA_MATCHED_VARS,
+	formatValue,
+	metadataValue,
+	valueTone,
+} from "./types";
+import { DecryptKeyPanel, PromptPayload } from "../ai-security/PromptPayload";
 
 const CARD = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
@@ -26,6 +34,11 @@ export function RequestTracePage({
 	const [rayInput, setRayInput] = useState("");
 	const [zoneId, setZoneId] = useState("");
 	const [minutes, setMinutes] = useState(1440);
+	/**
+	 * Payload-decryption key, in component state only — never stored, never sent to the Worker.
+	 * Same rule as the AI Security events table, and the same components enforce it.
+	 */
+	const [privateKey, setPrivateKey] = useState("");
 	const { result, loading, error, progress, load } = useRequestTrace(onAuthError);
 
 	function submit(event: FormEvent) {
@@ -162,6 +175,62 @@ export function RequestTracePage({
 							);
 						})}
 					</div>
+
+					{(() => {
+						const leftovers = Object.keys(request ?? {})
+							.filter((key) => !shown.has(key) && key !== "rayName" && key !== "rayId")
+							.filter((key) => {
+								const value = request?.[key];
+								return value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && !value.length);
+							})
+							.sort();
+						if (!leftovers.length) return null;
+						return (
+							<section className={`${CARD} mb-4`}>
+								<h3 className="mb-2 text-sm font-semibold">Other fields ({leftovers.length})</h3>
+								<p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
+									Everything else this zone's schema returned for the request. Swept from the schema rather than
+									listed in code, so a field Cloudflare adds later shows up here without a change.
+								</p>
+								<dl className="grid gap-x-3 gap-y-1 text-sm md:grid-cols-2">
+									{leftovers.map((key) => (
+										<div key={key} className="grid grid-cols-[minmax(0,12rem)_1fr] gap-x-3">
+											<dt className="truncate text-zinc-500 dark:text-zinc-400" title={key}>{key}</dt>
+											<dd className={`break-all font-mono text-xs ${valueTone(key, request?.[key])}`}>
+												{formatValue(key, request?.[key])}
+											</dd>
+										</div>
+									))}
+								</dl>
+							</section>
+						);
+					})()}
+
+					{result.firewallEvents.some((event) => metadataValue(event, METADATA_ENCRYPTED_BODY)) && (
+						<section className={`${CARD} mb-4`}>
+							<h3 className="mb-2 text-sm font-semibold">Request body</h3>
+							<p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+								A rule with payload logging captured this request's body. Cloudflare stores it encrypted to the
+								zone's public key; decryption happens in this browser and the key is never sent anywhere.
+							</p>
+							<DecryptKeyPanel privateKey={privateKey} onChange={setPrivateKey} />
+							{result.firewallEvents.map((event, index) => {
+								const ciphertext = metadataValue(event, METADATA_ENCRYPTED_BODY);
+								if (!ciphertext) return null;
+								const matched = metadataValue(event, METADATA_MATCHED_VARS);
+								return (
+									<div key={index} className="mb-3 last:mb-0">
+										{matched && (
+											<div className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
+												Matched fields: <span className="font-mono">{matched}</span>
+											</div>
+										)}
+										<PromptPayload ciphertext={ciphertext} privateKey={privateKey} />
+									</div>
+								);
+							})}
+						</section>
+					)}
 
 					<section className={CARD}>
 						<h3 className="mb-2 text-sm font-semibold">
