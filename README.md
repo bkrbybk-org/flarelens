@@ -96,8 +96,8 @@ See [PROGRESS.md](PROGRESS.md) for the full route table, hook inventory, storage
 | Cache Rules: Read | Cache Rules section |
 | Zone Analytics: Read | Traffic and hit-ratio data in Cache Rules, and the request/detection telemetry behind AI Security |
 | Analytics: Read | Prompt injection, PII and topic detections in AI Security; Access Usage, Gateway Usage, Workers Analytics, Workers AI and Cost & Usage all read account-scoped GraphQL datasets behind this |
-| Cloudflare Tunnel: Read | Tunnel names, status and ingress rules in the Tunnel Map. **Cloudflare returns an empty list rather than a 403 when this is missing**, so without it the page cannot tell an account with no tunnels from a token that cannot see them — it says so rather than showing a blank map |
-| Workers Scripts: Read | Adds workers with no traffic in the window to the Workers Analytics filter. Without it that section still works, listing only workers that were invoked |
+| Cloudflare Tunnel: Read | Tunnel names, status and ingress rules in the Tunnel Map, and the private network routes. **Cloudflare returns an empty list rather than a 403 when this is missing**, so without it the page cannot tell an account with no tunnels from a token that cannot see them — it says so rather than showing a blank map |
+| Workers Scripts: Read | Adds workers with no traffic in the window to the Workers Analytics filter, and lets the Tunnel Map identify an Access application served by a Worker on a custom domain instead of reporting it as having no route. Both degrade rather than fail without it |
 
 ### Reading logged prompts
 

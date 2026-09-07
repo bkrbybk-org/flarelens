@@ -93,6 +93,66 @@ describe("the chain", () => {
 	});
 });
 
+describe("origin kinds — not every app needs a tunnel", () => {
+	const withType = (type: string, host: string, extra: Record<string, unknown> = {}) => ({
+		id: `app-${type}-${host}`,
+		name: `${type} app`,
+		type,
+		destinations: [{ type: "public", uri: host }],
+		...extra,
+	});
+
+	it("treats Cloudflare-hosted application types as routed, not missing a tunnel", async () => {
+		// WARP, App Launcher and Browser Isolation are served by Cloudflare on the team domain.
+		// Flagging them as "no tunnel" would be noise on every account that uses them.
+		mockUpstream({
+			apps: [
+				withType("warp", "team.cloudflareaccess.com/warp"),
+				withType("app_launcher", "team.cloudflareaccess.com"),
+				withType("biso", "team.cloudflareaccess.com/browser"),
+			],
+			tunnels: [],
+		});
+		const { result } = (await (await call()).json()) as { result: { rows: { originKind: string; gap?: string }[] } };
+		expect(result.rows.map((r) => r.originKind)).toEqual(["cloudflare", "cloudflare", "cloudflare"]);
+		expect(result.rows.every((r) => !r.gap)).toBe(true);
+	});
+
+	it("recognises a workers.dev hostname as a Worker origin", async () => {
+		mockUpstream({ apps: [withType("self_hosted", "svc.example.workers.dev")], tunnels: [] });
+		const { result } = (await (await call()).json()) as { result: { rows: { originKind: string; service: string; gap?: string }[] } };
+		expect(result.rows[0].originKind).toBe("worker");
+		expect(result.rows[0].service).toBe("Cloudflare Worker");
+		expect(result.rows[0].gap).toBeUndefined();
+	});
+
+	it("lists private destinations that have no public hostname at all", async () => {
+		// These were dropped entirely before: no hostname meant no row, so three private_ip
+		// applications were simply invisible on the map.
+		mockUpstream({
+			apps: [{ id: "app-p", name: "OpenShift", type: "self_hosted", destinations: [{ type: "private", uri: "10.0.4.0/24" }] }],
+			tunnels: [],
+		});
+		const { result } = (await (await call()).json()) as { result: { rows: { hostname: string; originKind: string; gap?: string }[] } };
+		expect(result.rows).toHaveLength(1);
+		expect(result.rows[0].hostname).toBe("10.0.4.0/24");
+		expect(result.rows[0].originKind).toBe("private");
+		expect(result.rows[0].gap).toBeUndefined();
+	});
+
+	it("still flags a self-hosted public hostname with no route to an origin", async () => {
+		mockUpstream({ apps: [withType("self_hosted", "orphan.example.com")], tunnels: [] });
+		const { result } = (await (await call()).json()) as { result: { rows: { originKind: string; gap?: string }[] } };
+		expect(result.rows[0].originKind).toBe("unknown");
+		expect(result.rows[0].gap).toBe("no-tunnel");
+	});
+
+	it("marks a tunnel-served row as tunnel-routed", async () => {
+		const { result } = (await (await call()).json()) as { result: { rows: { hostname: string; originKind: string }[] } };
+		expect(result.rows.find((r) => r.hostname === "gitlab-ce.example.com")?.originKind).toBe("tunnel");
+	});
+});
+
 describe("gaps", () => {
 	it("flags a tunnel hostname with no Access application", async () => {
 		mockUpstream({

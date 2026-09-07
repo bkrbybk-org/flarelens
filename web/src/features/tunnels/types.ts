@@ -6,10 +6,13 @@ export interface TunnelSummary {
 	configError?: string;
 }
 
+export type OriginKind = "tunnel" | "worker" | "cloudflare" | "private" | "unknown";
+
 export interface MappingRow {
 	hostname: string;
 	path?: string;
 	service: string;
+	originKind: OriginKind;
 	tunnel?: { id: string; name: string; status: string };
 	app?: {
 		id: string;
@@ -38,7 +41,47 @@ export interface TunnelMapResult {
 /** Text for the CSV export and the search haystack — the chain as it reads on screen. */
 export function chainText(row: MappingRow): string {
 	const policies = row.app ? row.app.policies.map((p) => `${p.name} (${p.decision})`).join("; ") : "";
-	return [row.hostname, row.app?.name ?? "", policies, row.tunnel?.name ?? "", row.service].join(" ");
+	return [row.hostname, row.app?.name ?? "", row.app?.type ?? "", policies, row.tunnel?.name ?? "", row.service].join(" ");
+}
+
+/** Cloudflare's application type as an operator would say it. */
+export const APP_TYPE_LABELS: Record<string, string> = {
+	self_hosted: "Self-hosted",
+	private_ip: "Private IP",
+	saas: "SaaS",
+	ssh: "SSH",
+	rdp: "RDP",
+	vnc: "VNC",
+	warp: "WARP",
+	biso: "Browser isolation",
+	app_launcher: "App Launcher",
+	dash_sso: "Dashboard SSO",
+	bookmark: "Bookmark",
+	infrastructure: "Infrastructure",
+};
+
+export function appTypeLabel(type: string | undefined): string {
+	if (!type) return "—";
+	return APP_TYPE_LABELS[type] ?? type.replace(/_/g, " ");
+}
+
+/**
+ * How an origin kind should read. Only `unknown` is a finding: everything else is a destination
+ * that legitimately never involves a tunnel.
+ */
+export function originKindLabel(kind: OriginKind): string {
+	switch (kind) {
+		case "tunnel":
+			return "Tunnel";
+		case "worker":
+			return "Worker";
+		case "cloudflare":
+			return "Cloudflare";
+		case "private":
+			return "Private network";
+		default:
+			return "Unrouted";
+	}
 }
 
 export function statusTone(status: string): string {

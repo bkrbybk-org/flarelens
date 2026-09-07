@@ -82,6 +82,11 @@ interface CfIngressRule {
 	originRequest?: Record<string, unknown>;
 }
 
+interface CfWorkerDomain {
+	hostname?: string;
+	service?: string;
+}
+
 interface CfRoute {
 	network?: string;
 	tunnel_id?: string;
@@ -99,6 +104,16 @@ export interface TunnelSummary {
 	configError?: string;
 }
 
+/**
+ * Where a destination's traffic actually terminates.
+ *
+ * Not every Access application needs a tunnel, so "no ingress rule matched" is only a finding for
+ * the kinds that should have one. A WARP or App Launcher app is served by Cloudflare itself, a
+ * `.workers.dev` hostname is a Worker, and a private destination is reached over the private
+ * network rather than a public hostname.
+ */
+export type OriginKind = "tunnel" | "worker" | "cloudflare" | "private" | "unknown";
+
 export interface MappingRow {
 	/** Public hostname, or the catch-all marker for a tunnel's final rule. */
 	hostname: string;
@@ -106,6 +121,7 @@ export interface MappingRow {
 	/** Origin the tunnel forwards to, e.g. `https://172.16.12.101:443`. */
 	service: string;
 	tunnel?: { id: string; name: string; status: string };
+	originKind: OriginKind;
 	app?: {
 		id: string;
 		name: string;
@@ -114,8 +130,9 @@ export interface MappingRow {
 		policiesError: boolean;
 	};
 	/**
-	 * What is missing, if anything: a tunnel ingress nobody gates, or an Access app whose
-	 * hostname no tunnel serves. Both are worth seeing.
+	 * What is missing, if anything: a tunnel ingress nobody gates, or a destination that should
+	 * reach an origin and has no visible route to one. Kinds that legitimately have no tunnel
+	 * never raise the second.
 	 */
 	gap?: "no-access-app" | "no-tunnel";
 }
@@ -152,6 +169,11 @@ function hostMatches(ingressHost: string, appHost: string): boolean {
 	return false;
 }
 
+/** Application types Cloudflare serves itself; a tunnel would make no sense for them. */
+const CLOUDFLARE_HOSTED_TYPES = new Set(["warp", "app_launcher", "biso", "dash_sso"]);
+/** Types whose origin is a third party, not an origin of ours. */
+const EXTERNAL_TYPES = new Set(["saas", "bookmark"]);
+
 interface AccessApp {
 	id: string;
 	name?: string;
@@ -172,6 +194,32 @@ function appHostnames(app: AccessApp): string[] {
 	for (const domain of app.self_hosted_domains || []) hosts.add(normaliseHost(domain));
 	if (app.domain) hosts.add(normaliseHost(app.domain));
 	return [...hosts].filter(Boolean);
+}
+
+/** A `.workers.dev` hostname is served by a Worker; no tunnel is involved. */
+function isWorkersDev(host: string): boolean {
+	return host.endsWith(".workers.dev");
+}
+
+function originKindFor(app: AccessApp, host: string, workerDomains: Map<string, string>): OriginKind {
+	if (isWorkersDev(host) || workerDomains.has(host)) return "worker";
+	if (app.type && CLOUDFLARE_HOSTED_TYPES.has(app.type)) return "cloudflare";
+	if (app.type && EXTERNAL_TYPES.has(app.type)) return "cloudflare";
+	if (app.type === "private_ip") return "private";
+	return "unknown";
+}
+
+function originLabel(kind: OriginKind): string {
+	switch (kind) {
+		case "worker":
+			return "Cloudflare Worker";
+		case "cloudflare":
+			return "Cloudflare-hosted";
+		case "private":
+			return "private network";
+		default:
+			return "—";
+	}
 }
 
 export async function fetchTunnelMap(accountId: string, token: string, apps: AccessApp[]): Promise<TunnelMapResult> {
@@ -206,6 +254,15 @@ export async function fetchTunnelMap(accountId: string, token: string, apps: Acc
 
 	const routesRes = await restList<CfRoute>(`/accounts/${accountId}/teamnet/routes`, token);
 	if (routesRes.error) errors.push({ source: "private routes", message: routesRes.error });
+
+	// Worker custom domains, so an app served by a Worker on its own hostname is identified as
+	// such rather than reported as missing a tunnel. Best-effort: this needs Workers Scripts:
+	// Read, and without it those rows simply stay unclassified instead of the map failing.
+	const domainsRes = await restList<CfWorkerDomain>(`/accounts/${accountId}/workers/domains`, token);
+	const workerDomains = new Map<string, string>();
+	for (const domain of domainsRes.result) {
+		if (domain.hostname) workerDomains.set(normaliseHost(domain.hostname), domain.service || "Worker");
+	}
 
 	const summaries: TunnelSummary[] = configs.map(({ tunnel, error }) => ({
 		id: tunnel.id,
@@ -257,6 +314,7 @@ export async function fetchTunnelMap(accountId: string, token: string, apps: Acc
 				path: rule.path || undefined,
 				service: rule.service,
 				tunnel: { id: tunnel.id, name: tunnel.name || tunnel.id, status: tunnel.status || "unknown" },
+				originKind: "tunnel",
 				app: app ? toAppRef(app) : undefined,
 				// The catch-all rule is plumbing, not an exposed hostname, so it is not a gap.
 				gap: !app && host ? "no-access-app" : undefined,
@@ -264,14 +322,35 @@ export async function fetchTunnelMap(accountId: string, token: string, apps: Acc
 		}
 	}
 
-	// Access apps whose hostname no tunnel ingress serves. Not necessarily wrong — the origin may
-	// be public or behind something else — but it is the other half of the picture.
+	// Access apps no tunnel ingress serves. Whether that is a finding depends entirely on the
+	// application type: most of these are working exactly as intended.
 	for (const app of apps) {
 		if (matchedAppIds.has(app.id)) continue;
-		const hosts = appHostnames(app);
-		if (!hosts.length) continue;
-		for (const host of hosts) {
-			rows.push({ hostname: host, service: "—", app: toAppRef(app), gap: "no-tunnel" });
+		const appRef = toAppRef(app);
+
+		// Private destinations are reached over the private network, not a public hostname, so
+		// they are listed by destination rather than dropped for having no hostname.
+		for (const destination of app.destinations || []) {
+			if (destination.type === "public" || !destination.uri) continue;
+			rows.push({
+				hostname: destination.uri,
+				service: destination.uri,
+				originKind: "private",
+				app: appRef,
+			});
+		}
+
+		for (const host of appHostnames(app)) {
+			const kind = originKindFor(app, host, workerDomains);
+			const worker = workerDomains.get(host);
+			rows.push({
+				hostname: host,
+				service: worker ? `Worker: ${worker}` : originLabel(kind),
+				originKind: kind,
+				app: appRef,
+				// Only a destination that ought to reach an origin of ours counts as a gap.
+				gap: kind === "unknown" ? "no-tunnel" : undefined,
+			});
 		}
 	}
 

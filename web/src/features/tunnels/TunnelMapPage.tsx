@@ -4,7 +4,7 @@ import { RefreshIcon, SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { Session } from "../../hooks/useSession";
 import { useTunnelMap } from "./useTunnelMap";
-import { chainText, statusTone, type MappingRow } from "./types";
+import { appTypeLabel, chainText, originKindLabel, statusTone, type MappingRow, type OriginKind } from "./types";
 
 const CARD = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
@@ -31,12 +31,27 @@ function GapBadge({ gap }: { gap: MappingRow["gap"] }) {
 			title={
 				isUngated
 					? "This tunnel hostname has no Access application in front of it — the origin is reachable without an Access policy."
-					: "This Access application's hostname is not served by any tunnel ingress rule. Its origin may be public or reached another way."
+					: "A self-hosted destination with no tunnel ingress serving it. Its origin may be public, or reached some other way worth confirming."
 			}
 		>
-			{isUngated ? "No Access app" : "No tunnel"}
+			{isUngated ? "No Access app" : "No route found"}
 		</span>
 	);
+}
+
+/** Where the traffic terminates. Muted for the kinds that never involve a tunnel. */
+function KindChip({ kind }: { kind: OriginKind }) {
+	const tone =
+		kind === "tunnel"
+			? "bg-cf/15 text-cf"
+			: kind === "worker"
+				? "bg-violet-500/10 text-violet-600 dark:text-violet-400"
+				: kind === "private"
+					? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
+					: kind === "cloudflare"
+						? "bg-zinc-500/10 text-zinc-500 dark:text-zinc-400"
+						: "bg-amber-500/10 text-amber-700 dark:text-amber-400";
+	return <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${tone}`}>{originKindLabel(kind)}</span>;
 }
 
 /** One hop of the chain. Kept flat so a row reads left to right like the path a request takes. */
@@ -66,16 +81,19 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 
 	const ungated = (result?.rows ?? []).filter((r) => r.gap === "no-access-app").length;
 	const mapped = (result?.rows ?? []).filter((r) => !r.gap).length;
+	const unrouted = (result?.rows ?? []).filter((r) => r.gap === "no-tunnel").length;
 
 	function exportCsv() {
 		const csv = toCsv(rows, [
 			{ header: "hostname", value: (r) => r.hostname },
 			{ header: "path", value: (r) => r.path ?? "" },
 			{ header: "access_app", value: (r) => r.app?.name ?? "" },
+			{ header: "app_type", value: (r) => appTypeLabel(r.app?.type) },
 			{ header: "policies", value: (r) => (r.app ? r.app.policies.map((p) => `${p.name} (${p.decision})`).join(" | ") : "") },
 			{ header: "tunnel", value: (r) => r.tunnel?.name ?? "" },
 			{ header: "tunnel_status", value: (r) => r.tunnel?.status ?? "" },
 			{ header: "origin", value: (r) => r.service },
+			{ header: "origin_kind", value: (r) => originKindLabel(r.originKind) },
 			{ header: "gap", value: (r) => r.gap ?? "" },
 		]);
 		downloadCsv(`tunnel-map-${new Date().toISOString().slice(0, 10)}.csv`, csv);
@@ -161,13 +179,16 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 					<div className="mt-0.5 text-xs text-zinc-400">tunnel ingress with no Access app</div>
 				</div>
 				<div className={CARD}>
-					<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Private routes</div>
-					<div className="mt-1 text-2xl font-semibold tabular-nums">{result?.privateRoutes.length ?? 0}</div>
+					<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">No route found</div>
+					<div className={`mt-1 text-2xl font-semibold tabular-nums ${unrouted ? "text-amber-700 dark:text-amber-400" : ""}`}>
+						{unrouted}
+					</div>
+					<div className="mt-0.5 text-xs text-zinc-400">self-hosted, no tunnel ingress</div>
 				</div>
 			</div>
 
 			<section className={`${CARD} mb-4`}>
-				<h2 className="mb-3 text-sm font-semibold">Hostname → policy → tunnel → origin</h2>
+				<h2 className="mb-3 text-sm font-semibold">Destination → application → route → origin</h2>
 				{rows.length === 0 ? (
 					<p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">
 						{loading ? "Loading…" : "Nothing to show for this search."}
@@ -188,6 +209,9 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 										{row.app ? (
 											<span className="flex flex-wrap items-center gap-1">
 												<span className="truncate" title={row.app.name}>{row.app.name}</span>
+												<span className="rounded bg-zinc-500/10 px-1.5 py-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+													{appTypeLabel(row.app.type)}
+												</span>
 												{row.app.policiesError ? (
 													<span className="text-xs text-amber-600 dark:text-amber-400">policies unavailable</span>
 												) : row.app.policies.length ? (
@@ -211,7 +235,10 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 										)}
 									</Hop>
 									<Hop label="Origin">
-										<span className="font-mono text-xs">{row.service}</span>
+										<span className="flex flex-wrap items-center gap-1.5">
+											<span className="truncate font-mono text-xs" title={row.service}>{row.service}</span>
+											<KindChip kind={row.originKind} />
+										</span>
 									</Hop>
 								</div>
 								{row.gap && (
