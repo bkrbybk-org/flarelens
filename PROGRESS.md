@@ -2,14 +2,14 @@
 
 Status snapshot, last reviewed **2026-09-05** (second pass, against a full read of the tree) against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
 
-**TL;DR** — Eleven sections, 457 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
-Running version `a6bb0120`, deployed 2026-09-05 13:21 UTC.
+**TL;DR** — Thirteen sections, 485 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
+Running version `c065d631`, deployed 2026-09-07 16:31 UTC.
 
 ---
 
 ## Sections
 
-Eleven routes, grouped in the sidebar by Cloudflare product area:
+Thirteen routes, grouped in the sidebar by Cloudflare product area:
 
 | Group | Routes |
 |---|---|
@@ -97,6 +97,8 @@ documents, so no caller text reaches a query.
 | [src/lib/auth.ts](src/lib/auth.ts) | Credential resolution for every route: Access JWT verification against the team JWKS, BYOT-wins precedence, account/zone allowlist |
 | [src/lib/access-usage.ts](src/lib/access-usage.ts) | Access login telemetry; folds success/failure rows and resolves app/IdP uuids to names |
 | [src/lib/gateway-usage.ts](src/lib/gateway-usage.ts) | Gateway DNS + HTTP telemetry; conservative block classification, multi-value category handling |
+| [src/lib/access-tunnels.ts](src/lib/access-tunnels.ts) | Tunnel Map: joins Access apps, tunnel ingress and private routes, and classifies each destination's origin kind |
+| [src/lib/request-trace.ts](src/lib/request-trace.ts) | Ray ID forensics: schema-swept field selection, adaptive retry around per-zone entitlements and Cloudflare's field ceiling |
 | [src/lib/workers-analytics.ts](src/lib/workers-analytics.ts) | Workers invocation metrics; script list degrades when the scope is absent |
 | [src/lib/workers-ai.ts](src/lib/workers-ai.ts) | Workers AI inference metrics; folds rows split by `errorCode` |
 | [src/lib/ai-sec/](src/lib/ai-sec/) | AI Security: zone fan-out, schema-capability probing, per-token edge caching, and the `buildDashboard` aggregation |
@@ -196,6 +198,13 @@ Disconnect clears the store.
 - `9a747ea` Docs brought back in line with the shipped app
 - `8c2f04d` Fixed cross-account leakage in the new cross-page snapshot store — see below
 
+**Sections added**
+- `fa17935` `767b858` Tunnel Map — Access app → tunnel → origin, with both gaps surfaced (a tunnel ingress nobody gates; a destination with no route). Classifies by application type, because WARP, App Launcher, Browser Isolation, Worker and private destinations legitimately have no tunnel and were all being flagged.
+- `bb4efac` `22c4db3` Request Trace — Ray ID forensics across zones. Field selection is swept from the schema rather than hard-coded, with adaptive retry around per-zone entitlements and Cloudflare's 70-field ceiling. Where a payload-logging rule captured the body, it is decrypted in the browser with the AI Security key panel.
+
+**Incidents**
+- 2026-09-07: **server mode broke for every gated route.** The Access application was recreated, which changed its AUD, so JWT verification failed audience check and the SPA fell back to asking for a token. Found while testing an unrelated route — the control route failed the same way, which ruled out the new code. Fixed by reading the live AUD from the login redirect and updating `CF_ACCESS_AUD`. See the constraints section in [README.md](README.md).
+
 **Layout**
 - `51bde1a` `min-h-0` on the shell column — a flex item defaults to `min-height: auto`, so the column grew to fit its content instead of the viewport and no section could become its own scroll container. Real bug, but not the one being chased.
 - `1ddc364` `relative` on `<main>` — the actual cause of the shell scrolling. `overflow` does **not** create a containing block, so every `sr-only` label and every icon absolutely positioned inside an input anchored to the initial containing block rather than the scroller. Deep in a long page they sit past the fold: the `sr-only` span for the events-table expander landed at 1444px against a 900px viewport, stretching `<html>` until the document itself scrolled — taking the sidebar and top bar with it. Measured before/after in the running app: `html.scrollHeight` 1444 → 900, `documentScrolls` true → false, page keeps its own 2796px scroll.
@@ -212,10 +221,11 @@ Disconnect clears the store.
 |---|---|---|---|
 | P1 | **No git remote** — `git remote -v` is empty | Single copy on this machine; no backup, no PR flow, and nothing enforces `npm run check` before a deploy | `git remote add origin …`, push, then a GitHub Actions workflow running `npm run check` on PR and deploying on merge |
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules |
-| P2 | **Bound token lacks `Workers Scripts: Read`** — re-verified 2026-09-05, `/api/workers/scripts` still returns 403 | Workers Analytics lists only workers that had traffic in the window; idle ones are missing from the filter | Add the scope in the Cloudflare dashboard, then `wrangler secret put CF_API_TOKEN`. No code change needed |
+| P2 | **Bound token lacks `Workers Scripts: Read`** — re-verified 2026-09-08, `/api/workers/scripts` still returns 403 | Two sections are affected: Workers Analytics lists only workers that had traffic in the window, and the Tunnel Map cannot identify an Access app served by a Worker on a custom domain, so ten of them read as "no route found" rather than "Worker" | Add the scope in the Cloudflare dashboard, then `wrangler secret put CF_API_TOKEN`. No code change needed |
 | P2 | **AI Security telemetry is cached at the edge** — [queries.ts](src/lib/ai-sec/cf/queries.ts) writes `ZoneResult` to `caches.default`, keyed by a SHA-256 fingerprint of the token, while every other section is `no-store` | Not a leak (per-token namespacing is deliberate and commented), but detection rows including client IPs and payload ciphertext persist at the edge for the TTL | Decide whether that posture is wanted here, and write the decision down either way |
 | P3 | **`buildMitigations` doc/code mismatch** — its comment says a fully blocked critical signal sinks below an unblocked high one; the sort is severity-first, so it does not | Mitigation ranking may not match what the panel claims to recommend | Product decision: reword the comment, or make unmitigated volume outrank severity. `tests/ai-sec-catalog.test.ts` pins current behaviour |
 | P3 | **`graphBuckets` clamps out-of-window events into the edge buckets** rather than excluding them ([chart.ts](web/src/lib/waf/chart.ts)) | An event outside the requested window is silently counted in the first or last bucket. Low impact — events are already fetched for the same window | Exclude instead of clamp; `tests/waf-chart.test.ts` pins the current behaviour and will need updating |
+| — | **Account posture, not an app defect: seven tunnel hostnames have no Access application in front of them** — `app-alpha`, `nexus`, `app-delta` (Tunnel A), `app-bravo`, `private` (Tunnel B), `app-echo`, `app-charlie` | Those origins are reachable without an Access policy. `app-alpha` is deliberately vulnerable software; `app-bravo` exposes RDP | Surfaced by the Tunnel Map. Add Access applications, or confirm each is intentionally public |
 | P3 | **Connect screen does not list the scopes the newer sections need** — [ConnectPage](web/src/components/connect/ConnectPage.tsx) names seven optional permissions, none covering Workers Analytics, Workers AI, Gateway Usage, Access Usage or Cost & Usage | A BYOT operator sees those sections return nothing with no stated reason. Server mode is unaffected | Add them to `OPTIONAL_PERMISSIONS`, matching the table now in the README |
 | P3 | **Three things the standalone `ai-sec-dashboard` had that this app does not** — a live schema-probe readout (which detection fields resolve, so a hidden KPI has a stated reason), a custom absolute time range, and bar-to-events drill-down | Operators lose "why is this KPI missing?" and per-bar navigation; the underlying data is already fetched | Schema readout is the cheap one: `getSchemaCaps` already computes it, nothing renders it. Setup knowledge is captured in [docs/ai-security-setup.md](docs/ai-security-setup.md) |
 | P3 | **Prompt decryption is unverified against a real payload** — the blob parse is proven against live ciphertext, but the HPKE open path has only ever run against blobs the test suite seals itself | A format difference in the real payloads would surface as "could not decrypt" and read as a wrong key | Decrypt one live event with the zone's payload-logging private key. If Cloudflare hands the key out as hex rather than base64, `matchedData.ts` needs to accept both |
@@ -248,7 +258,7 @@ Disconnect clears the store.
 | **Cache range comparison** — current vs previous equivalent window (hit-ratio and volume delta) | Turns a point-in-time number into a trend signal | M | — |
 | **Component / integration tests** | Current suite covers pure logic only; UI regressions rely on manual preview checks | M | Testing-library + jsdom setup |
 | **AI Gateway section** — `aiGatewayRequestsAdaptiveGroups`, `…ErrorsAdaptiveGroups`, `…CacheAdaptiveGroups`, `…SpendSessionsAdaptiveGroups` all exist on this account | Requests, cache hit rate, errors and spend. The only spend signal Cloudflare exposes directly, and Cost & Usage currently has to be priced by hand | M | — |
-| **Findings covers the newer sections** | Findings folds in Access, Groups, WAF and Cache only; AI detections, Workers error rates, Gateway blocks and Access login failures never reach the audit view | M | — |
+| **Findings covers the newer sections** | Findings folds in Access, Groups, WAF and Cache only. Everything since — AI detections, Workers error rates, Gateway blocks, Access login failures, and most pointedly the Tunnel Map's ungated hostnames — never reaches the audit view, though an ungated origin is exactly what a Findings entry is for | M | — |
 | **Lazy-load the HPKE bundle** | `hpke-js` costs ~130 KB on every page load for a feature used on one tab, by one role | S | — |
 | **Per-user Access and Gateway breakdowns** | `userUuid`, `email`, `deviceId` are available and deliberately unqueried | S | **A privacy decision, not a technical one** — and under a shared bound token those reads are attributable to nobody |
 | **Snapshot diff / audit trail** — capture policy snapshots, diff them (and diff the newest against live) | Biggest product differentiator; answers "what changed since the last review" | L | Nothing — **designed and ready to build** |

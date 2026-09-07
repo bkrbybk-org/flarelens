@@ -194,6 +194,40 @@ the section unreachable, and the sensitive part — the prompt itself — is gat
 zone's payload-logging private key rather than on the API token. The Worker only ever handles
 ciphertext.
 
+## Cloudflare API constraints worth knowing
+
+Behaviour of the upstream API that is not obvious, cost real debugging time, and is not
+documented anywhere we control. Each is handled in code; this is why the handling exists.
+
+**An empty list can mean "not permitted".** `/accounts/{id}/cfd_tunnel` answers a token without
+**Cloudflare Tunnel: Read** with `200 success:true total_count:0`, not `403`. An empty tunnel map
+is therefore ambiguous, and the Tunnel Map says so rather than rendering a blank table that reads
+as a clean bill of health.
+
+**A zone query may select at most 70 fields.** Exceeding it fails the whole query with
+`number of fields can't be more than 70`. Request Trace budgets its schema sweep against that
+ceiling, and parses the number out of the error to trim if the ceiling ever changes.
+
+**A field can exist in the schema and still be refused for a zone.** Fraud detection fields
+(`fraudAttack`, `fraudUserId`, `fraudEmailRisk`, `fraudEventType`) introspect fine and then fail
+with `zone '…' does not have access to the field 'fraudattack'`, rejecting the entire query.
+Cloudflare names the offender, so Request Trace drops it and retries rather than losing every
+swept field to one of them.
+
+**Recreating the Access application changes its AUD**, and server mode stops working the moment
+it does: every gated route 401s and the SPA falls back to asking for a token. That happened on
+2026-09-07. The live value is readable from the login redirect on the protected hostname:
+
+```bash
+curl -sS -o /dev/null -w "%{redirect_url}\n" https://<host>/health
+```
+
+The `kid` query parameter is the AUD, and the `meta` JWT's payload carries it too. Update
+`CF_ACCESS_AUD` in [wrangler.jsonc](wrangler.jsonc) and redeploy.
+
+Pinning the AUD in config rather than resolving it at runtime is deliberate: a swapped Access
+application should stop the app, not be trusted silently.
+
 ## Tests
 
 `npm test` runs everything except the live E2E suite, which is opt-in. No test touches the
