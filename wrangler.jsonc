@@ -25,7 +25,7 @@
   // redirect for flarelens.example.com.
   "vars": {
     "CF_ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
-    "CF_ACCESS_AUD": "dd10a468df66d2840d11177cac49d0416897f8c34e55d61daa53205b15ca05b2",
+    "CF_ACCESS_AUD": "0000000000000000000000000000000000000000000000000000000000000000",
     "ALLOWED_ACCOUNT_IDS": "11111111111111111111111111111111",
     // Zone-only routes (/api/cache/analyze) carry no account id, so without this list they
     // would either run ungated or refuse outright. These are the four zones on the allowlisted

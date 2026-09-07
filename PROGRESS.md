@@ -14,7 +14,7 @@ Eleven routes, grouped in the sidebar by Cloudflare product area:
 | Group | Routes |
 |---|---|
 | Zero Trust | `#/access`, `#/groups`, `#/access-usage`, `#/tunnels`, `#/gateway` |
-| Security | `#/waf`, `#/ai-security` |
+| Security | `#/waf`, `#/ai-security`, `#/request` |
 | Performance | `#/cache` |
 | Developer Platform | `#/workers`, `#/workers-ai`, `#/cost` |
 | Audit | `#/findings` |
@@ -70,6 +70,7 @@ of the calling token — see the P2 entry below.
 | `GET /api/config` | — | SPA bootstrap: credential mode, allowlisted accounts, running version. Answers `byot` rather than 401 when the Access gate does not pass, so an unauthenticated caller learns nothing about the deployment |
 | `POST /api/ai-security/analyze` | account or zone | AI Security (one fan-out builds every panel) |
 | `POST /api/access/usage` | account | Access Usage. Upstream caps this dataset at 1 week |
+| `POST /api/request/trace` | account or zone | Request Trace — Ray ID lookup across zones, schema-driven field selection |
 | `GET /api/access/tunnels` | account | Tunnel Map — joins Access apps, their policies (reusable ones resolved), tunnel ingress rules and private routes |
 | `POST /api/gateway/usage` | account | Gateway Usage (DNS resolver + Gateway HTTP) |
 | `GET /api/workers/scripts` | account | Workers Analytics filter — needs `Workers Scripts: Read`, degrades if absent |

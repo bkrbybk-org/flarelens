@@ -12,6 +12,7 @@ import { AccessUsagePage } from "./features/access-usage/AccessUsagePage";
 import { WorkersAiPage } from "./features/workers-ai/WorkersAiPage";
 import { GatewayPage } from "./features/gateway/GatewayPage";
 import { TunnelMapPage } from "./features/tunnels/TunnelMapPage";
+import { RequestTracePage } from "./features/request/RequestTracePage";
 import { CostPage } from "./features/cost/CostPage";
 import { AiSecurityPage } from "./features/ai-security/AiSecurityPage";
 import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
@@ -35,6 +36,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	workers: "Workers Analytics",
 	"access-usage": "Access Usage",
 	"workers-ai": "Workers AI",
+	request: "Request Trace",
 	tunnels: "Tunnel Map",
 	gateway: "Gateway Usage",
 	cost: "Cost & Usage",
@@ -111,7 +113,7 @@ export default function App() {
 	// Zone list is only needed by zone-scoped features; fetch on first visit
 	const ensureZones = zones.ensureLoaded;
 	useEffect(() => {
-		if (sessionAccountId && (route === "waf" || route === "cache" || route === "ai-security")) {
+		if (sessionAccountId && (route === "waf" || route === "cache" || route === "ai-security" || route === "request")) {
 			ensureZones(sessionToken || "", sessionAccountId);
 		}
 	}, [route, sessionToken, sessionAccountId, ensureZones]);
@@ -283,6 +285,7 @@ export default function App() {
 					{route === "workers" && <WorkersPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "access-usage" && <AccessUsagePage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "workers-ai" && <WorkersAiPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
+					{route === "request" && <RequestTracePage session={session} zones={zones.zones} onAuthError={handleDisconnect} />}
 					{route === "tunnels" && <TunnelMapPage session={session} onAuthError={handleDisconnect} />}
 					{route === "gateway" && <GatewayPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "cost" && (
