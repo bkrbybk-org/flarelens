@@ -97,3 +97,7 @@ export const ChartIcon = (p: IconProps) => (
 export const PanelLeftIcon = (p: IconProps) => (
 	<svg {...base(p)}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></svg>
 );
+
+export const ShareIcon = (p: IconProps) => (
+	<svg {...base(p)}><circle cx="6" cy="12" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><path d="M8.6 10.6 15.4 7.4M8.6 13.4l6.8 3.2" /></svg>
+);

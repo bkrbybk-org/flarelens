@@ -11,6 +11,7 @@ import { WorkersPage } from "./features/workers/WorkersPage";
 import { AccessUsagePage } from "./features/access-usage/AccessUsagePage";
 import { WorkersAiPage } from "./features/workers-ai/WorkersAiPage";
 import { GatewayPage } from "./features/gateway/GatewayPage";
+import { TunnelMapPage } from "./features/tunnels/TunnelMapPage";
 import { CostPage } from "./features/cost/CostPage";
 import { AiSecurityPage } from "./features/ai-security/AiSecurityPage";
 import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
@@ -34,6 +35,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	workers: "Workers Analytics",
 	"access-usage": "Access Usage",
 	"workers-ai": "Workers AI",
+	tunnels: "Tunnel Map",
 	gateway: "Gateway Usage",
 	cost: "Cost & Usage",
 	findings: "Findings",
@@ -281,6 +283,7 @@ export default function App() {
 					{route === "workers" && <WorkersPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "access-usage" && <AccessUsagePage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "workers-ai" && <WorkersAiPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
+					{route === "tunnels" && <TunnelMapPage session={session} onAuthError={handleDisconnect} />}
 					{route === "gateway" && <GatewayPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "cost" && (
 						<CostPage

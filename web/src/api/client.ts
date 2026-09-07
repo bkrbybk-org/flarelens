@@ -180,3 +180,7 @@ export function fetchGatewayUsage<T>(
 ): Promise<T> {
 	return postJson<T>("/api/gateway/usage", token, body);
 }
+
+export function fetchTunnelMap<T>(token: string, accountId: string): Promise<T> {
+	return apiFetch<T>(`/api/access/tunnels?account_id=${encodeURIComponent(accountId)}`, token);
+}

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { assertAllowedScope, resolveAuth, type AuthEnv } from "./lib/auth";
+import { TunnelMapError, fetchTunnelMap } from "./lib/access-tunnels";
 import { MAX_AI_RANGE_MS, WorkersAiError, fetchWorkersAi, isAiGranularity } from "./lib/workers-ai";
 import {
 	MAX_GATEWAY_RANGE_MS,
@@ -725,6 +726,64 @@ app.post("/api/workers-ai/usage", async (c) => {
 	} catch (err) {
 		const status = err instanceof WorkersAiError ? err.status : 502;
 		const message = err instanceof Error ? err.message : "Failed to load Workers AI usage";
+		return c.json({ success: false, errors: [{ message }] }, status as 502);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Access application → Tunnel → origin mapping
+
+/**
+ * Joins Access applications to the tunnel ingress rules that serve their hostnames.
+ *
+ * Apps are fetched here rather than taken from the client so the join cannot be skewed by a
+ * stale page: the mapping is only meaningful if both halves come from the same moment.
+ */
+app.get("/api/access/tunnels", async (c) => {
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
+	}
+	const accountId = validHexId(c.req.query("account_id"));
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Invalid account_id" }] }, 400);
+	}
+	const scope = assertAllowedScope(auth.auth, c.env, { accountId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
+	}
+
+	const token = auth.auth.token;
+	const [appsRes, policiesRes] = await Promise.all([
+		fetchCloudflareAll<CfApp>(`/accounts/${accountId}/access/apps`, token),
+		fetchCloudflareAll<CfPolicy>(`/accounts/${accountId}/access/policies`, token),
+	]);
+	if (appsRes.status !== 200) {
+		return c.json(
+			{ success: false, errors: appsRes.errors || [{ message: "Failed to fetch applications" }] },
+			appsRes.status as 200,
+		);
+	}
+
+	// Per-app policies, same bounded fan-out as /api/data. Reusable policies are resolved from
+	// the account list so a policy attached by reference still shows its name and decision.
+	const reusable = new Map((policiesRes.status === 200 ? policiesRes.result : []).map((p) => [p.id, p]));
+	const withPolicies = await mapWithConcurrency(appsRes.result, 5, async (appItem) => {
+		const res = await fetchCloudflareAll<CfPolicy>(`/accounts/${accountId}/access/apps/${appItem.id}/policies`, token);
+		const policies = (res.status === 200 ? res.result : []).map((p) => {
+			const hasRules = Array.isArray(p.include) || Array.isArray(p.exclude) || Array.isArray(p.require);
+			const source = !hasRules && reusable.has(p.id) ? { ...reusable.get(p.id), ...p } : p;
+			return { name: source.name, decision: source.decision };
+		});
+		return { ...appItem, policies, policies_error: res.status !== 200 };
+	});
+
+	try {
+		const result = await fetchTunnelMap(accountId, token, withPolicies);
+		return c.json({ success: true, result });
+	} catch (err) {
+		const status = err instanceof TunnelMapError ? err.status : 502;
+		const message = err instanceof Error ? err.message : "Failed to build the tunnel map";
 		return c.json({ success: false, errors: [{ message }] }, status as 502);
 	}
 });

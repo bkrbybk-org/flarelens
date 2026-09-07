@@ -9,6 +9,7 @@ Ops dashboard for Cloudflare: a single pane of glass for reviewing an account's 
 | `#/access` | Access Applications | account | Apps and their policies, with include/require/exclude rules rendered as readable sentences; filterable/sortable table, per-app detail drawer |
 | `#/groups` | Access Groups | account | Reusable Access Groups with their rules, cross-referenced to the applications whose policies use them |
 | `#/access-usage` | Access Usage | account | Access login telemetry from `accessLoginRequestsAdaptiveGroups`: volume with a success/failure split, and top applications, identity providers and countries. Cloudflare caps this dataset at a 1-week window |
+| `#/tunnels` | Tunnel Map | account | The chain behind a self-hosted app: public hostname → Access application and its policy decisions → Cloudflare Tunnel → origin service. Flags both gaps — a tunnel ingress with no Access app in front of it, and an Access app whose hostname no tunnel serves |
 | `#/gateway` | Gateway Usage | account | Zero Trust Gateway: DNS resolver queries and Gateway HTTP requests over time, split allowed/blocked, with top categories, policies, hosts and actions |
 | `#/waf` | WAF Analytics | account or zone | `firewallEventsAdaptive` telemetry correlated against ruleset metadata: KPIs, events-over-time, per-ruleset/rule tables, action-drift detection, per-rule drill-down |
 | `#/ai-security` | AI Security for Apps | account or zone | Prompt-injection, PII, unsafe-topic and custom-topic detections on LLM traffic: KPIs, detections over time, endpoint/country/session breakdowns, ranked mitigations, and a flagged-request table with per-row prompt decryption |
@@ -95,6 +96,7 @@ See [PROGRESS.md](PROGRESS.md) for the full route table, hook inventory, storage
 | Cache Rules: Read | Cache Rules section |
 | Zone Analytics: Read | Traffic and hit-ratio data in Cache Rules, and the request/detection telemetry behind AI Security |
 | Analytics: Read | Prompt injection, PII and topic detections in AI Security; Access Usage, Gateway Usage, Workers Analytics, Workers AI and Cost & Usage all read account-scoped GraphQL datasets behind this |
+| Cloudflare Tunnel: Read | Tunnel names, status and ingress rules in the Tunnel Map. **Cloudflare returns an empty list rather than a 403 when this is missing**, so without it the page cannot tell an account with no tunnels from a token that cannot see them — it says so rather than showing a blank map |
 | Workers Scripts: Read | Adds workers with no traffic in the window to the Workers Analytics filter. Without it that section still works, listing only workers that were invoked |
 
 ### Reading logged prompts
