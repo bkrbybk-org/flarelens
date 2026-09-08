@@ -47,6 +47,26 @@ function fromBase64(value: string, what: string): Uint8Array {
 	return bytes;
 }
 
+/**
+ * The private key as the operator has it in hand.
+ *
+ * Cloudflare shows the payload-logging key pair in the dashboard, and the value that gets pasted
+ * here is not guaranteed to be base64: a 64-character hex string is exactly the same 32-byte
+ * X25519 key written the other way, and every byte of it is also a legal base64 character, so a
+ * hex key decodes as base64 without error and comes out 48 bytes long. That surfaces as "must be
+ * 32 bytes" against a key that is perfectly correct, so hex is detected first and decoded as hex.
+ */
+function fromKeyText(value: string): Uint8Array {
+	const cleaned = value.trim().replace(/\s+/g, "").replace(/^0x/i, "");
+	if (!cleaned) throw new MatchedDataError("Private key is empty.");
+	if (/^[0-9a-fA-F]+$/.test(cleaned) && cleaned.length === ENC_LENGTH * 2) {
+		const bytes = new Uint8Array(ENC_LENGTH);
+		for (let i = 0; i < ENC_LENGTH; i++) bytes[i] = Number.parseInt(cleaned.slice(i * 2, i * 2 + 2), 16);
+		return bytes;
+	}
+	return fromBase64(cleaned, "Private key");
+}
+
 export interface ParsedBlob {
 	enc: Uint8Array;
 	ciphertext: Uint8Array;
@@ -88,13 +108,14 @@ function suite(): CipherSuite {
  * Decrypt one payload. Returns the plaintext prompt.
  *
  * A wrong key fails inside AES-GCM authentication rather than producing garbage, so the error
- * distinguishes "wrong key" from "malformed blob" — the operator needs to know which.
+ * distinguishes "wrong key" from "malformed blob" — the operator needs to know which. The key
+ * itself is accepted as base64 or hex; see fromKeyText.
  */
-export async function decryptMatchedData(privateKeyBase64: string, blobBase64: string): Promise<string> {
+export async function decryptMatchedData(privateKey: string, blobBase64: string): Promise<string> {
 	const { enc, ciphertext } = parseMatchedDataBlob(blobBase64);
-	const rawKey = fromBase64(privateKeyBase64, "Private key");
+	const rawKey = fromKeyText(privateKey);
 	if (rawKey.length !== ENC_LENGTH) {
-		throw new MatchedDataError(`Private key must be ${ENC_LENGTH} bytes; got ${rawKey.length}.`);
+		throw new MatchedDataError(`Private key must be ${ENC_LENGTH} bytes; got ${rawKey.length}. Paste it as base64 or hex.`);
 	}
 
 	const cipherSuite = suite();

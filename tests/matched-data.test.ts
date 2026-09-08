@@ -15,6 +15,13 @@ import { MatchedDataError, decryptMatchedData, parseMatchedDataBlob } from "../w
 const suite = () =>
 	new CipherSuite({ kem: KemId.DhkemX25519HkdfSha256, kdf: KdfId.HkdfSha256, aead: AeadId.Aes256Gcm });
 
+function fromBase64(value: string): Uint8Array {
+	const binary = atob(value);
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+	return bytes;
+}
+
 function toBase64(bytes: Uint8Array): string {
 	let binary = "";
 	for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -73,9 +80,31 @@ describe("decryptMatchedData", () => {
 		await expect(decryptMatchedData(toBase64(new Uint8Array(16)), blob)).rejects.toThrow(/32 bytes/);
 	});
 
-	it("rejects a key that is not base64", async () => {
+	it("rejects a key that is neither base64 nor hex", async () => {
 		const { blob } = await makeBlob("x");
 		await expect(decryptMatchedData("not base64!!", blob)).rejects.toThrow(MatchedDataError);
+	});
+
+	// The dashboard may hand the payload-logging key over as hex. Every character of a 64-char
+	// hex string is also legal base64, so without the hex path it decodes silently to 48 bytes
+	// and a correct key is reported as the wrong length.
+	it("accepts the same key written as hex, with or without an 0x prefix", async () => {
+		const prompt = "hex key path";
+		const { blob, privateKey } = await makeBlob(prompt);
+		const hex = [...fromBase64(privateKey)].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+		expect(hex).toHaveLength(64);
+		expect(await decryptMatchedData(hex, blob)).toBe(prompt);
+		expect(await decryptMatchedData(hex.toUpperCase(), blob)).toBe(prompt);
+		expect(await decryptMatchedData(`0x${hex}`, blob)).toBe(prompt);
+	});
+
+	it("still reads a base64 key whose characters happen to be hex digits", async () => {
+		// Guard against the hex sniff being too eager: base64 keys are 44 characters, so the
+		// length check is what keeps the two apart.
+		const { blob, privateKey } = await makeBlob("base64 path");
+		expect(privateKey).toHaveLength(44);
+		expect(await decryptMatchedData(privateKey, blob)).toBe("base64 path");
 	});
 });
 
