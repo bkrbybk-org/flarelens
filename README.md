@@ -100,6 +100,7 @@ See [PROGRESS.md](PROGRESS.md) for the full route table, hook inventory, storage
 | Analytics: Read | Prompt injection, PII and topic detections in AI Security; Access Usage, Gateway Usage, Workers Analytics, Workers AI and Cost & Usage all read account-scoped GraphQL datasets behind this |
 | Cloudflare Tunnel: Read | Tunnel names, status and ingress rules in the Tunnel Map, and the private network routes. **Cloudflare returns an empty list rather than a 403 when this is missing**, so without it the page cannot tell an account with no tunnels from a token that cannot see them — it says so rather than showing a blank map |
 | Zone: DNS: Read | The hostname inventory behind PQC Readiness. Without it each zone is still listed, carrying its own error and no hostnames, rather than the page reporting a clean but empty account |
+| Zone Settings: Read | TLS 1.3, minimum TLS version and SSL mode, which every PQC verdict depends on. Cloudflare answers a token without it with `Unauthorized to access requested resource`, and the page reports each zone's settings as unreadable rather than assuming a default |
 | Workers Scripts: Read | Adds workers with no traffic in the window to the Workers Analytics filter, and lets the Tunnel Map identify an Access application served by a Worker on a custom domain instead of reporting it as having no route. Both degrade rather than fail without it |
 
 ### Reading logged prompts
