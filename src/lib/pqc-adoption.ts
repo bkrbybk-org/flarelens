@@ -25,8 +25,6 @@
  */
 
 const GRAPHQL_ENDPOINT = "https://api.cloudflare.com/client/v4/graphql";
-/** The value Cloudflare reports for a hybrid post-quantum key agreement. */
-const PQC_GROUP = "X25519MLKEM768";
 /** Per-zone rows for the breakdown. Hostname x key-exchange group stays small. */
 const ROW_LIMIT = 2000;
 
