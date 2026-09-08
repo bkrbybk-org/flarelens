@@ -48,31 +48,49 @@ afterEach(() => {
 });
 
 describe("GroupsPage tabs", () => {
-	it("opens on rule groups, with reusable policies one click away", async () => {
+	it("opens on reusable policies, with rule groups one click away", async () => {
+		// Policies lead: they are what applications actually attach, and a rule group is only
+		// reachable through one.
 		renderPage();
-		expect(screen.getByRole("tab", { name: /Rule groups \(1\)/ })).toHaveAttribute("aria-selected", "true");
-		expect(screen.getByText("Engineering")).toBeInTheDocument();
-
-		await userEvent.click(screen.getByRole("tab", { name: /Reusable policies \(2\)/ }));
+		expect(screen.getByRole("tab", { name: /Reusable policies \(2\)/ })).toHaveAttribute("aria-selected", "true");
 		expect(screen.getByText("Staff only")).toBeInTheDocument();
-		// The groups panel is replaced, not merely hidden behind it.
-		expect(screen.queryByText("Engineering")).not.toBeInTheDocument();
+
+		await userEvent.click(screen.getByRole("tab", { name: /Rule groups \(1\)/ }));
+		expect(screen.getByText("Engineering")).toBeInTheDocument();
+		// The policies panel is replaced, not merely hidden behind it.
+		expect(screen.queryByText("Staff only")).not.toBeInTheDocument();
 	});
 
-	it("says which applications attach a policy, and says when none do", async () => {
+	it("names the applications attaching a policy, and flags one attaching nothing", async () => {
 		// An unattached reusable policy enforces nothing. That is either dead configuration or a
 		// policy someone believes is in force, and both are worth seeing.
 		renderPage();
-		await userEvent.click(screen.getByRole("tab", { name: /Reusable policies/ }));
-
-		expect(screen.getByText(/Attached to 1 application:/)).toBeInTheDocument();
 		expect(screen.getByText("wiki")).toBeInTheDocument();
-		expect(screen.getByText(/Not attached to any application/)).toBeInTheDocument();
+		expect(screen.getByText("Not attached")).toBeInTheDocument();
 	});
 
-	it("searches within the active tab", async () => {
+	it("sorts by last update, newest first, without being asked", async () => {
+		// This page is for review, so the thing that moved last is the thing worth looking at.
+		renderPage({
+			reusablePolicies: [
+				{ id: "old", name: "Older policy", decision: "allow", updated_at: "2026-01-01T00:00:00Z" },
+				{ id: "new", name: "Newer policy", decision: "allow", updated_at: "2026-09-01T00:00:00Z" },
+			],
+		});
+		const names = screen.getAllByRole("row").slice(1).map((r) => r.textContent ?? "");
+		expect(names[0]).toContain("Newer policy");
+		expect(names[1]).toContain("Older policy");
+	});
+
+	it("expands a row to show its rules", async () => {
 		renderPage();
-		await userEvent.click(screen.getByRole("tab", { name: /Reusable policies/ }));
+		expect(screen.queryByText(/Raw JSON/i)).not.toBeInTheDocument();
+		await userEvent.click(screen.getByText("Staff only"));
+		expect(screen.getByText(/Raw JSON/i)).toBeInTheDocument();
+	});
+
+	it("filters the table by search", async () => {
+		renderPage();
 		await userEvent.type(screen.getByRole("searchbox"), "vendor");
 
 		expect(screen.getByText("Old vendor access")).toBeInTheDocument();
@@ -82,18 +100,16 @@ describe("GroupsPage tabs", () => {
 	it("distinguishes a missing permission from an account with no reusable policies", async () => {
 		// The two produce an identical empty list, and only one of them is the operator's to fix.
 		const { unmount } = renderPage({ reusablePolicies: [], reusablePoliciesError: true });
-		await userEvent.click(screen.getByRole("tab", { name: /Reusable policies/ }));
 		expect(screen.getByText(/API token is missing/)).toBeInTheDocument();
 		unmount();
 
 		renderPage({ reusablePolicies: [], reusablePoliciesError: false });
-		await userEvent.click(screen.getByRole("tab", { name: /Reusable policies/ }));
 		expect(screen.getByText(/defines no reusable policies/)).toBeInTheDocument();
 	});
 
 	it("mirrors the active tab into the hash so the view is deep-linkable", async () => {
 		renderPage();
-		await userEvent.click(screen.getByRole("tab", { name: /Reusable policies/ }));
-		expect(window.location.hash).toContain("tab=policies");
+		await userEvent.click(screen.getByRole("tab", { name: /Rule groups/ }));
+		expect(window.location.hash).toContain("tab=groups");
 	});
 });

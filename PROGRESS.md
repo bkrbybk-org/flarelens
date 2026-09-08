@@ -251,7 +251,13 @@ into that project only, so the node project's Workers-shaped globals stay untouc
   reusable policies were already fetched by `/api/data` and already used to resolve group
   references, but nothing rendered them, so a policy attached to no application was invisible.
   That is the case the new tab calls out by name: it is either dead configuration or a policy
-  someone believes is in force. Deep-linkable as `#/groups?tab=policies`.
+  someone believes is in force. Deep-linkable as `#/groups?tab=groups`.
+  Policies lead, as a table modelled on the Applications page: sortable columns (last update
+  first, since this page is for review), Excel-style column filters — including a "Not attached"
+  facet, the row most worth isolating — search, CSV export and an expandable row for the rules.
+  Columns are declared rather than discovered from the row's keys the way AppsTable does it: an
+  application is a bag of loosely-related settings, a policy is four things, and its rules are
+  nested arrays that make poor columns.
 
 **Incidents**
 - 2026-09-07: **server mode broke for every gated route.** The Access application was recreated, which changed its AUD, so JWT verification failed audience check and the SPA fell back to asking for a token. Found while testing an unrelated route — the control route failed the same way, which ruled out the new code. Fixed by reading the live AUD from the login redirect and updating `CF_ACCESS_AUD`. See the constraints section in [README.md](README.md).
@@ -274,7 +280,7 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules |
 | — | **Account posture, not an app defect: seven tunnel hostnames have no Access application in front of them** — `app-alpha`, `nexus`, `app-delta` (Tunnel A), `app-bravo`, `private` (Tunnel B), `app-echo`, `app-charlie` | Those origins are reachable without an Access policy. `app-alpha` is deliberately vulnerable software; `app-bravo` exposes RDP | Surfaced by the Tunnel Map. Add Access applications, or confirm each is intentionally public |
 | P2 | **Bound token lacks `Zone: DNS: Read` and `Zone Settings: Read`** — verified against the deployed endpoint 2026-09-08: `/api/pqc/report` returns all four zones with every field null | PQC Readiness has no rows at all. Each zone states its own failure, so the page does not read as a clean account, but it answers nothing until the scopes are added | Add both in the Cloudflare dashboard. If a new token is minted rather than the existing one edited, `wrangler secret put CF_API_TOKEN` too |
-| P3 | 3 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
+| P3 | 4 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 | P4 | `useHashSyncedState` adopts URL params on mount only. Editing the hash to a *different route* while the app is open (e.g. `#/waf?zone=A` → `#/cache?zone=B`) does not adopt the new param, because `App` never unmounts — the write-back then overwrites it | Hand-edited cross-route deep links lose their param. Fresh loads and in-app navigation are unaffected | Key the adoption on `route` as well as mount |
 | P4 | Worker's `CfGroup` interface ([src/index.ts](src/index.ts)) declares only `id`/`name`, but the endpoint passes the full group object through to the client | None at runtime — TS interfaces don't strip fields — but it misleads anyone reading the Worker in isolation | Widen it to match [web/src/types.ts](web/src/types.ts) |
 
@@ -364,7 +370,7 @@ diff reuses `describeRule` so rule changes read as sentences rather than JSON.
 ## Conventions
 
 - **Commits:** Conventional Commits, imperative subject ≤50 chars, body only when the *why* isn't obvious.
-- **Gate:** `npm run check` (tsc project build → tests → Vite build → wrangler dry-run) must pass before commit. `npm run lint` should show 0 errors (3 known warnings are expected — see P3 above).
+- **Gate:** `npm run check` (tsc project build → tests → Vite build → wrangler dry-run) must pass before commit. `npm run lint` should show 0 errors (4 known warnings are expected — see P3 above).
 - **Verification pattern:** for anything visual or layout-related, **measure, do not reason**. Two consecutive shell-scrolling fixes were shipped on plausible CSS reasoning before the cause was found by reading `html.scrollHeight` in the running app. The harness is described under Development in [README.md](README.md).
 - **Layout invariants:** the shell is a fixed-height flex column and each section owns its scrolling. `<main>` must keep `relative` (containing block), `overflow-hidden` (clipping) and `min-h-0` (shrinkable), and every section root needs its own `h-full overflow-auto`. [tests/shell-layout.test.ts](tests/shell-layout.test.ts) pins all of it — none of these fail loudly.
 - **Data honesty (Cache section):** never redistribute unattributed traffic with synthetic weights, never present mock data unlabeled, and let a genuinely quiet zone show zeros. See the note at the end of [README.md](README.md).
