@@ -2,21 +2,21 @@
 
 Status snapshot, last reviewed **2026-09-05** (second pass, against a full read of the tree) against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
 
-**TL;DR** — Fourteen sections, 530 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
+**TL;DR** — Fifteen sections, 545 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section except AI Gateway has been exercised against real account data through an Access service token — AI Gateway was built without API access in this environment, so its GraphQL field names are unverified guesses; see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts).
 Running version `c065d631`, deployed 2026-09-07 16:31 UTC.
 
 ---
 
 ## Sections
 
-Fourteen routes, grouped in the sidebar by Cloudflare product area:
+Fifteen routes, grouped in the sidebar by Cloudflare product area:
 
 | Group | Routes |
 |---|---|
 | Zero Trust | `#/access`, `#/groups`, `#/access-usage`, `#/tunnels`, `#/gateway` |
 | Security | `#/waf`, `#/ai-security`, `#/request`, `#/pqc` |
 | Performance | `#/cache` |
-| Developer Platform | `#/workers`, `#/workers-ai`, `#/cost` |
+| Developer Platform | `#/workers`, `#/workers-ai`, `#/ai-gateway`, `#/cost` |
 | Audit | `#/findings` |
 
 All time-windowed sections share one range picker in the top bar (`hooks/useTimeRange.ts`),
@@ -77,6 +77,7 @@ of the calling token — see the P2 entry below.
 | `GET /api/workers/scripts` | account | Workers Analytics filter — needs `Workers Scripts: Read`, degrades if absent |
 | `POST /api/workers/metrics` | account | Workers Analytics; also half of Cost & Usage |
 | `POST /api/workers-ai/usage` | account | Workers AI; also half of Cost & Usage |
+| `POST /api/ai-gateway/usage` | account | AI Gateway (proxy requests, tokens, errors, cache, spend). **Field names unverified** — see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
 | `app.all("*")` | — | static asset fallback |
 
 All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, missing/bad token →
@@ -103,6 +104,7 @@ documents, so no caller text reaches a query.
 | [src/lib/request-trace.ts](src/lib/request-trace.ts) | Ray ID forensics: schema-swept field selection, adaptive retry around per-zone entitlements and Cloudflare's field ceiling |
 | [src/lib/workers-analytics.ts](src/lib/workers-analytics.ts) | Workers invocation metrics; script list degrades when the scope is absent |
 | [src/lib/workers-ai.ts](src/lib/workers-ai.ts) | Workers AI inference metrics; folds rows split by `errorCode` |
+| [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) | AI Gateway proxy usage across four `aiGateway*AdaptiveGroups` datasets. **Every field/dataset name is an unverified guess** — no API token was available to check against a live schema. The requests dataset is load-bearing (throws on failure); errors/cache/spend are fetched separately and degrade independently, each reporting `{ available, reason }` rather than showing zero |
 | [src/lib/ai-sec/](src/lib/ai-sec/) | AI Security: zone fan-out, schema-capability probing, per-token edge caching of the **aggregate half only** (rows are never cached), and the `buildDashboard` aggregation |
 | [web/src/hooks/useTimeRange.ts](web/src/hooks/useTimeRange.ts) | Shared analytics window in minutes, hash-synced, clamped per section |
 | [web/src/components/chart/ChartHover.tsx](web/src/components/chart/ChartHover.tsx) | Hover readout for every inline-SVG chart: bucket hit-testing and measured, clamped placement |
@@ -168,6 +170,7 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | `tests/components/PqcPage.test.tsx` | Rendered `PqcPage` (fetch mocked at `api/client`'s `fetchPqcReport`): verdict filter chips narrow/restore rows, search matches hostname and zone, a zone-level error renders instead of being swallowed, empty state on no match |
 | `tests/components/ConnectPage.test.tsx` | Rendered `ConnectPage`: empty-token submit shows "API Token is required" and calls no fetch; every required/optional permission entry renders |
 | `tests/components/AppsTable.test.tsx` | Rendered `AppsTable`: the global search box narrows visible rows and clearing it restores them |
+| `tests/ai-gateway.test.ts` | AI Gateway route: series/totals fold, rate arithmetic (never divides by zero), per-dataset degradation when a guessed field name is wrong, validation, auth, `no-store`, 502 on load-bearing failure, and the same "no per-user dimension" privacy assertion as the other aggregate-only sections |
 
 ---
 

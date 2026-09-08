@@ -181,6 +181,13 @@ export function fetchGatewayUsage<T>(
 	return postJson<T>("/api/gateway/usage", token, body);
 }
 
+export function fetchAiGatewayUsage<T>(
+	token: string,
+	body: { accountId: string; from: string; to: string; granularity: string },
+): Promise<T> {
+	return postJson<T>("/api/ai-gateway/usage", token, body);
+}
+
 export function fetchTunnelMap<T>(token: string, accountId: string): Promise<T> {
 	return apiFetch<T>(`/api/access/tunnels?account_id=${encodeURIComponent(accountId)}`, token);
 }
