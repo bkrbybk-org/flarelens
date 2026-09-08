@@ -79,9 +79,20 @@ interface CfPolicy {
 	require?: unknown[];
 }
 
+// Mirrors web/src/types.ts's CfGroup rather than importing it: the Worker and the SPA each
+// declare their own shape for every Cloudflare type in this codebase (see CfIdp/CfPolicy/CfApp
+// above), so a reader looking at either side alone sees the real shape without having to
+// cross-reference the other package. This one under-declared its fields for a while — the
+// endpoint below passes the full upstream group object straight through, so the client's
+// richer type was always the accurate one.
 interface CfGroup {
 	id: string;
 	name?: string;
+	include?: unknown[];
+	exclude?: unknown[];
+	require?: unknown[];
+	created_at?: string;
+	updated_at?: string;
 }
 
 interface CfApp {
