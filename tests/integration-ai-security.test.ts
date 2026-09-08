@@ -99,7 +99,23 @@ describe("POST /api/ai-security/analyze", () => {
 		const body = (await res.json()) as { success: boolean; result: Record<string, unknown> };
 		expect(body.success).toBe(true);
 		// One endpoint per screen is deliberate: splitting it would re-run the zone fan-out.
-		expect(Object.keys(body.result).sort()).toEqual(["data", "window", "zones"]);
+		expect(Object.keys(body.result).sort()).toEqual(["data", "schema", "window", "zones"]);
+	});
+
+	it("states which detection fields the schema resolved", async () => {
+		// A KPI that is zero because the field is absent must be distinguishable from one that
+		// is zero because nothing was detected; the panel reads this.
+		const res = await analyze({ accountId: ACCOUNT, range: "24h" });
+		const body = (await res.json()) as {
+			result: { schema: { dataset: string | null; probedAt: string; rows: { id: string; resolved: boolean; detail: string }[] } };
+		};
+		const { schema } = body.result;
+		expect(schema.rows.map((row) => row.id)).toEqual(["injection", "pii", "unsafe", "custom", "tokenCount", "ja4", "payloads"]);
+		// Every unresolved row has to say what it costs, or the panel is just a red dot.
+		for (const row of schema.rows) {
+			if (!row.resolved) expect(row.detail.length).toBeGreaterThan(0);
+		}
+		expect(typeof schema.probedAt).toBe("string");
 	});
 
 	it("reports the window it actually used, honouring the requested range", async () => {

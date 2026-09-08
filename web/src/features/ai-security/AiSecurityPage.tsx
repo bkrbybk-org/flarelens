@@ -3,7 +3,7 @@ import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { ProgressBar } from "../../components/ProgressBar";
 import { AlertIcon, RefreshIcon } from "../../components/Icons";
-import type { Kpi } from "../../lib/ai-sec/types";
+import type { Kpi, SchemaReadout } from "../../lib/ai-sec/types";
 import { BarList, CARD_CLS, DetectionsChart, Sparkline, TrendChart } from "./charts";
 import { EventsTable } from "./EventsTable";
 import { useAiSecurityData } from "./useAiSecurityData";
@@ -29,6 +29,47 @@ const TONE_SPARK: Record<string, string> = {
 	warn: "text-amber-500",
 	neutral: "text-cf",
 };
+
+/**
+ * Which detection fields this token's schema actually resolves.
+ *
+ * Collapsed by default: it matters only when a panel is empty, and then it is the difference
+ * between "nothing was detected" and "this KPI cannot be built here at all".
+ */
+function SchemaReadoutPanel({ schema }: { schema: SchemaReadout }) {
+	const missing = schema.rows.filter((row) => !row.resolved);
+	return (
+		<details className={`${CARD_CLS} text-sm`}>
+			<summary className="cursor-pointer select-none font-medium">
+				Detection field coverage
+				<span className="ml-2 font-normal text-zinc-500 dark:text-zinc-400">
+					{missing.length === 0
+						? `all ${schema.rows.length} resolve`
+						: `${missing.length} of ${schema.rows.length} unavailable: ${missing.map((row) => row.label).join(", ")}`}
+				</span>
+			</summary>
+			<ul className="mt-3 space-y-2">
+				{schema.rows.map((row) => (
+					<li key={row.id} className="flex gap-2">
+						<span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${row.resolved ? "bg-emerald-500" : "bg-amber-500"}`} />
+						<div className="min-w-0">
+							<div className="font-medium">
+								{row.label}
+								{row.field && <span className="ml-2 font-mono text-xs text-zinc-500 dark:text-zinc-400">{row.field}</span>}
+							</div>
+							{!row.resolved && <div className="text-xs text-zinc-500 dark:text-zinc-400">{row.detail}</div>}
+						</div>
+					</li>
+				))}
+			</ul>
+			<p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+				Probed {schema.probedAt}
+				{schema.dataset ? ` · rows from ${schema.dataset}` : " · no dataset carried the AI fields"}
+				{schema.notes.length ? ` · ${schema.notes.join("; ")}` : ""}
+			</p>
+		</details>
+	);
+}
 
 function KpiCard({ kpi, spark }: { kpi: Kpi; spark?: number[] }) {
 	// Percentage change from zero is undefined, not "+Infinity%".
@@ -161,6 +202,8 @@ export function AiSecurityPage({ session, zoneId, timeRange, onAuthError }: Prop
 						</span>
 					</div>
 				) : null}
+
+				{ai.result && <SchemaReadoutPanel schema={ai.result.schema} />}
 
 				{!data && !ai.loading && !ai.error && (
 					<p className="py-16 text-center text-sm text-zinc-500 dark:text-zinc-400">

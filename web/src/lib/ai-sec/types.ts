@@ -179,8 +179,34 @@ export interface AiSecDashboard {
 	truncated: boolean;
 }
 
+/**
+ * One capability the detection panels depend on, and whether this token's schema actually
+ * resolves it. Without this a KPI that is structurally unavailable renders as a hard zero and
+ * reads as "no attacks", which is the opposite of what it means.
+ */
+export interface SchemaCapabilityRow {
+	id: string;
+	label: string;
+	/** GraphQL field backing it, when the probe resolved one. */
+	field: string | null;
+	resolved: boolean;
+	/** What is lost while it is unresolved. */
+	detail: string;
+}
+
+export interface SchemaReadout {
+	/** Dataset the AI fields were found on — null when none of them resolved anywhere. */
+	dataset: string | null;
+	probedAt: string;
+	rows: SchemaCapabilityRow[];
+	/** Probe notes, same text /health carries. */
+	notes: string[];
+}
+
 export interface AiSecResult {
 	window: TimeWindow;
 	zones: { id: string; name: string }[];
 	data: AiSecDashboard;
+	/** Which detection fields resolved for this token. See SchemaReadout. */
+	schema: SchemaReadout;
 }

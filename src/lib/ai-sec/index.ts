@@ -122,6 +122,80 @@ function toParams(body: AiSecRequest, zones: Zone[]): DashboardParams {
 export type { AiSecResult };
 
 /**
+ * Turn the probe into something an operator can read.
+ *
+ * getSchemaCaps already computes all of this to decide which GraphQL aliases it can emit; until
+ * now none of it reached the browser, so a KPI that is zero because the field does not resolve
+ * looked exactly like a KPI that is zero because nothing was detected.
+ */
+function schemaReadout(schema: SchemaCaps): AiSecResult["schema"] {
+	const rowsDataset = schema.ai.dataset ? schema.datasets[schema.ai.dataset] : undefined;
+	const fw = schema.datasets.firewallEventsAdaptive;
+	const payloads = !!fw?.fields.includes("metadata") && !!fw.fields.includes("rayName");
+
+	return {
+		dataset: schema.ai.dataset,
+		probedAt: schema.probedAt,
+		notes: schema.notes,
+		rows: [
+			{
+				id: "injection",
+				label: "Prompt injection score",
+				field: schema.ai.injectionScore,
+				resolved: !!schema.ai.injectionScore,
+				detail: "The injection KPI, histogram and score drill-down are empty without it.",
+			},
+			{
+				id: "pii",
+				label: "PII categories",
+				field: schema.ai.piiCategories,
+				resolved: !!schema.ai.piiCategories,
+				detail: "The PII KPI and its category breakdown are empty without it.",
+			},
+			{
+				id: "unsafe",
+				label: "Unsafe topic categories",
+				field: schema.ai.unsafeTopicCategories,
+				resolved: !!schema.ai.unsafeTopicCategories,
+				detail: "The unsafe-topic KPI and its breakdown are empty without it.",
+			},
+			{
+				id: "custom",
+				label: "Custom topics",
+				field: schema.ai.customTopicScoresMin,
+				// The field name alone is not enough: the KPI is fed by an aggregate alias that
+				// only exists when the Groups dataset accepts the `_lt` operator.
+				resolved: hasCustomTopicAggregate(schema),
+				detail: schema.ai.customTopicScoresMin
+					? "Field resolves, but httpRequestsAdaptiveGroups does not accept its _lt filter, so the aggregate KPI cannot be built."
+					: "The custom-topic KPI and breakdown are empty without it.",
+			},
+			{
+				id: "tokenCount",
+				label: "Token count",
+				field: schema.ai.tokenCount,
+				resolved: !!schema.ai.tokenCount,
+				detail: "The token-volume tile is hidden without it.",
+			},
+			{
+				id: "ja4",
+				label: "JA4 fingerprint",
+				field: rowsDataset?.fields.includes("ja4") ? "ja4" : null,
+				resolved: !!rowsDataset?.fields.includes("ja4"),
+				detail: "Attacker sessions fall back to grouping by IP without it.",
+			},
+			{
+				id: "payloads",
+				label: "Payload logging join",
+				field: payloads ? "firewallEventsAdaptive.metadata" : null,
+				resolved: payloads,
+				detail: "Logged prompts cannot be joined onto events without it, so no prompt text is decryptable here.",
+			},
+		],
+	};
+}
+
+/**
  * One request's worth of work: probe the schema, fan out across the in-scope zones, aggregate.
  *
  * Zone fan-out and per-zone caching are the ported code's own; a zone that fails does not fail
@@ -168,5 +242,6 @@ export async function loadAiSecurity(token: string, body: AiSecRequest, waitUnti
 		window: params.range,
 		zones: zones.map((z) => ({ id: z.id, name: z.name })),
 		data,
+		schema: schemaReadout(schema),
 	};
 }
