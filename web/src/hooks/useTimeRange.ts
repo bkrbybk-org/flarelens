@@ -48,18 +48,24 @@ export interface TimeRange {
 	bounds: (maxMinutes?: number) => { from: string; to: string };
 }
 
-export function useTimeRange(prefs: Prefs, updatePrefs: (patch: Partial<Prefs>) => void): TimeRange {
+export function useTimeRange(prefs: Prefs, updatePrefs: (patch: Partial<Prefs>) => void, route: string): TimeRange {
 	const minutes = prefs.rangeMinutes || DEFAULT_RANGE_MINUTES;
 	const preset = presetForMinutes(minutes);
 
 	// Deep-linkable: `#/workers?range=7d` selects the window, and changing the window updates
-	// the URL, so a section view can be shared as-is.
-	useHashSyncedState("range", preset, (next) => {
-		const fromHash = minutesForPreset(next);
-		if (fromHash !== null && fromHash !== minutes) {
-			updatePrefs({ rangeMinutes: fromHash });
-		}
-	});
+	// the URL, so a section view can be shared as-is. `route` is threaded through so a
+	// hand-edited cross-route link (this hook lives in App and never remounts) still adopts.
+	useHashSyncedState(
+		"range",
+		preset,
+		(next) => {
+			const fromHash = minutesForPreset(next);
+			if (fromHash !== null && fromHash !== minutes) {
+				updatePrefs({ rangeMinutes: fromHash });
+			}
+		},
+		route,
+	);
 
 	const setPreset = useCallback(
 		(key: TimePresetKey) => {

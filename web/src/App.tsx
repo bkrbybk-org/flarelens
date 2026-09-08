@@ -48,8 +48,8 @@ const PAGE_TITLES: Record<Route, string> = {
 export default function App() {
 	const { session, connect, disconnect } = useSession();
 	const { prefs, updatePrefs } = usePrefs();
-	const timeRange = useTimeRange(prefs, updatePrefs);
 	const [route, navigate] = useRoute();
+	const timeRange = useTimeRange(prefs, updatePrefs, route);
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
 	// Disconnecting must not leave one customer's telemetry in memory for
@@ -136,11 +136,16 @@ export default function App() {
 	// Deep-linkable zone for zone-scoped routes: #/waf?zone=… / #/cache?zone=…
 	const activeZone =
 		route === "waf" ? prefs.wafZone : route === "cache" ? prefs.cacheZone : route === "ai-security" ? prefs.aiSecZone : "";
-	useHashSyncedState("zone", activeZone, (zoneId) => {
-		if (route === "waf") updatePrefs({ wafZone: zoneId });
-		else if (route === "cache") updatePrefs({ cacheZone: zoneId });
-		else if (route === "ai-security") updatePrefs({ aiSecZone: zoneId });
-	});
+	useHashSyncedState(
+		"zone",
+		activeZone,
+		(zoneId) => {
+			if (route === "waf") updatePrefs({ wafZone: zoneId });
+			else if (route === "cache") updatePrefs({ cacheZone: zoneId });
+			else if (route === "ai-security") updatePrefs({ aiSecZone: zoneId });
+		},
+		route,
+	);
 
 	const ctx = useMemo<RuleContext>(
 		() => ({

@@ -36,9 +36,16 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 	const [drawerRule, setDrawerRule] = useState<DrawerRule | null>(null);
 
 	// Deep-linkable state: #/waf?lookback=1440&tab=rules
-	useHashSyncedState("tab", tab, (v) => {
-		if (v === "overview" || v === "rules") setTab(v);
-	});
+	// This page only exists while route === "waf" (App mounts/unmounts it), so a literal
+	// route is fine — there's no cross-route case to key adoption on here.
+	useHashSyncedState(
+		"tab",
+		tab,
+		(v) => {
+			if (v === "overview" || v === "rules") setTab(v);
+		},
+		"waf",
+	);
 
 	useEffect(() => {
 		load(session.token, session.accountId, zoneId, minutes).then(() => setLastRefreshed(new Date().toISOString()));

@@ -32,26 +32,34 @@ export function setHashParam(key: string, value: string | null): void {
 }
 
 /**
- * Two-way sync between a hash query param and a piece of state:
- * on mount the URL value (if present and different) wins and is pushed
- * into state; afterwards state changes are mirrored back into the hash.
+ * Two-way sync between a hash query param and a piece of state: on arrival at
+ * `route` the URL value (if present and different) wins and is pushed into
+ * state; afterwards state changes are mirrored back into the hash.
+ *
+ * Keyed on `route`, not just mount, because the App shell never unmounts —
+ * hand-editing the hash to a different route (e.g. #/waf?zone=A to
+ * #/cache?zone=B) is a real arrival at that route and must re-adopt, even
+ * though no component remounted to give us a fresh mount effect for free.
  */
-export function useHashSyncedState(key: string, value: string, setValue: (next: string) => void): void {
-	const appliedRef = useRef(false);
+export function useHashSyncedState(key: string, value: string, setValue: (next: string) => void, route: string): void {
+	const appliedRouteRef = useRef<string | null>(null);
 
 	useEffect(() => {
-		if (appliedRef.current) return;
-		appliedRef.current = true;
-		const fromUrl = getHashParams().get(key);
-		if (fromUrl !== null && fromUrl !== value) {
-			setValue(fromUrl);
+		if (appliedRouteRef.current !== route) {
+			appliedRouteRef.current = route;
+			const fromUrl = getHashParams().get(key);
+			if (fromUrl !== null && fromUrl !== value) {
+				setValue(fromUrl);
+				// Adoption above lands as a state update; let the re-render this
+				// triggers carry the adopted value before writing back, so the
+				// write-back below never fires against the pre-adoption value.
+				return;
+			}
 		}
-		// Mount-only URL adoption
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
-
-	useEffect(() => {
-		if (!appliedRef.current) return;
 		setHashParam(key, value || null);
-	}, [key, value]);
+		// `setValue` deliberately excluded: callers pass a fresh closure every render, and
+		// this effect must only re-run when the key/value/route it actually reads changes —
+		// not on every render of the parent.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [key, value, route]);
 }
