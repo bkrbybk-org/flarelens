@@ -150,7 +150,10 @@ Disconnect clears the store.
 
 ### Tests
 
-`npm test` (Vitest, `environment: "node"` — pure logic only, no DOM).
+`npm test` (Vitest `test.projects`: a `node` project, `environment: "node"`, pure logic only, no
+DOM; and a `component` project, `environment: "jsdom"` + `@testing-library/react`, for actually
+rendered components — `tests/components/setup.ts` wires jest-dom matchers and RTL's auto-cleanup
+into that project only, so the node project's Workers-shaped globals stay untouched).
 
 | File | Covers |
 |---|---|
@@ -162,6 +165,9 @@ Disconnect clears the store.
 | `tests/pqc.test.ts` | Every readiness verdict, the inventory filter and ordering, and the route including the DNS-scope degradation |
 | `tests/rules.test.ts` | `describeRule` per rule type, `resolvePolicy`, decision tones |
 | `tests/csv.test.ts` | RFC 4180 escaping edge cases |
+| `tests/components/PqcPage.test.tsx` | Rendered `PqcPage` (fetch mocked at `api/client`'s `fetchPqcReport`): verdict filter chips narrow/restore rows, search matches hostname and zone, a zone-level error renders instead of being swallowed, empty state on no match |
+| `tests/components/ConnectPage.test.tsx` | Rendered `ConnectPage`: empty-token submit shows "API Token is required" and calls no fetch; every required/optional permission entry renders |
+| `tests/components/AppsTable.test.tsx` | Rendered `AppsTable`: the global search box narrows visible rows and clearing it restores them |
 
 ---
 
@@ -221,6 +227,9 @@ Disconnect clears the store.
   call: forward secrecy and AEAD judged independently, obsolete families (RC4, 3DES,
   export-grade, MD5) called out. It never moves a verdict — cipher selection does not apply to
   TLS 1.3 — and an empty list is reported as “Cloudflare default” rather than graded.
+  A "TLS posture" section grades zone hygiene from the same settings call — minimum TLS version,
+  Full vs Full (strict), HSTS on/off and max-age, Always Use HTTPS — as a third axis that also
+  never moves a verdict: these are classical-TLS configuration choices, not key agreement.
 
 **Incidents**
 - 2026-09-07: **server mode broke for every gated route.** The Access application was recreated, which changed its AUD, so JWT verification failed audience check and the SPA fell back to asking for a token. Found while testing an unrelated route — the control route failed the same way, which ruled out the new code. Fixed by reading the live AUD from the login redirect and updating `CF_ACCESS_AUD`. See the constraints section in [README.md](README.md).
