@@ -185,9 +185,13 @@ function toMitigation(stat: SignalStat): Mitigation | null {
 }
 
 /**
- * Ranked recommendations. Sorted by how much a rule would actually change — unmitigated volume —
- * within severity tier, so a critical signal that is already fully blocked sinks below a high one
- * that is entirely getting through.
+ * Ranked recommendations. Severity tier is the primary key, so every critical signal is listed
+ * above every high one — including a critical signal that is already fully blocked, which stays
+ * above an unmitigated high one. That is deliberate: a block is a live configuration choice that
+ * can be removed, while the tier reflects what the category costs when it gets through.
+ *
+ * Unmitigated volume ranks WITHIN a tier — of two criticals, the one nothing is stopping comes
+ * first — and raw count breaks the remaining ties.
  */
 export function buildMitigations(stats: SignalStat[], limit = 8): Mitigation[] {
 	return stats

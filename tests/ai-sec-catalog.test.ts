@@ -103,12 +103,9 @@ describe("buildMitigations", () => {
 	});
 
 	it("ranks by severity tier first, even when the critical signal is fully blocked", () => {
-		// NOTE: buildMitigations' own doc comment claims "a critical signal that is already
-		// fully blocked sinks below a high one that is entirely getting through". It does not —
-		// SEVERITY_ORDER is the primary sort key and unmitigated volume only breaks ties inside
-		// a tier. This test pins the implemented behaviour; the comment is the thing that is
-		// wrong. Fixing it means either rewording the comment or making unmitigated volume
-		// outrank severity, which is a product decision, not a cleanup.
+		// Severity is the primary sort key and unmitigated volume only breaks ties inside a
+		// tier. Intended: a block can be removed, the category's cost cannot. See the doc
+		// comment on buildMitigations.
 		const out = buildMitigations([
 			stat({ kind: "unsafe", code: "S4", count: 50, blocked: 50 }),
 			stat({ kind: "pii", code: "CRYPTO", count: 40, blocked: 0 }),
