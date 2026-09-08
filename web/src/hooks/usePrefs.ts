@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 const PREFS_KEY = "cf_zt_prefs";
 // Bump when column defaults change shape: stale saved order/visibility is
 // dropped so new defaults apply, while theme/density/perPage survive.
-const PREFS_VERSION = 2;
+const PREFS_VERSION = 3;
 
 export interface Prefs {
 	version: number;
@@ -12,6 +12,12 @@ export interface Prefs {
 	density: "comfortable" | "compact";
 	columnVisibility: Record<string, boolean>;
 	columnOrder: string[];
+	/**
+	 * Separate keys for the reusable-policies table. It shares column ids with the applications
+	 * table — name, updated_at, id — so one saved order would scramble the other.
+	 */
+	policyColumnVisibility: Record<string, boolean>;
+	policyColumnOrder: string[];
 	// Zone selection per zone-scoped feature ("" = account-wide for WAF, unselected for Cache)
 	wafZone: string;
 	cacheZone: string;
@@ -36,6 +42,8 @@ const DEFAULT_PREFS: Prefs = {
 	density: "comfortable",
 	columnVisibility: {},
 	columnOrder: [],
+	policyColumnVisibility: {},
+	policyColumnOrder: [],
 	wafZone: "",
 	cacheZone: "",
 	aiSecZone: "",
@@ -52,7 +60,7 @@ function readPrefs(): Prefs {
 		}
 		const parsed = { ...DEFAULT_PREFS, ...JSON.parse(raw) };
 		if (parsed.version !== PREFS_VERSION) {
-			return { ...parsed, version: PREFS_VERSION, columnVisibility: {}, columnOrder: [] };
+			return { ...parsed, version: PREFS_VERSION, columnVisibility: {}, columnOrder: [], policyColumnVisibility: {}, policyColumnOrder: [] };
 		}
 		return parsed;
 	} catch {

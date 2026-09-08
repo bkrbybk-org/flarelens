@@ -23,6 +23,10 @@ interface GroupsPageProps {
 	reusablePoliciesError: boolean;
 	loading: boolean;
 	error: string | null;
+	/** Column prefs for the policies table; separate keys from the applications table. */
+	policyColumnVisibility: Record<string, boolean>;
+	policyColumnOrder: string[];
+	onPrefsChange: (patch: { policyColumnVisibility?: Record<string, boolean>; policyColumnOrder?: string[] }) => void;
 	progressPercent: number;
 	progressRunning: boolean;
 	ctx: RuleContext;
@@ -35,6 +39,9 @@ export function GroupsPage({
 	reusableMap,
 	reusablePolicies,
 	reusablePoliciesError,
+	policyColumnVisibility,
+	policyColumnOrder,
+	onPrefsChange,
 	loading,
 	error,
 	progressPercent,
@@ -129,7 +136,15 @@ export function GroupsPage({
 							</p>
 						</div>
 					) : (
-						<PoliciesTable policies={reusablePolicies} usedBy={policyUsedBy} loading={loading} ctx={ctx} />
+						<PoliciesTable
+							policies={reusablePolicies}
+							usedBy={policyUsedBy}
+							loading={loading}
+							ctx={ctx}
+							columnVisibility={policyColumnVisibility}
+							columnOrder={policyColumnOrder}
+							onPrefsChange={onPrefsChange}
+						/>
 					)
 				) : !loading && filtered.length === 0 ? (
 					<div className="rounded-2xl border border-zinc-200 bg-white px-8 py-12 text-center dark:border-zinc-800 dark:bg-zinc-900">

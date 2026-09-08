@@ -92,6 +92,28 @@ interface CfPolicy {
 // cross-reference the other package. This one under-declared its fields for a while — the
 // endpoint below passes the full upstream group object straight through, so the client's
 // richer type was always the accurate one.
+/** Cap on items returned per list: this payload is for reading a policy, not exporting a directory. */
+const LIST_ITEM_CAP = 500;
+
+interface CfListMeta {
+	id: string;
+	name?: string;
+	/** EMAIL, IP, DOMAIN, SERIAL … */
+	type?: string;
+	count?: number;
+}
+
+interface CfList {
+	id: string;
+	name: string;
+	type: string;
+	count: number;
+	items: string[];
+	items_truncated: boolean;
+	/** Set when the list's items could not be read, so an empty list is not mistaken for a read one. */
+	error?: string;
+}
+
 interface CfGroup {
 	id: string;
 	name?: string;
@@ -352,6 +374,59 @@ app.get("/api/data", async (c) => {
 	});
 	const policyMap = new Map(policyResults.map((p) => [p.appId, p]));
 
+	// 2b. Resolve the Zero Trust lists that policies reference.
+	//
+	// A rule reading "Email in list 55e12a45-…" is unreviewable: the whole point of a policy
+	// review is knowing who it lets in. Only lists actually referenced are expanded — an account
+	// can hold large lists this page has no reason to read — and items are capped, because the
+	// payload is for reading, not for exporting a directory.
+	const referencedListIds = new Set<string>();
+	const scanRules = (rules: unknown) => {
+		if (!Array.isArray(rules)) return;
+		for (const rule of rules) {
+			if (!rule || typeof rule !== "object") continue;
+			for (const [key, value] of Object.entries(rule as Record<string, unknown>)) {
+				if (!key.endsWith("_list") || !value || typeof value !== "object") continue;
+				const id = (value as { id?: unknown }).id;
+				if (typeof id === "string" && id) referencedListIds.add(id);
+			}
+		}
+	};
+	const scanPolicy = (policy: { include?: unknown; exclude?: unknown; require?: unknown }) => {
+		scanRules(policy.include);
+		scanRules(policy.exclude);
+		scanRules(policy.require);
+	};
+	for (const policy of reusablePolicies) scanPolicy(policy);
+	for (const group of groups) scanPolicy(group as { include?: unknown });
+	for (const entry of policyMap.values()) {
+		for (const policy of entry.policies) scanPolicy(policy);
+	}
+
+	let lists: CfList[] = [];
+	let listsError = false;
+	if (referencedListIds.size > 0) {
+		const listsRes = await fetchCloudflareAll<CfListMeta>(`/accounts/${accountId}/gateway/lists`, token);
+		listsError = listsRes.status !== 200;
+		const byId = new Map((listsRes.result || []).map((entry) => [entry.id, entry]));
+
+		lists = await mapWithConcurrency([...referencedListIds], 5, async (id) => {
+			const meta = byId.get(id);
+			const itemsRes = await fetchCloudflareAll<{ value?: string }>(`/accounts/${accountId}/gateway/lists/${id}/items`, token);
+			const values = (itemsRes.result || []).map((item) => item.value).filter((v): v is string => !!v);
+			return {
+				id,
+				name: meta?.name || id,
+				type: meta?.type || "",
+				// The list's own count, which stands even when items could not be read.
+                count: typeof meta?.count === "number" ? meta.count : values.length,
+				items: values.slice(0, LIST_ITEM_CAP),
+				items_truncated: values.length > LIST_ITEM_CAP,
+				error: itemsRes.status !== 200 ? itemsRes.errors?.[0]?.message || `HTTP ${itemsRes.status}` : undefined,
+			};
+		});
+	}
+
 	// 3. Merge policies into applications and map fields
 	const enrichedApps = apps.map((appItem) => {
 		const entry = policyMap.get(appItem.id);
@@ -372,6 +447,8 @@ app.get("/api/data", async (c) => {
 			groups_error: groupsError,
 			reusable_policies: reusablePolicies,
 			reusable_policies_error: reusablePoliciesError,
+			lists,
+			lists_error: listsError,
 		},
 	});
 });

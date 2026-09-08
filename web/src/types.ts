@@ -51,6 +51,20 @@ export interface CfApp {
 	[key: string]: unknown;
 }
 
+/**
+ * A Zero Trust list a policy rule references. Items are capped server-side; `count` is the
+ * list's own size, so a truncated render still states the truth about how big it is.
+ */
+export interface CfList {
+	id: string;
+	name: string;
+	type: string;
+	count: number;
+	items: string[];
+	items_truncated: boolean;
+	error?: string;
+}
+
 export interface ZeroTrustData {
 	apps: CfApp[];
 	idps: CfIdp[];
@@ -58,6 +72,8 @@ export interface ZeroTrustData {
 	groups_error: boolean;
 	reusable_policies: CfPolicy[];
 	reusable_policies_error: boolean;
+	lists: CfList[];
+	lists_error: boolean;
 }
 
 export interface ApiEnvelope<T> {

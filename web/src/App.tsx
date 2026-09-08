@@ -149,12 +149,20 @@ export default function App() {
 		route,
 	);
 
+	// Referenced Zero Trust lists, by id. Every rule renderer reads them through ctx, so a rule
+	// saying "Email in list …" resolves to a name and its entries wherever it is shown.
+	const listMap = useMemo(
+		() => Object.fromEntries((data.data?.lists || []).map((list) => [list.id, list])),
+		[data.data?.lists],
+	);
+
 	const ctx = useMemo<RuleContext>(
 		() => ({
 			groupName: (id) => data.groupMap[id] || id,
 			idpName: (id) => data.idpMap[id] || id,
+			list: (id) => listMap[id],
 		}),
-		[data.groupMap, data.idpMap],
+		[data.groupMap, data.idpMap, listMap],
 	);
 
 	const handleConnect = useCallback((next: Session) => {
@@ -281,6 +289,9 @@ export default function App() {
 							reusableMap={data.reusableMap}
 							reusablePolicies={data.data?.reusable_policies || []}
 							reusablePoliciesError={data.data?.reusable_policies_error || false}
+							policyColumnVisibility={prefs.policyColumnVisibility}
+							policyColumnOrder={prefs.policyColumnOrder}
+							onPrefsChange={updatePrefs}
 							loading={data.loading}
 							error={data.error}
 							progressPercent={data.progress.percent}

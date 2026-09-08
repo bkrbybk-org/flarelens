@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	flexRender,
 	getCoreRowModel,
@@ -9,11 +9,12 @@ import {
 	type ColumnDef,
 	type ColumnFiltersState,
 	type SortingState,
+	type VisibilityState,
 } from "@tanstack/react-table";
 import type { CfPolicy } from "../../types";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import { formatLocalDateTime, type RuleContext } from "../../lib/rules";
-import { ChevronDownIcon, ChevronUpIcon, FilterIcon, SearchIcon } from "../../components/Icons";
+import { ChevronDownIcon, ChevronUpIcon, ColumnsIcon, FilterIcon, SearchIcon } from "../../components/Icons";
 import {
 	ColumnFilterPopover,
 	EMPTY_COLUMN_FILTER,
@@ -46,9 +47,19 @@ interface PoliciesTableProps {
 	usedBy: Map<string, string[]>;
 	loading: boolean;
 	ctx: RuleContext;
+	columnVisibility: VisibilityState;
+	columnOrder: string[];
+	onPrefsChange: (patch: { policyColumnVisibility?: VisibilityState; policyColumnOrder?: string[] }) => void;
 }
 
 const COLUMNS = ["name", "decision", "rules", "attached", "updated_at", "created_at", "id"] as const;
+
+/**
+ * Shown unless the operator says otherwise. `created_at` is off: a policy's creation date almost
+ * never decides anything during a review, where the last change does, and the row is wide enough
+ * already once a policy is attached to a dozen applications.
+ */
+const DEFAULT_VISIBLE: ColumnKey[] = ["name", "decision", "rules", "attached", "updated_at", "id"];
 type ColumnKey = (typeof COLUMNS)[number];
 
 const HEADERS: Record<ColumnKey, string> = {
@@ -93,6 +104,37 @@ function cellText(key: ColumnKey, row: PolicyRow): string {
 	}
 }
 
+/** JSX per column. Keep in lockstep with cellText, which the CSV export uses. */
+function renderCell(key: ColumnKey, row: PolicyRow) {
+	const { policy, attachedTo } = row;
+	switch (key) {
+		case "name":
+			return <span className="font-medium">{policy.name || policy.id}</span>;
+		case "decision":
+			return policy.decision ? <DecisionBadge decision={policy.decision} /> : null;
+		case "rules":
+			return <span className="whitespace-nowrap text-zinc-500 dark:text-zinc-400">{rulesSummary(policy)}</span>;
+		case "attached":
+			return attachedTo.length ? (
+				<span className="flex flex-wrap gap-1">
+					{attachedTo.map((name) => <Tag key={name} label={name} />)}
+				</span>
+			) : (
+				// The row most worth spotting: configuration that enforces nothing.
+				<span className="text-amber-600 dark:text-amber-400">Not attached</span>
+			);
+		case "updated_at":
+		case "created_at":
+			return (
+				<span className="whitespace-nowrap tabular-nums text-zinc-500 dark:text-zinc-400">
+					{policy[key] != null ? formatLocalDateTime(policy[key]) : "—"}
+				</span>
+			);
+		case "id":
+			return <span className="font-mono text-xs text-zinc-400">{policy.id}</span>;
+	}
+}
+
 /**
  * Atomic values a column contributes to Excel-style filtering.
  *
@@ -119,7 +161,7 @@ function sortValue(key: ColumnKey, row: PolicyRow): string | number {
 	return cellText(key, row).toLowerCase();
 }
 
-export function PoliciesTable({ policies, usedBy, loading, ctx }: PoliciesTableProps) {
+export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility, columnOrder, onPrefsChange }: PoliciesTableProps) {
 	// Most recently changed first: on a page whose job is review, the thing that moved last is
 	// the thing worth looking at.
 	const [sorting, setSorting] = useState<SortingState>([{ id: "updated_at", desc: true }]);
@@ -129,6 +171,22 @@ export function PoliciesTable({ policies, usedBy, loading, ctx }: PoliciesTableP
 	const [expanded, setExpanded] = useState<string | null>(null);
 	const [pageIndex, setPageIndex] = useState(0);
 	const [perPage, setPerPage] = useState(25);
+	const [columnsOpen, setColumnsOpen] = useState(false);
+	const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+	const draggedKeyRef = useRef<string | null>(null);
+	const columnsMenuRef = useRef<HTMLDivElement>(null);
+
+	// Saved prefs win; anything the operator has never touched falls back to the defaults above.
+	const effectiveVisibility = useMemo<VisibilityState>(() => {
+		const visibility: VisibilityState = {};
+		for (const key of COLUMNS) visibility[key] = columnVisibility[key] ?? DEFAULT_VISIBLE.includes(key);
+		return visibility;
+	}, [columnVisibility]);
+
+	const effectiveOrder = useMemo(() => {
+		const known = columnOrder.filter((key) => (COLUMNS as readonly string[]).includes(key));
+		return [...known, ...COLUMNS.filter((key) => !known.includes(key))];
+	}, [columnOrder]);
 
 	const data = useMemo<PolicyRow[]>(
 		() => policies.map((policy) => ({ policy, attachedTo: usedBy.get(policy.id) || [] })),
@@ -141,6 +199,7 @@ export function PoliciesTable({ policies, usedBy, loading, ctx }: PoliciesTableP
 				id: key,
 				accessorFn: (row) => sortValue(key, row),
 				header: HEADERS[key],
+				cell: ({ row }) => renderCell(key, row.original),
 				filterFn: (row, _columnId, filterValue: ColumnFilterValue) => facetFilterPasses(facetValues(key, row.original), filterValue),
 			})),
 		[],
@@ -149,7 +208,14 @@ export function PoliciesTable({ policies, usedBy, loading, ctx }: PoliciesTableP
 	const table = useReactTable({
 		data,
 		columns,
-		state: { sorting, globalFilter, columnFilters, pagination: { pageIndex, pageSize: perPage } },
+		state: {
+			sorting,
+			globalFilter,
+			columnFilters,
+			columnVisibility: effectiveVisibility,
+			columnOrder: effectiveOrder,
+			pagination: { pageIndex, pageSize: perPage },
+		},
 		onSortingChange: setSorting,
 		onGlobalFilterChange: setGlobalFilter,
 		onColumnFiltersChange: setColumnFilters,
@@ -190,9 +256,41 @@ export function PoliciesTable({ policies, usedBy, loading, ctx }: PoliciesTableP
 		});
 	}
 
+	// Close the columns menu on an outside click, same as the applications table.
+	useEffect(() => {
+		if (!columnsOpen) return;
+		const onDown = (e: MouseEvent) => {
+			if (!columnsMenuRef.current?.contains(e.target as Node)) setColumnsOpen(false);
+		};
+		document.addEventListener("mousedown", onDown);
+		return () => document.removeEventListener("mousedown", onDown);
+	}, [columnsOpen]);
+
+	function moveColumn(key: string, dir: -1 | 1) {
+		const order = [...effectiveOrder];
+		const from = order.indexOf(key);
+		const to = from + dir;
+		if (to < 0 || to >= order.length) return;
+		order.splice(from, 1);
+		order.splice(to, 0, key);
+		onPrefsChange({ policyColumnOrder: order });
+	}
+
+	function reorderColumn(fromKey: string, toKey: string) {
+		if (fromKey === toKey) return;
+		const order = [...effectiveOrder];
+		const from = order.indexOf(fromKey);
+		const to = order.indexOf(toKey);
+		if (from === -1 || to === -1) return;
+		order.splice(from, 1);
+		order.splice(to, 0, fromKey);
+		onPrefsChange({ policyColumnOrder: order });
+	}
+
 	const rows = table.getRowModel().rows;
 	const totalRows = table.getFilteredRowModel().rows.length;
 	const pageCount = table.getPageCount();
+	const visibleCount = table.getVisibleLeafColumns().length;
 
 	return (
 		<div className="flex flex-col gap-3">
@@ -208,12 +306,66 @@ export function PoliciesTable({ policies, usedBy, loading, ctx }: PoliciesTableP
 						className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cf focus:ring-2 focus:ring-cf/30 dark:border-zinc-700 dark:bg-zinc-900"
 					/>
 				</div>
+				<div ref={columnsMenuRef} className="relative">
+					<button
+						type="button"
+						onClick={() => setColumnsOpen((v) => !v)}
+						disabled={loading}
+						aria-expanded={columnsOpen}
+						className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+					>
+						<ColumnsIcon size={15} />
+						Columns
+					</button>
+					{columnsOpen && (
+						<div className="absolute right-0 z-30 mt-1 max-h-80 w-64 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+							{effectiveOrder.map((key, i) => (
+								<div key={key} className="flex items-center gap-1 rounded-lg px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+									<label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm">
+										<input
+											type="checkbox"
+											checked={effectiveVisibility[key]}
+											onChange={(e) =>
+												onPrefsChange({ policyColumnVisibility: { ...effectiveVisibility, [key]: e.target.checked } })
+											}
+											className="accent-cf"
+										/>
+										<span className="truncate">{HEADERS[key as ColumnKey]}</span>
+									</label>
+									<button
+										type="button"
+										aria-label={`Move ${HEADERS[key as ColumnKey]} up`}
+										disabled={i === 0}
+										onClick={() => moveColumn(key, -1)}
+										className="rounded p-0.5 text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
+									>
+										<ChevronUpIcon size={14} />
+									</button>
+									<button
+										type="button"
+										aria-label={`Move ${HEADERS[key as ColumnKey]} down`}
+										disabled={i === effectiveOrder.length - 1}
+										onClick={() => moveColumn(key, 1)}
+										className="rounded p-0.5 text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
+									>
+										<ChevronDownIcon size={14} />
+									</button>
+								</div>
+							))}
+						</div>
+					)}
+				</div>
+
 				<button
 					type="button"
 					onClick={() => {
+						// Visible columns only, so the export matches what is on screen.
 						const csv = toCsv(
 							table.getFilteredRowModel().rows,
-							COLUMNS.map((key) => ({ header: HEADERS[key], value: (row) => cellText(key, row.original) })),
+							table.getVisibleLeafColumns().map((col) => ({
+								header: HEADERS[col.id as ColumnKey],
+								value: (row) => cellText(col.id as ColumnKey, row.original),
+							})),
 						);
 						downloadCsv(`flarelens-reusable-policies-${new Date().toISOString().slice(0, 10)}.csv`, csv);
 					}}
@@ -234,7 +386,39 @@ export function PoliciesTable({ policies, usedBy, loading, ctx }: PoliciesTableP
 										const sorted = header.column.getIsSorted();
 										const key = header.column.id;
 										return (
-											<th key={header.id} className="px-2 py-1 text-left">
+											<th
+												key={header.id}
+												draggable
+												onDragStart={(e) => {
+													draggedKeyRef.current = key;
+													e.dataTransfer.effectAllowed = "move";
+												}}
+												onDragOver={(e) => {
+													e.preventDefault();
+													e.dataTransfer.dropEffect = "move";
+												}}
+												onDragEnter={() => {
+													if (draggedKeyRef.current && draggedKeyRef.current !== key) setDragOverKey(key);
+												}}
+												onDragLeave={(e) => {
+													if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+														setDragOverKey((k) => (k === key ? null : k));
+													}
+												}}
+												onDrop={(e) => {
+													e.preventDefault();
+													if (draggedKeyRef.current) reorderColumn(draggedKeyRef.current, key);
+													draggedKeyRef.current = null;
+													setDragOverKey(null);
+												}}
+												onDragEnd={() => {
+													draggedKeyRef.current = null;
+													setDragOverKey(null);
+												}}
+												className={`cursor-grab px-2 py-1 text-left active:cursor-grabbing ${
+													dragOverKey === key ? "bg-cf/10 outline-2 outline-dashed outline-cf/60 -outline-offset-2" : ""
+												}`}
+											>
 												<span className="flex items-center">
 													<button
 														type="button"
@@ -274,16 +458,16 @@ export function PoliciesTable({ policies, usedBy, loading, ctx }: PoliciesTableP
 						</thead>
 						<tbody>
 							{loading ? (
-								<SkeletonRows cols={COLUMNS.length} />
+								<SkeletonRows cols={Math.max(visibleCount, 1)} />
 							) : rows.length === 0 ? (
 								<tr>
-									<td colSpan={COLUMNS.length} className="px-4 py-16 text-center text-zinc-500 dark:text-zinc-400">
+									<td colSpan={Math.max(visibleCount, 1)} className="px-4 py-16 text-center text-zinc-500 dark:text-zinc-400">
 										No matching policies.
 									</td>
 								</tr>
 							) : (
 								rows.map((row) => {
-									const { policy, attachedTo } = row.original;
+									const { policy } = row.original;
 									const isOpen = expanded === policy.id;
 									return (
 										<>
@@ -300,30 +484,15 @@ export function PoliciesTable({ policies, usedBy, loading, ctx }: PoliciesTableP
 												aria-expanded={isOpen}
 												className="cursor-pointer border-b border-zinc-100 transition last:border-0 hover:bg-zinc-50 focus:bg-zinc-50 focus:outline-none dark:border-zinc-800/60 dark:hover:bg-zinc-800/40 dark:focus:bg-zinc-800/40"
 											>
-												<td className="px-4 py-3 font-medium">{policy.name || policy.id}</td>
-												<td className="px-4 py-3">{policy.decision && <DecisionBadge decision={policy.decision} />}</td>
-												<td className="whitespace-nowrap px-4 py-3 text-zinc-500 dark:text-zinc-400">{rulesSummary(policy)}</td>
-												<td className="px-4 py-3">
-													{attachedTo.length ? (
-														<span className="flex flex-wrap gap-1">
-															{attachedTo.map((name) => <Tag key={name} label={name} />)}
-														</span>
-													) : (
-														// The row most worth spotting: configuration that enforces nothing.
-														<span className="text-amber-600 dark:text-amber-400">Not attached</span>
-													)}
-												</td>
-												<td className="whitespace-nowrap px-4 py-3 tabular-nums text-zinc-500 dark:text-zinc-400">
-													{policy.updated_at != null ? formatLocalDateTime(policy.updated_at) : "—"}
-												</td>
-												<td className="whitespace-nowrap px-4 py-3 tabular-nums text-zinc-500 dark:text-zinc-400">
-													{policy.created_at != null ? formatLocalDateTime(policy.created_at) : "—"}
-												</td>
-												<td className="px-4 py-3 font-mono text-xs text-zinc-400">{policy.id}</td>
+												{row.getVisibleCells().map((cell) => (
+													<td key={cell.id} className="px-4 py-3 align-top">
+														{flexRender(cell.column.columnDef.cell, cell.getContext())}
+													</td>
+												))}
 											</tr>
 											{isOpen && (
 												<tr key={`${row.id}-detail`} className="border-b border-zinc-100 bg-zinc-50/60 dark:border-zinc-800/60 dark:bg-zinc-800/20">
-													<td colSpan={COLUMNS.length} className="px-4 py-4">
+													<td colSpan={Math.max(visibleCount, 1)} className="px-4 py-4">
 														<RuleList policy={policy} ctx={ctx} />
 														<details className="mt-3">
 															<summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wide text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">

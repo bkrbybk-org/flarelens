@@ -259,6 +259,15 @@ into that project only, so the node project's Workers-shaped globals stay untouc
   application is a bag of loosely-related settings, a policy is four things, and its rules are
   nested arrays that make poor columns.
 
+- **Policy list references resolve to their contents** (2026-09-09) — a rule reading
+  `Email in list 55e12a45-…` is unreviewable, since the question a policy review asks is who it
+  lets in. `/api/data` now resolves the Zero Trust lists a policy references — referenced ones
+  only, items capped at 500 — and the rule renders as `Email in list "NTT TH Staff" (42 entries)`
+  with the entries expandable inline. A list whose items could not be read says so rather than
+  rendering empty, which would read as an empty list. The policies table also gained a column
+  selector with drag-to-reorder, saved under its own prefs keys because it shares column ids
+  (name, updated_at, id) with the applications table; `created_at` is hidden by default.
+
 **Incidents**
 - 2026-09-07: **server mode broke for every gated route.** The Access application was recreated, which changed its AUD, so JWT verification failed audience check and the SPA fell back to asking for a token. Found while testing an unrelated route — the control route failed the same way, which ruled out the new code. Fixed by reading the live AUD from the login redirect and updating `CF_ACCESS_AUD`. See the constraints section in [README.md](README.md).
 

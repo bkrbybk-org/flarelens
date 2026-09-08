@@ -38,6 +38,9 @@ function renderPage(overrides: Partial<Parameters<typeof GroupsPage>[0]> = {}) {
 			progressPercent={0}
 			progressRunning={false}
 			ctx={ctx}
+			policyColumnVisibility={{}}
+			policyColumnOrder={[]}
+			onPrefsChange={() => {}}
 			{...overrides}
 		/>,
 	);
@@ -105,6 +108,53 @@ describe("GroupsPage tabs", () => {
 
 		renderPage({ reusablePolicies: [], reusablePoliciesError: false });
 		expect(screen.getByText(/defines no reusable policies/)).toBeInTheDocument();
+	});
+
+	it("hides the created column by default but keeps it selectable", async () => {
+		// A policy's creation date almost never decides anything during a review; its last change
+		// does. The column still exists for anyone who wants it.
+		renderPage();
+		expect(screen.queryByRole("button", { name: /^Created$/ })).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^Updated$/ })).toBeInTheDocument();
+
+		await userEvent.click(screen.getByRole("button", { name: "Columns" }));
+		expect(screen.getByLabelText(/Move Created up/)).toBeInTheDocument();
+	});
+
+	it("shows a referenced list's name, size and entries", async () => {
+		// The whole point of the feature: "Email in list <uuid>" tells a reviewer nothing.
+		renderPage({
+			reusablePolicies: [{ id: "p9", name: "List policy", decision: "allow", include: [{ email_list: { id: "l1" } }] }],
+			ctx: {
+				...ctx,
+				list: () => ({
+					id: "l1",
+					name: "NTT TH Staff",
+					type: "EMAIL",
+					count: 2,
+					items: ["a@example.com", "b@example.com"],
+					items_truncated: false,
+				}),
+			},
+		});
+		await userEvent.click(screen.getByText("List policy"));
+		expect(screen.getByText(/Email in list "NTT TH Staff" \(2 entries\)/)).toBeInTheDocument();
+
+		await userEvent.click(screen.getByText(/Show all 2 entries/));
+		expect(screen.getByText("a@example.com")).toBeInTheDocument();
+	});
+
+	it("says so when a list's entries could not be read", async () => {
+		// An empty render would read as an empty list, which is a different fact entirely.
+		renderPage({
+			reusablePolicies: [{ id: "p9", name: "List policy", decision: "allow", include: [{ email_list: { id: "l1" } }] }],
+			ctx: {
+				...ctx,
+				list: () => ({ id: "l1", name: "Staff", type: "EMAIL", count: 5, items: [], items_truncated: false, error: "Authentication error" }),
+			},
+		});
+		await userEvent.click(screen.getByText("List policy"));
+		expect(screen.getByText(/Entries could not be read: Authentication error/)).toBeInTheDocument();
 	});
 
 	it("mirrors the active tab into the hash so the view is deep-linkable", async () => {

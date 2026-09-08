@@ -1,8 +1,19 @@
+import type { CfList } from "../types";
+
 import type { CfPolicy } from "../types";
 
 export interface RuleContext {
 	groupName: (id: string) => string;
 	idpName: (id: string) => string;
+	/** Resolves a referenced Zero Trust list, when the account exposed it. */
+	list?: (id: string) => CfList | undefined;
+}
+
+/** "list "NTT TH Staff" (42 entries)", or the bare id when the list could not be resolved. */
+function describeList(id: string, ctx: RuleContext): string {
+	const list = ctx.list?.(id);
+	if (!list) return `list ${id}`;
+	return `list "${list.name}" (${list.count} ${list.count === 1 ? "entry" : "entries"})`;
 }
 
 // Translate a single Access rule object ({ type: {...} }) into a human-readable sentence.
@@ -18,12 +29,12 @@ export function describeRule(rule: unknown, ctx: RuleContext): string {
 	switch (key) {
 		case "email": return `Email is ${val.email}`;
 		case "email_domain": return `Emails ending in @${val.domain}`;
-		case "email_list": return `Email in list ${val.id}`;
+		case "email_list": return `Email in ${describeList(val.id, ctx)}`;
 		case "everyone": return "Everyone";
 		case "certificate": return "Valid client certificate";
 		case "common_name": return `Certificate CN is ${val.common_name}`;
 		case "ip": return `IP in ${val.ip}`;
-		case "ip_list": return `IP in list ${val.id}`;
+		case "ip_list": return `IP in ${describeList(val.id, ctx)}`;
 		case "group": return `Member of group "${ctx.groupName(val.id)}"`;
 		case "geo": return `Country is ${val.country_code}`;
 		case "auth_method": return `Auth method is ${val.auth_method}`;
