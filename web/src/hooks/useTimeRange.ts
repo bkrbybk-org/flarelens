@@ -90,4 +90,4 @@ export function useTimeRange(prefs: Prefs, updatePrefs: (patch: Partial<Prefs>) 
 }
 
 /** Sections whose data is time-windowed; the picker is hidden everywhere else. */
-export const TIME_RANGE_ROUTES = new Set(["waf", "cache", "ai-security", "workers", "workers-ai", "access-usage", "gateway", "cost"]);
+export const TIME_RANGE_ROUTES = new Set(["waf", "cache", "ai-security", "workers", "workers-ai", "ai-gateway", "access-usage", "gateway", "cost"]);

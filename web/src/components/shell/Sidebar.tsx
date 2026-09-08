@@ -73,6 +73,7 @@ const NAV_GROUPS: { label: string; items: { route: Route; label: string; icon: t
 		items: [
 			{ route: "workers", label: "Workers Analytics", icon: BoltIcon },
 			{ route: "workers-ai", label: "Workers AI", icon: SparkIcon },
+			{ route: "ai-gateway", label: "AI Gateway", icon: SparkIcon },
 			{ route: "cost", label: "Cost & Usage", icon: ChartIcon },
 		],
 	},
