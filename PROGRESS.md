@@ -234,6 +234,19 @@ into that project only, so the node project's Workers-shaped globals stay untouc
   Full vs Full (strict), HSTS on/off and max-age, Always Use HTTPS — as a third axis that also
   never moves a verdict: these are classical-TLS configuration choices, not key agreement.
 
+- **PQC measured adoption** (2026-09-08) — the schema question is settled: GraphQL *does* expose
+  `clientTLSKeyExchangeGroup` on `httpRequestsAdaptiveGroups`. Live on this account: 2,327
+  post-quantum against 5,960 classical over 24h, about 28%, across 60 hostnames. The probe stays
+  in rather than being replaced by the literal name, so an account without the dimension gets a
+  stated reason instead of a fabricated 0%.
+
+- **AI Gateway verified against real data** (2026-09-08) — 74 requests over 30 days, 16,294 input
+  and 2,455 output tokens, $0.0072, 18 errors (24%), 1 cache hit. Getting there took three
+  deploys and is the reason the module now resolves field names from the schema by priority-
+  ordered exact name: the first guess failed loudly (`unknown field "totalTokensIn"`), and the
+  first probe failed *quietly* by matching `cachedTokensIn` and `abnormalCostSessions` — real
+  fields that answer different questions and report zero.
+
 **Incidents**
 - 2026-09-07: **server mode broke for every gated route.** The Access application was recreated, which changed its AUD, so JWT verification failed audience check and the SPA fell back to asking for a token. Found while testing an unrelated route — the control route failed the same way, which ruled out the new code. Fixed by reading the live AUD from the login redirect and updating `CF_ACCESS_AUD`. See the constraints section in [README.md](README.md).
 

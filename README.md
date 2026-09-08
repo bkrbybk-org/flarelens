@@ -249,11 +249,19 @@ API supports. To settle a specific origin:
 bssl client -connect <origin>:443 -curves X25519MLKEM768
 ```
 
-Measured adoption is a separate matter: the `ClientTLSKeyExchangeGroup` field (values
-`X25519MLKEM768`, `X25519`, `P-256`, `UNK`, `NONE`) exists in the `http_requests` **Logpush**
-dataset and Log Explorer, not in the GraphQL Analytics schema this app reads. If it appears in
-`httpRequestsAdaptiveGroups`, PQC Readiness can gain a measured column; until then it reports
-configuration, not observed traffic.
+**Measured adoption is available through GraphQL** — verified 2026-09-08. Cloudflare documents
+`ClientTLSKeyExchangeGroup` as a Logpush field, but `httpRequestsAdaptiveGroups` also exposes it
+as the `clientTLSKeyExchangeGroup` dimension, so PQC Readiness reports observed adoption without
+Log Explorer's stored-logs cost. The Worker still probes for it rather than hardcoding the name:
+if the dimension is absent the section says so and names Log Explorer as the alternative, because
+a zero and an absence must never look the same.
+
+**A schema field can be real, well-named and still answer a different question.** AI Gateway's
+requests dataset exposes `tokensIn` alongside `cachedTokensIn` and `uncachedTokensIn`, and `cost`
+alongside `abnormalCostSessions`. A pattern match for the obvious shape picked the wrong field in
+both cases and reported a confident zero rather than an error. Field resolution there names its
+candidates in priority order for that reason, and the API response carries both the resolved
+names and the lists they were chosen from.
 
 **Cipher suites and key agreement are separate axes.** The zone `ciphers` setting selects
 allowed suites for **TLS 1.0–1.2 only** — TLS 1.3 suites are fixed and cannot be configured — so
