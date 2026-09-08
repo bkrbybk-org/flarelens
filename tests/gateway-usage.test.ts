@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isBlockedVerdict } from "../src/lib/gateway-usage";
 import app from "../src/index";
 import { MAX_GATEWAY_RANGE_MS, isGatewayGranularity } from "../src/lib/gateway-usage";
 
@@ -51,6 +52,35 @@ beforeEach(() => {
 	});
 });
 afterEach(() => vi.restoreAllMocks());
+
+describe("verdict vocabulary", () => {
+	// Pinned against Cloudflare's documented policy actions and resolver decisions — the account
+	// this runs on has never produced a real block, so the doc'd vocabulary is the only check
+	// available. See the note on isBlockedVerdict.
+	it.each([
+		["block", true],
+		["quarantine", true],
+		["blockedOnBlockPolicy", true],
+		["blockedOnSecurityCategory", true],
+		["allow", false],
+		["allowedOnNoPolicyMatch", false],
+		["off", false],
+		// Served through Browser Isolation, and rewrites of the answer: not refusals.
+		["isolate", false],
+		["overrideForSafeSearch", false],
+		["override", false],
+		// Never seen: default to allowed rather than inventing a block.
+		["somethingNewFromCloudflare", false],
+		["", false],
+	])("classifies %s", (verdict, blocked) => {
+		expect(isBlockedVerdict(verdict)).toBe(blocked);
+	});
+
+	it("treats a missing verdict as allowed", () => {
+		expect(isBlockedVerdict(undefined)).toBe(false);
+		expect(isBlockedVerdict(null)).toBe(false);
+	});
+});
 
 describe("verdict classification", () => {
 	it("counts a verdict naming a block as blocked, and everything else as allowed", async () => {

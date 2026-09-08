@@ -69,12 +69,29 @@ export interface GatewayUsageResult {
 }
 
 /**
- * Both datasets describe the outcome as a free-text verdict rather than a boolean, and the exact
- * vocabulary is not documented anywhere we control (`blocked`, `block`, `blockedBy…`). Anything
- * naming a block or a quarantine counts as blocked; everything else is treated as allowed, so a
- * verdict we have not seen before is never silently counted as a block.
+ * Both datasets describe the outcome as a free-text verdict rather than a boolean, so this is a
+ * substring test: anything naming a block or a quarantine counts as blocked, everything else is
+ * treated as allowed. A verdict we have not seen before is therefore never silently counted as
+ * a block.
+ *
+ * Checked against Cloudflare's published policy vocabulary (2026-09-08), since no window queried
+ * on this account has yet contained a real block:
+ *
+ *   HTTP policy `action`  allow, block, quarantine, isolate, off (Do Not Inspect), and the
+ *                         non-enforcement actions. Of these only block and quarantine stop the
+ *                         request, and both are matched here. `isolate` is deliberately NOT a
+ *                         block: the request is served, through Browser Isolation.
+ *   DNS `resolverDecision` camelCase strings naming what happened, e.g. `blockedOnBlockPolicy`,
+ *                         `allowedOnNoPolicyMatch`, `overrideForSafeSearch`. The Block action's
+ *                         decisions all carry "blocked".
+ *
+ * The Override, Safe Search and YouTube Restricted Mode actions rewrite the answer rather than
+ * refusing it, so they land under allowed. That is the intended reading — the query did resolve —
+ * but it does mean "allowed" here means "not blocked", not "unmodified".
+ *
+ * Exported for tests; production callers go through the folds below.
  */
-function isBlockedVerdict(value: unknown): boolean {
+export function isBlockedVerdict(value: unknown): boolean {
 	const text = String(value ?? "").toLowerCase();
 	return text.includes("block") || text.includes("quarantine");
 }
