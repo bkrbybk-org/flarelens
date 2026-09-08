@@ -80,18 +80,18 @@ describe("graphBuckets — bucketing maths", () => {
 		expect(buckets[4].counts.block).toBe(1);
 	});
 
-	// SUSPECTED BUG: graphBuckets clamps the computed index into [0, bucketCount-1]
-	// rather than excluding events whose time falls outside [start, end). An event
-	// far before the window or far after it is still counted, silently folded into
-	// the first or last bucket instead of being dropped. Pinning that behavior here.
-	it("SUSPECTED BUG: an event before the window start is folded into bucket 0 instead of excluded", () => {
+	// Events outside [start, end] are dropped rather than clamped into the edge buckets, so a
+	// bucket never reports traffic from outside the window it labels.
+	it("excludes an event before the window start", () => {
 		const buckets = graphBuckets([timed("block", -500)], start, end, bucketCount, ALL_ON);
-		expect(buckets[0].counts.block).toBe(1);
+		expect(buckets[0].counts.block).toBe(0);
+		expect(buckets.reduce((n, b) => n + b.total, 0)).toBe(0);
 	});
 
-	it("SUSPECTED BUG: an event after the window end is folded into the last bucket instead of excluded", () => {
+	it("excludes an event after the window end", () => {
 		const buckets = graphBuckets([timed("block", 5000)], start, end, bucketCount, ALL_ON);
-		expect(buckets[4].counts.block).toBe(1);
+		expect(buckets[4].counts.block).toBe(0);
+		expect(buckets.reduce((n, b) => n + b.total, 0)).toBe(0);
 	});
 
 	it("ignores events whose action doesn't map to any chart action group", () => {

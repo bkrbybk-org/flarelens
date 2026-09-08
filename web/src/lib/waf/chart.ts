@@ -39,6 +39,11 @@ export function graphBuckets(
 		end: start + (index + 1) * bucketMs,
 	}));
 	for (const event of events) {
+		// Outside the requested window is excluded, not clamped: folding a stray event into the
+		// first or last bucket makes that bucket claim traffic the window never contained.
+		// `end` itself is kept — the window is inclusive of its own upper bound, and the index
+		// it computes is one past the last bucket, so it is clamped down rather than dropped.
+		if (event.time < start || event.time > end) continue;
 		const index = clampNumber(Math.floor((event.time - start) / bucketMs), 0, bucketCount - 1);
 		const group = chartActionFor(normalizeAction(event.action));
 		if (!group) continue;
