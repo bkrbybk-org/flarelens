@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { assertAllowedScope, resolveAuth, type AuthEnv } from "./lib/auth";
 import { TunnelMapError, fetchTunnelMap } from "./lib/access-tunnels";
+import { PqcError, fetchPqcReport, type PqcZone } from "./lib/pqc";
 import { RequestTraceError, normaliseRayId, traceRequest } from "./lib/request-trace";
 import { MAX_AI_RANGE_MS, WorkersAiError, fetchWorkersAi, isAiGranularity } from "./lib/workers-ai";
 import {
@@ -833,6 +834,57 @@ app.get("/api/access/tunnels", async (c) => {
 	} catch (err) {
 		const status = err instanceof TunnelMapError ? err.status : 502;
 		const message = err instanceof Error ? err.message : "Failed to build the tunnel map";
+		return c.json({ success: false, errors: [{ message }] }, status as 502);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// PQC readiness (post-quantum coverage per hostname)
+
+/**
+ * Post-quantum readiness for every proxiable hostname in the account.
+ *
+ * Zone-wide by design: the settings that decide the answer (TLS 1.3, SSL mode) are zone settings,
+ * and the inventory question being asked is "which of our names are not covered", which cannot be
+ * answered one zone at a time. `zone_id` narrows it when an operator wants a single zone.
+ *
+ * Needs Zone: DNS: Read for the record inventory. Without it each zone comes back carrying its
+ * own error and no rows, rather than the page reporting an empty, clean-looking account.
+ */
+app.get("/api/pqc/report", async (c) => {
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
+	}
+	const accountId = validHexId(c.req.query("account_id"));
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Invalid account_id" }] }, 400);
+	}
+	const zoneParam = c.req.query("zone_id");
+	const zoneId = zoneParam ? validHexId(zoneParam) : null;
+	if (zoneParam && !zoneId) {
+		return c.json({ success: false, errors: [{ message: "Invalid zone_id" }] }, 400);
+	}
+	const scope = assertAllowedScope(auth.auth, c.env, zoneId ? { accountId, zoneId } : { accountId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
+	}
+
+	const token = auth.auth.token;
+	const zonesRes = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`, token);
+	if (zonesRes.status !== 200) {
+		return c.json({ success: false, errors: zonesRes.errors || [{ message: "Failed to fetch zones" }] }, zonesRes.status as 200);
+	}
+
+	const zones: PqcZone[] = zonesRes.result
+		.filter((z) => !zoneId || z.id === zoneId)
+		.map((z) => ({ id: z.id, name: z.name || z.id }));
+
+	try {
+		return c.json({ success: true, result: await fetchPqcReport(accountId, token, zones) });
+	} catch (err) {
+		const status = err instanceof PqcError ? err.status : 502;
+		const message = err instanceof Error ? err.message : "Failed to build the PQC report";
 		return c.json({ success: false, errors: [{ message }] }, status as 502);
 	}
 });

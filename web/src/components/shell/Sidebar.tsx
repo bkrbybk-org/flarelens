@@ -8,6 +8,7 @@ import {
 	DatabaseIcon,
 	GlobeIcon,
 	KeyIcon,
+	LockIcon,
 	PanelLeftIcon,
 	SearchIcon,
 	ShareIcon,
@@ -60,6 +61,7 @@ const NAV_GROUPS: { label: string; items: { route: Route; label: string; icon: t
 			{ route: "waf", label: "WAF Analytics", icon: ShieldIcon },
 			{ route: "ai-security", label: "AI Security", icon: KeyIcon },
 			{ route: "request", label: "Request Trace", icon: SearchIcon },
+			{ route: "pqc", label: "PQC Readiness", icon: LockIcon },
 		],
 	},
 	{

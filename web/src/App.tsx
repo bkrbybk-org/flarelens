@@ -12,6 +12,7 @@ import { AccessUsagePage } from "./features/access-usage/AccessUsagePage";
 import { WorkersAiPage } from "./features/workers-ai/WorkersAiPage";
 import { GatewayPage } from "./features/gateway/GatewayPage";
 import { TunnelMapPage } from "./features/tunnels/TunnelMapPage";
+import { PqcPage } from "./features/pqc/PqcPage";
 import { RequestTracePage } from "./features/request/RequestTracePage";
 import { CostPage } from "./features/cost/CostPage";
 import { AiSecurityPage } from "./features/ai-security/AiSecurityPage";
@@ -39,6 +40,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	request: "Request Trace",
 	tunnels: "Tunnel Map",
 	gateway: "Gateway Usage",
+	pqc: "PQC Readiness",
 	cost: "Cost & Usage",
 	findings: "Findings",
 };
@@ -288,6 +290,7 @@ export default function App() {
 					{route === "request" && <RequestTracePage session={session} zones={zones.zones} onAuthError={handleDisconnect} />}
 					{route === "tunnels" && <TunnelMapPage session={session} onAuthError={handleDisconnect} />}
 					{route === "gateway" && <GatewayPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
+					{route === "pqc" && <PqcPage session={session} onAuthError={handleDisconnect} />}
 					{route === "cost" && (
 						<CostPage
 							session={session}

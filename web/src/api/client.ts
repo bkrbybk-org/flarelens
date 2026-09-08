@@ -185,6 +185,10 @@ export function fetchTunnelMap<T>(token: string, accountId: string): Promise<T> 
 	return apiFetch<T>(`/api/access/tunnels?account_id=${encodeURIComponent(accountId)}`, token);
 }
 
+export function fetchPqcReport<T>(token: string, accountId: string): Promise<T> {
+	return apiFetch<T>(`/api/pqc/report?account_id=${encodeURIComponent(accountId)}`, token);
+}
+
 export function traceRequest<T>(
 	token: string,
 	body: { accountId: string; rayId: string; zoneId?: string; minutes: number },
