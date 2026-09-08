@@ -50,7 +50,19 @@ interface DatasetCaps {
 }
 
 interface ResolvedFields {
-	requests: (DatasetCaps & { gateway: string | null; model: string | null; provider: string | null; tokensIn: string | null; tokensOut: string | null }) | null;
+	requests:
+		| (DatasetCaps & {
+				gateway: string | null;
+				model: string | null;
+				provider: string | null;
+				tokensIn: string | null;
+				tokensOut: string | null;
+				/** Requests served from the Gateway's cache — the numerator for the hit rate. */
+				cachedRequests: string | null;
+				erroredRequests: string | null;
+				cost: string | null;
+		  })
+		| null;
 	errors: DatasetCaps | null;
 	cache: (DatasetCaps & { status: string | null }) | null;
 	spend: (DatasetCaps & { cost: string | null }) | null;
@@ -59,6 +71,18 @@ interface ResolvedFields {
 }
 
 const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * First candidate that exists, in priority order.
+ *
+ * Deliberately exact-match rather than a regex over the whole list. The first version matched by
+ * pattern and picked `cachedTokensIn` for token volume and `abnormalCostSessions` for cost —
+ * both real fields answering a different question, both reporting a confident zero. Ordering
+ * named candidates makes "the one I actually want, else a documented fallback" explicit.
+ */
+const prefer = (names: string[], ...candidates: string[]) => candidates.find((c) => names.includes(c)) ?? null;
+
+/** Last resort for dimensions whose spelling genuinely varies between accounts. */
 const pick = (names: string[], pattern: RegExp) => names.find((n) => pattern.test(norm(n))) ?? null;
 
 const TYPE_REF = "name ofType { name ofType { name ofType { name ofType { name } } } }";
@@ -155,16 +179,22 @@ export async function resolveAiGatewayFields(token: string, cacheKey: string): P
 	const value: ResolvedFields = {
 		requests: requests && {
 			...requests,
-			gateway: pick(requests.dimensions, /gateway/),
-			model: pick(requests.dimensions, /model/),
-			provider: pick(requests.dimensions, /provider/),
-			// Token counts are the field names that were wrong first time round; match on shape.
-			tokensIn: pick(requests.sums, /token.*in|input.*token|promptttoken|prompttoken/),
-			tokensOut: pick(requests.sums, /token.*out|output.*token|completiontoken/),
+			gateway: prefer(requests.dimensions, "gateway", "gatewayId", "gatewayName"),
+			model: prefer(requests.dimensions, "model", "modelId"),
+			provider: prefer(requests.dimensions, "provider"),
+			// `tokensIn` is the total; `cachedTokensIn` and `uncachedTokensIn` are its parts, and
+			// picking a part reports a fraction of the truth as the whole of it.
+			tokensIn: prefer(requests.sums, "tokensIn", "totalTokensIn"),
+			tokensOut: prefer(requests.sums, "tokensOut", "totalTokensOut"),
+			cachedRequests: prefer(requests.sums, "cachedRequests"),
+			erroredRequests: prefer(requests.sums, "erroredRequests"),
+			cost: prefer(requests.sums, "cost", "totalCost"),
 		},
 		errors,
-		cache: cache && { ...cache, status: pick(cache.dimensions, /cach|status|hit/) },
-		spend: spend && { ...spend, cost: pick(spend.sums, /cost|spend|amount/) },
+		cache: cache && { ...cache, status: prefer(cache.dimensions, "cacheStatus", "cacheOp") ?? pick(cache.dimensions, /cach/) },
+		// `cost` is the spend total. Every other cost-shaped name on this dataset counts sessions
+		// with some property (abnormal, premium, thinking), which is a different quantity.
+		spend: spend && { ...spend, cost: prefer(spend.sums, "cost", "totalCost") },
 		datasetsSeen,
 	};
 
@@ -272,6 +302,15 @@ export interface AiGatewayUsageResult {
 		tokensOutField: string | null;
 		cacheStatusDimension: string | null;
 		costField: string | null;
+		/**
+		 * The candidate lists each choice was made from.
+		 *
+		 * Kept in the response because a resolution can be wrong in a way that looks like data:
+		 * the first pass matched `cachedTokensIn` for token volume and `abnormalCostSessions`
+		 * for cost, both of which are real fields that answer a different question and report
+		 * an honest-looking zero. Seeing the alternatives is what makes that diagnosable.
+		 */
+		candidates: { requestsSums: string[]; requestsDimensions: string[]; cacheDimensions: string[]; spendSums: string[] };
 	};
 }
 
@@ -350,7 +389,7 @@ query AiGatewayRequests($accountTag: string!, $since: Time!, $until: Time!, $ser
       ) {
         count
         dimensions { ${timeDimension} }
-        ${sumSelection([f.tokensIn, f.tokensOut])}
+        ${sumSelection([f.tokensIn, f.tokensOut, f.cachedRequests, f.erroredRequests, f.cost])}
       }${gatewayAlias}${modelAlias}
     }
   }
@@ -465,6 +504,12 @@ export async function fetchAiGatewayUsage(
 		field ? seriesRows.reduce((total, row) => total + (row.sum?.[field] ?? 0), 0) : null;
 	const tokensIn = sumOf(fields.requests.tokensIn);
 	const tokensOut = sumOf(fields.requests.tokensOut);
+	// Cache, errors and cost come from the requests dataset when it carries them: it is the one
+	// dataset already proven to answer, and `cachedRequests` is an exact count of cache-served
+	// requests where the cache dataset's own dimension would need its vocabulary interpreted.
+	const cachedRequests = sumOf(fields.requests.cachedRequests);
+	const inlineErrors = sumOf(fields.requests.erroredRequests);
+	const inlineCost = sumOf(fields.requests.cost);
 
 	// The three supplementary datasets each degrade independently: an absent dataset (or a
 	// dimension this account does not carry) empties that one panel with a stated reason instead
@@ -482,19 +527,19 @@ export async function fetchAiGatewayUsage(
 				: "Failed to load"
 			: "";
 
-	let errors: number | null = null;
-	const errorsStatus: AiGatewayDatasetStatus = { available: false };
-	if (errorsOutcome.status === "fulfilled") {
+	let errors: number | null = inlineErrors;
+	const errorsStatus: AiGatewayDatasetStatus = { available: inlineErrors !== null };
+	if (inlineErrors === null && errorsOutcome.status === "fulfilled") {
 		errors = (errorsOutcome.value.account?.total || []).reduce((sum, row) => sum + row.count, 0);
 		errorsStatus.available = true;
-	} else {
+	} else if (inlineErrors === null) {
 		errorsStatus.reason = reasonOf(errorsOutcome);
 	}
 
-	let cacheHits: number | null = null;
-	let cacheMisses: number | null = null;
-	const cacheStatus: AiGatewayDatasetStatus = { available: false };
-	if (cacheOutcome.status === "fulfilled" && fields.cache?.status) {
+	let cacheHits: number | null = cachedRequests;
+	let cacheMisses: number | null = cachedRequests === null ? null : Math.max(0, requests - cachedRequests);
+	const cacheStatus: AiGatewayDatasetStatus = { available: cachedRequests !== null };
+	if (cachedRequests === null && cacheOutcome.status === "fulfilled" && fields.cache?.status) {
 		const rows = cacheOutcome.value.account?.byStatus || [];
 		cacheHits = 0;
 		cacheMisses = 0;
@@ -503,22 +548,22 @@ export async function fetchAiGatewayUsage(
 			else cacheMisses += row.count;
 		}
 		cacheStatus.available = true;
-	} else {
+	} else if (cachedRequests === null) {
 		// Present but with no status dimension is still unusable: hits and misses would be
 		// indistinguishable, and reporting every row as a miss would invent a 0% hit rate.
 		cacheStatus.reason = cacheOutcome.status === "fulfilled" ? "The cache dataset exposes no status dimension, so hits cannot be told from misses" : reasonOf(cacheOutcome);
 	}
 
-	let cost: number | null = null;
-	const spendStatus: AiGatewayDatasetStatus = { available: false };
-	if (spendOutcome.status === "fulfilled" && fields.spend?.cost) {
+	let cost: number | null = inlineCost;
+	const spendStatus: AiGatewayDatasetStatus = { available: inlineCost !== null };
+	if (inlineCost === null && spendOutcome.status === "fulfilled" && fields.spend?.cost) {
 		const rows = spendOutcome.value.account?.total || [];
 		// No rows stays null rather than 0: until this has been seen against real data, an empty
 		// spend result cannot be told apart from a dataset that does not answer in this shape,
 		// and a confident $0 is the more damaging of the two readings.
 		if (rows.length) cost = rows.reduce((sum, row) => sum + (row.sum?.[fields.spend!.cost as string] ?? 0), 0);
 		spendStatus.available = true;
-	} else {
+	} else if (inlineCost === null) {
 		spendStatus.reason = spendOutcome.status === "fulfilled" ? "The spend dataset exposes no cost aggregate" : reasonOf(spendOutcome);
 	}
 
@@ -555,6 +600,12 @@ export async function fetchAiGatewayUsage(
 			tokensOutField: fields.requests.tokensOut,
 			cacheStatusDimension: fields.cache?.status ?? null,
 			costField: fields.spend?.cost ?? null,
+			candidates: {
+				requestsSums: fields.requests.sums,
+				requestsDimensions: fields.requests.dimensions,
+				cacheDimensions: fields.cache?.dimensions ?? [],
+				spendSums: fields.spend?.sums ?? [],
+			},
 		},
 	};
 }
