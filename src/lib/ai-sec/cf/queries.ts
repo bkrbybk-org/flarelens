@@ -384,15 +384,21 @@ function toEvent(zone: Zone, row: Record<string, unknown>): RawEvent {
 	};
 }
 
-/** Fetch everything the dashboard needs for one zone in a single GraphQL round trip. */
-async function fetchZone(env: AiSecEnv, schema: SchemaCaps, zone: Zone, win: TimeWindow): Promise<ZoneResult> {
+
+/** One zone's row set as it comes back from GraphQL. */
+type ZoneNode = ZoneQueryResponse['viewer']['zones'][number];
+
+/**
+ * The aggregate half of one zone's query: totals, previous-period totals and the bucketed
+ * series. Everything it returns is a count or a bucket timestamp — nothing here identifies a
+ * requester, which is what makes this the only half allowed into the edge cache. See
+ * fetchZoneCached.
+ */
+function aggregateAliases(
+	schema: SchemaCaps,
+	win: TimeWindow,
+): { aliases: string[]; detSeriesAvailable: ZoneResult['detectionSeriesAvailable'] } {
 	const groups = schema.datasets.httpRequestsAdaptiveGroups;
-	const rowsDataset = schema.ai.dataset ? schema.datasets[schema.ai.dataset] : undefined;
-
-	if (!groups && !rowsDataset) {
-		return emptyResult(zone, 'No usable analytics dataset in schema');
-	}
-
 	const aliases: string[] = [];
 	let detSeriesAvailable = { ...EMPTY_SERIES_AVAILABLE };
 
@@ -482,6 +488,18 @@ async function fetchZone(env: AiSecEnv, schema: SchemaCaps, zone: Zone, win: Tim
 		};
 	}
 
+	return { aliases, detSeriesAvailable };
+}
+
+/**
+ * The row half: one entry per request, plus the payload-logging metadata joined onto it.
+ * Client IPs, JA4 fingerprints, paths and the encrypted prompt all live here, so this half is
+ * fetched fresh on every load and is never written to the cache.
+ */
+function rowAliases(env: AiSecEnv, schema: SchemaCaps, win: TimeWindow): { aliases: string[]; rulesetFiltered: boolean } {
+	const rowsDataset = schema.ai.dataset ? schema.datasets[schema.ai.dataset] : undefined;
+	const aliases: string[] = [];
+
 	if (rowsDataset) {
 		const sel = buildRowSelection(rowsDataset, schema.ai);
 		const f = baseFilter(rowsDataset, schema.labelField[schema.ai.dataset!], win);
@@ -540,29 +558,31 @@ async function fetchZone(env: AiSecEnv, schema: SchemaCaps, zone: Zone, win: Tim
 		}
 	}
 
-	const body = aliases.filter(Boolean).join('\n');
-	if (!body.trim()) {
-		return emptyResult(zone, 'No queryable fields');
-	}
+	return { aliases, rulesetFiltered };
+}
 
-	const query = `
-query ZoneAiSecurity {
+/** Wrap a set of aliases in a zone-scoped document. Null when there is nothing worth asking. */
+function zoneQuery(zone: Zone, name: string, aliases: string[]): string | null {
+	const body = aliases.filter(Boolean).join('\n');
+	if (!body.trim()) return null;
+	return `
+query ${name} {
   viewer {
     zones(filter: { zoneTag: "${zone.id}" }) {${body}
     }
   }
 }`;
+}
 
-	const { data, error } = await graphqlSafe<ZoneQueryResponse>(env, query);
-	if (error || !data) {
-		return emptyResult(zone, error ?? 'no data');
-	}
-
-	const z = data.viewer.zones[0];
-	if (!z) {
-		return emptyResult(zone, null);
-	}
-
+/** Counts and series only; `events` is left empty for the row half to fill in. */
+function parseAggregates(
+	zone: Zone,
+	schema: SchemaCaps,
+	win: TimeWindow,
+	z: ZoneNode,
+	detSeriesAvailable: ZoneResult['detectionSeriesAvailable'],
+): ZoneResult {
+	const groups = schema.datasets.httpRequestsAdaptiveGroups;
 	// Resolved a second time rather than threaded down: same pure function, same inputs. Null
 	// means no series was requested at all, in which case z.series is absent and this maps nothing.
 	const bucketKey = groups ? resolveBucket(groups, win.bucket) : null;
@@ -592,6 +612,38 @@ query ZoneAiSecurity {
 	addDetSeries(z.customSeries, 'custom');
 	const detectionSeries = [...detSeriesMap.values()].sort((a, b) => a.ts.localeCompare(b.ts));
 
+	const count = (g?: { count: number }[]) => g?.[0]?.count ?? 0;
+
+	return {
+		zone,
+		llmRequests: count(z.llmTotal),
+		llmRequestsPrev: count(z.llmPrev),
+		series,
+		seriesPrev,
+		detectionSeries,
+		detectionSeriesAvailable: detSeriesAvailable,
+		seriesBucket: bucketKey,
+		detections: {
+			injection: count(z.injectionTotal),
+			pii: count(z.piiTotal),
+			unsafe: count(z.unsafeTotal),
+			custom: count(z.customTotal),
+		},
+		detectionsPrev: {
+			injection: count(z.injectionPrev),
+			pii: count(z.piiPrev),
+			unsafe: count(z.unsafePrev),
+			custom: count(z.customPrev),
+		},
+		// Supplied by the row half on every load. Never populated from a cache entry.
+		events: [],
+		error: null,
+		truncated: false,
+	};
+}
+
+/** Per-request rows, deduped by ray and joined to their payload metadata. */
+function parseEvents(zone: Zone, z: ZoneNode, rulesetFiltered: boolean): { events: RawEvent[]; truncated: boolean } {
 	// A request can trip several detectors at once; dedupe on ray id so it is one event.
 	const byRay = new Map<string, RawEvent>();
 	const rowSets = [z.injectionRows, z.piiRows, z.unsafeRows, z.customRows];
@@ -643,34 +695,43 @@ query ZoneAiSecurity {
 		ev.payload = info;
 	}
 
-	const count = (g?: { count: number }[]) => g?.[0]?.count ?? 0;
-
-	return {
-		zone,
-		llmRequests: count(z.llmTotal),
-		llmRequestsPrev: count(z.llmPrev),
-		series,
-		seriesPrev,
-		detectionSeries,
-		detectionSeriesAvailable: detSeriesAvailable,
-		seriesBucket: bucketKey,
-		detections: {
-			injection: count(z.injectionTotal),
-			pii: count(z.piiTotal),
-			unsafe: count(z.unsafeTotal),
-			custom: count(z.customTotal),
-		},
-		detectionsPrev: {
-			injection: count(z.injectionPrev),
-			pii: count(z.piiPrev),
-			unsafe: count(z.unsafePrev),
-			custom: count(z.customPrev),
-		},
-		events: [...byRay.values()],
-		error: null,
-		truncated,
-	};
+	return { events: [...byRay.values()], truncated };
 }
+
+/** `queried` is false when the schema exposed nothing to ask for, as opposed to asking and getting nothing. */
+async function fetchZoneAggregates(env: AiSecEnv, schema: SchemaCaps, zone: Zone, win: TimeWindow): Promise<{ agg: ZoneResult; queried: boolean }> {
+	const { aliases, detSeriesAvailable } = aggregateAliases(schema, win);
+	const query = zoneQuery(zone, 'ZoneAiSecurityAggregates', aliases);
+	if (!query) return { agg: emptyResult(zone, null), queried: false };
+
+	const { data, error } = await graphqlSafe<ZoneQueryResponse>(env, query);
+	if (error || !data) return { agg: emptyResult(zone, error ?? 'no data'), queried: true };
+
+	const z = data.viewer.zones[0];
+	if (!z) return { agg: emptyResult(zone, null), queried: true };
+
+	return { agg: parseAggregates(zone, schema, win, z, detSeriesAvailable), queried: true };
+}
+
+async function fetchZoneEvents(
+	env: AiSecEnv,
+	schema: SchemaCaps,
+	zone: Zone,
+	win: TimeWindow,
+): Promise<{ events: RawEvent[]; truncated: boolean; error: string | null; queried: boolean }> {
+	const { aliases, rulesetFiltered } = rowAliases(env, schema, win);
+	const query = zoneQuery(zone, 'ZoneAiSecurityEvents', aliases);
+	if (!query) return { events: [], truncated: false, error: null, queried: false };
+
+	const { data, error } = await graphqlSafe<ZoneQueryResponse>(env, query);
+	if (error || !data) return { events: [], truncated: false, error: error ?? 'no data', queried: true };
+
+	const z = data.viewer.zones[0];
+	if (!z) return { events: [], truncated: false, error: null, queried: true };
+
+	return { ...parseEvents(zone, z, rulesetFiltered), error: null, queried: true };
+}
+
 
 /**
  * Bump whenever the ZoneResult shape changes. ZoneResult is round-tripped through the Cache
@@ -679,8 +740,12 @@ query ZoneAiSecurity {
  * missing from it for up to the TTL, and a bare `r.detectionsPrev.injection` access throws.
  * Folding this into the key forces a cache miss (and a fresh, complete fetch) on every deploy
  * that changes the shape, instead of serving stale-shaped JSON until it expires.
+ *
+ * 6: the cached value is now the aggregate half only — `events` is always empty in it and
+ * `truncated` always false, both supplied by the uncached row query instead. Entries written
+ * by version 5 carry real event rows, so they must not be read back.
  */
-const RESULT_VERSION = 5;
+const RESULT_VERSION = 6;
 
 /**
  * Quantized per-zone cache key.
@@ -711,28 +776,53 @@ function zoneCacheKey(fp: string, zoneId: string, win: TimeWindow, ttlSeconds: n
 	return new Request(`${base}?range=${win.key}&slot=${slot}&v=${RESULT_VERSION}`);
 }
 
-/** ZoneResult is plain JSON-serializable data; round-trip it through the Cache API as JSON. */
+/**
+ * One zone, assembled from its two halves.
+ *
+ * Only the aggregate half is cached. It is counts and bucket timestamps, so nothing that
+ * identifies a requester is left sitting at the edge for the TTL; the row half — client IPs,
+ * JA4s, paths and the encrypted prompt — is re-fetched on every load and thrown away with the
+ * response. That costs a second round trip on a cold cache and is the whole point of the split.
+ *
+ * ZoneResult is plain JSON-serializable data; round-trip it through the Cache API as JSON.
+ */
 async function fetchZoneCached(env: AiSecEnv, schema: SchemaCaps, zone: Zone, win: TimeWindow, waitUntil: WaitUntil, ttlSeconds: number): Promise<ZoneResult> {
+	const rowsDataset = schema.ai.dataset ? schema.datasets[schema.ai.dataset] : undefined;
+	if (!schema.datasets.httpRequestsAdaptiveGroups && !rowsDataset) {
+		return emptyResult(zone, 'No usable analytics dataset in schema');
+	}
+
 	const cache = caches.default;
 	const cacheKey = zoneCacheKey(env.CF_TOKEN_FP, zone.id, win, ttlSeconds);
 	const hit = await cache.match(cacheKey);
-	if (hit) return JSON.parse(await hit.text()) as ZoneResult;
 
-	const result = await fetchZone(env, schema, zone, win);
-
-	// Never cache a transient failure — pinning it for the TTL would keep showing the zone
-	// as broken long after the underlying API call would have succeeded again.
-	if (!result.error) {
-		waitUntil(
-			cache.put(
-				cacheKey,
-				new Response(JSON.stringify(result), {
-					headers: { 'Content-Type': 'application/json', 'Cache-Control': `max-age=${ttlSeconds}` },
-				}),
-			),
-		);
+	let agg: ZoneResult;
+	let aggQueried: boolean;
+	if (hit) {
+		agg = JSON.parse(await hit.text()) as ZoneResult;
+		aggQueried = true;
+	} else {
+		({ agg, queried: aggQueried } = await fetchZoneAggregates(env, schema, zone, win));
+		// Never cache a transient failure — pinning it for the TTL would keep showing the zone
+		// as broken long after the underlying API call would have succeeded again.
+		if (!agg.error && aggQueried) {
+			waitUntil(
+				cache.put(
+					cacheKey,
+					new Response(JSON.stringify(agg), {
+						headers: { 'Content-Type': 'application/json', 'Cache-Control': `max-age=${ttlSeconds}` },
+					}),
+				),
+			);
+		}
 	}
-	return result;
+	if (agg.error) return agg;
+
+	const rows = await fetchZoneEvents(env, schema, zone, win);
+	if (rows.error) return emptyResult(zone, rows.error);
+	if (!aggQueried && !rows.queried) return emptyResult(zone, 'No queryable fields');
+
+	return { ...agg, events: rows.events, truncated: rows.truncated };
 }
 
 /** Fan out across zones with a concurrency cap; a failing zone does not fail the page. */
