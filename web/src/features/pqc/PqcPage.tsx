@@ -4,7 +4,7 @@ import { RefreshIcon, SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { Session } from "../../hooks/useSession";
 import { usePqcReport } from "./usePqcReport";
-import type { CipherGrade, CipherSummary, InboundState, OriginState, PqcRow, PqcZoneSummary, Verdict } from "./types";
+import type { CipherGrade, CipherSummary, InboundState, OriginState, PqcRow, PqcZoneSummary, TlsFindingSeverity, Verdict } from "./types";
 
 const CARD = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
@@ -115,6 +115,54 @@ function CipherPanel({ zone }: { zone: PqcZoneSummary }) {
 	);
 }
 
+const TLS_FINDING_TONE: Record<TlsFindingSeverity, string> = {
+	high: "bg-red-500/10 text-red-600 dark:text-red-400",
+	medium: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+	low: "bg-zinc-500/10 text-zinc-500 dark:text-zinc-400",
+};
+
+/**
+ * One zone's TLS hygiene, separate from the Zones table above: those columns feed a verdict,
+ * these never do. A zone with no findings is stated as clean rather than omitted — an operator
+ * scanning for gaps should not have to infer "no row means fine" from silence.
+ */
+function TlsPostureSection({ zones }: { zones: PqcZoneSummary[] }) {
+	return (
+		<section className={`${CARD} mb-4`}>
+			<h2 className="mb-1 text-sm font-semibold">TLS posture</h2>
+			<p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+				Configuration hygiene, not key agreement — none of these move a verdict above. They are real gaps on their
+				own terms: a weak TLS floor, an unvalidated origin certificate, or HTTP left reachable.
+			</p>
+			<ul className="space-y-3">
+				{zones.map((zone) => (
+					<li key={zone.zoneId}>
+						<div className="mb-1 text-sm font-medium">{zone.zoneName}</div>
+						{zone.tlsFindings.length === 0 ? (
+							<p className="text-xs text-zinc-500 dark:text-zinc-400">Clean — no hygiene findings.</p>
+						) : (
+							<ul className="space-y-1.5">
+								{zone.tlsFindings.map((finding) => (
+									<li key={finding.id} className="rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800">
+										<div className="flex flex-wrap items-center gap-2">
+											<span className={`rounded px-1.5 py-0.5 text-[11px] font-medium uppercase ${TLS_FINDING_TONE[finding.severity]}`}>
+												{finding.severity}
+											</span>
+											<span className="text-sm font-medium">{finding.title}</span>
+										</div>
+										<p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{finding.detail}</p>
+										<p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{finding.remediation}</p>
+									</li>
+								))}
+							</ul>
+						)}
+					</li>
+				))}
+			</ul>
+		</section>
+	);
+}
+
 function Kpi({ label, value, hint, tone }: { label: string; value: number; hint: string; tone?: string }) {
 	return (
 		<div className={CARD}>
@@ -151,7 +199,7 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 		return all;
 	}, [result, search, filter]);
 
-	const totals = result?.totals ?? { hostnames: 0, ready: 0, eligible: 0, notReady: 0, unknown: 0 };
+	const totals = result?.totals ?? { hostnames: 0, ready: 0, eligible: 0, notReady: 0, unknown: 0, tlsFindings: 0 };
 
 	function exportCsv() {
 		const csv = toCsv(rows, [
@@ -169,6 +217,14 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 					const zone = (result?.zones ?? []).find((z) => z.zoneId === r.zoneId);
 					if (!zone || zone.ciphers.mode !== "custom") return zone?.ciphers.mode ?? "";
 					return zone.ciphers.suites.map((s) => `${s.name} (${s.grade})`).join(" | ");
+				},
+			},
+			{
+				header: "zone_tls_findings",
+				value: (r) => {
+					const zone = (result?.zones ?? []).find((z) => z.zoneId === r.zoneId);
+					if (!zone || zone.tlsFindings.length === 0) return "";
+					return zone.tlsFindings.map((f) => `${f.severity}: ${f.title}`).join(" | ");
 				},
 			},
 		]);
@@ -241,12 +297,18 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 				</div>
 			))}
 
-			<div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+			<div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-6">
 				<Kpi label="Hostnames" value={totals.hostnames} hint="A, AAAA and CNAME records" />
 				<Kpi label="Not ready" value={totals.notReady} hint="DNS-only, TLS 1.3 off, or plaintext origin" tone={totals.notReady ? "text-red-600 dark:text-red-400" : undefined} />
 				<Kpi label="Unknown" value={totals.unknown} hint="a setting could not be read" tone={totals.unknown ? "text-amber-700 dark:text-amber-400" : undefined} />
 				<Kpi label="Eligible" value={totals.eligible} hint="origin leg may negotiate PQC" />
 				<Kpi label="Ready" value={totals.ready} hint="both legs post-quantum" tone={totals.ready ? "text-emerald-600 dark:text-emerald-400" : undefined} />
+				<Kpi
+					label="TLS findings"
+					value={totals.tlsFindings}
+					hint="hygiene, not key agreement — never moves a verdict"
+					tone={totals.tlsFindings ? "text-amber-700 dark:text-amber-400" : undefined}
+				/>
 			</div>
 
 			{/* The distinction the whole page turns on. Without it "Eligible" reads as a pass and
@@ -314,6 +376,8 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 					</table>
 				</div>
 			</section>
+
+			<TlsPostureSection zones={result?.zones ?? []} />
 
 			<section className={CARD}>
 				<h2 className="mb-3 text-sm font-semibold">Hostnames</h2>

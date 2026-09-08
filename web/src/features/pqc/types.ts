@@ -32,6 +32,16 @@ export interface CipherSummary {
 	supersededByTls13: boolean;
 }
 
+export type TlsFindingSeverity = "high" | "medium" | "low";
+
+export interface TlsFinding {
+	id: string;
+	severity: TlsFindingSeverity;
+	title: string;
+	detail: string;
+	remediation: string;
+}
+
 export interface PqcZoneSummary {
 	zoneId: string;
 	zoneName: string;
@@ -39,6 +49,8 @@ export interface PqcZoneSummary {
 	minTlsVersion: string | null;
 	sslMode: string | null;
 	ciphers: CipherSummary;
+	/** Zone-level TLS hygiene findings — a separate axis from key agreement, never a verdict input. */
+	tlsFindings: TlsFinding[];
 	hostnames: number;
 	ready: number;
 	eligible: number;
@@ -50,7 +62,7 @@ export interface PqcZoneSummary {
 export interface PqcResult {
 	rows: PqcRow[];
 	zones: PqcZoneSummary[];
-	totals: { hostnames: number; ready: number; eligible: number; notReady: number; unknown: number };
+	totals: { hostnames: number; ready: number; eligible: number; notReady: number; unknown: number; tlsFindings: number };
 	errors: { source: string; message: string }[];
 	tunnelsKnown: boolean;
 	workersKnown: boolean;

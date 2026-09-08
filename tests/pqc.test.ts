@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
-import { buildPqcReport, gradeCipher, summariseCiphers, type DnsRecord, type PqcInputs, type ZoneTls } from "../src/lib/pqc";
+import { buildPqcReport, gradeCipher, summariseCiphers, zoneTlsFindings, type DnsRecord, type PqcInputs, type ZoneTls } from "../src/lib/pqc";
 
 /**
  * Cover for post-quantum readiness classification.
@@ -14,7 +14,15 @@ const ACCOUNT = "11111111111111111111111111111111";
 const ENV = { ASSETS: { fetch: async () => new Response("", { status: 404 }) } };
 const auth = { Authorization: "Bearer caller-token" };
 
-const tls = (over: Partial<ZoneTls> = {}): ZoneTls => ({ tls13: "on", minTlsVersion: "1.2", sslMode: "full", ciphers: [], ...over });
+const tls = (over: Partial<ZoneTls> = {}): ZoneTls => ({
+	tls13: "on",
+	minTlsVersion: "1.2",
+	sslMode: "full",
+	ciphers: [],
+	alwaysUseHttps: "on",
+	hsts: { enabled: true, maxAge: 31536000, includeSubdomains: true, preload: true },
+	...over,
+});
 const rec = (over: Partial<DnsRecord> = {}): DnsRecord => ({ name: "app.example.com", type: "A", proxied: true, content: "203.0.113.10", ...over });
 
 function inputs(over: Partial<PqcInputs> = {}): PqcInputs {
@@ -89,7 +97,7 @@ describe("verdicts", () => {
 	});
 
 	it("reports unreadable settings as unknown rather than assuming the default", () => {
-		const row = only({ settings: new Map([["z1", { tls13: null, minTlsVersion: null, sslMode: null, ciphers: null, error: "Authentication error" }]]) });
+		const row = only({ settings: new Map([["z1", { tls13: null, minTlsVersion: null, sslMode: null, ciphers: null, alwaysUseHttps: null, hsts: null, error: "Authentication error" }]]) });
 		expect(row.verdict).toBe("unknown");
 		expect(row.inbound).toBe("unknown");
 	});
@@ -138,7 +146,7 @@ describe("inventory", () => {
 		// Dropping it would look identical to a zone that genuinely has no hostnames.
 		const report = buildPqcReport(
 			inputs({
-				settings: new Map([["z1", { tls13: null, minTlsVersion: null, sslMode: null, ciphers: null, error: "Authentication error" }]]),
+				settings: new Map([["z1", { tls13: null, minTlsVersion: null, sslMode: null, ciphers: null, alwaysUseHttps: null, hsts: null, error: "Authentication error" }]]),
 				records: new Map([["z1", []]]),
 			}),
 		);
@@ -158,7 +166,7 @@ describe("inventory", () => {
 				]),
 			}),
 		);
-		expect(report.totals).toEqual({ hostnames: 3, ready: 0, eligible: 2, notReady: 1, unknown: 0 });
+		expect(report.totals).toEqual({ hostnames: 3, ready: 0, eligible: 2, notReady: 1, unknown: 0, tlsFindings: 1 });
 		const zone = report.zones[0];
 		expect(zone.eligible + zone.notReady + zone.ready + zone.unknown).toBe(zone.hostnames);
 	});
@@ -227,6 +235,77 @@ describe("cipher suites", () => {
 	});
 });
 
+describe("zone TLS hygiene findings", () => {
+	// This axis is deliberately separate from PQC readiness: every rule below is a classical TLS
+	// configuration choice, not a key-agreement one, so none of them may move a verdict.
+
+	it("flags a minimum TLS version below 1.2, and stays silent at 1.2 or above", () => {
+		expect(zoneTlsFindings(tls({ minTlsVersion: "1.0" })).map((f) => f.id)).toContain("min-tls");
+		expect(zoneTlsFindings(tls({ minTlsVersion: "1.1" })).map((f) => f.id)).toContain("min-tls");
+		expect(zoneTlsFindings(tls({ minTlsVersion: "1.2" })).map((f) => f.id)).not.toContain("min-tls");
+		expect(zoneTlsFindings(tls({ minTlsVersion: "1.3" })).map((f) => f.id)).not.toContain("min-tls");
+	});
+
+	it("flags Full but not Full (strict), origin_pull, or a plaintext mode already covered elsewhere", () => {
+		expect(zoneTlsFindings(tls({ sslMode: "full" })).map((f) => f.id)).toContain("ssl-mode-not-strict");
+		expect(zoneTlsFindings(tls({ sslMode: "strict" })).map((f) => f.id)).not.toContain("ssl-mode-not-strict");
+		expect(zoneTlsFindings(tls({ sslMode: "origin_pull" })).map((f) => f.id)).not.toContain("ssl-mode-not-strict");
+		// Flexible/Off are already reported as a plaintext origin leg by the verdict; duplicating
+		// it here would double-count the same gap under a second name.
+		expect(zoneTlsFindings(tls({ sslMode: "flexible" })).map((f) => f.id)).not.toContain("ssl-mode-not-strict");
+		expect(zoneTlsFindings(tls({ sslMode: "off" })).map((f) => f.id)).not.toContain("ssl-mode-not-strict");
+	});
+
+	it("flags HSTS off, and stays silent when it is on", () => {
+		expect(zoneTlsFindings(tls({ hsts: { enabled: false, maxAge: null, includeSubdomains: false, preload: false } })).map((f) => f.id)).toContain("hsts-off");
+		expect(zoneTlsFindings(tls({ hsts: { enabled: true, maxAge: 31536000, includeSubdomains: true, preload: true } })).map((f) => f.id)).not.toContain("hsts-off");
+	});
+
+	it("flags a short HSTS max-age, and stays silent at or above 180 days", () => {
+		expect(zoneTlsFindings(tls({ hsts: { enabled: true, maxAge: 86400, includeSubdomains: false, preload: false } })).map((f) => f.id)).toContain("hsts-short");
+		expect(zoneTlsFindings(tls({ hsts: { enabled: true, maxAge: 15552000, includeSubdomains: false, preload: false } })).map((f) => f.id)).not.toContain("hsts-short");
+		expect(zoneTlsFindings(tls({ hsts: { enabled: true, maxAge: null, includeSubdomains: false, preload: false } })).map((f) => f.id)).not.toContain("hsts-short");
+	});
+
+	it("flags Always Use HTTPS off, and stays silent when it is on", () => {
+		expect(zoneTlsFindings(tls({ alwaysUseHttps: "off" })).map((f) => f.id)).toContain("always-https-off");
+		expect(zoneTlsFindings(tls({ alwaysUseHttps: "on" })).map((f) => f.id)).not.toContain("always-https-off");
+	});
+
+	it("emits no finding for a rule whose setting is unreadable, rather than guessing a pass or a fail", () => {
+		const unreadable = tls({ minTlsVersion: null, sslMode: null, hsts: null, alwaysUseHttps: null });
+		expect(zoneTlsFindings(unreadable)).toEqual([]);
+	});
+
+	it("sorts high, then medium, then low", () => {
+		const worst = tls({
+			minTlsVersion: "1.0",
+			sslMode: "full",
+			alwaysUseHttps: "off",
+			hsts: { enabled: true, maxAge: 100, includeSubdomains: false, preload: false },
+		});
+		const severities = zoneTlsFindings(worst).map((f) => f.severity);
+		expect(severities).toEqual(["high", "medium", "medium", "low"]);
+	});
+
+	it("never changes a hostname's verdict, however many findings the zone carries", () => {
+		const dirty = tls({
+			minTlsVersion: "1.0",
+			sslMode: "full",
+			alwaysUseHttps: "off",
+			hsts: { enabled: false, maxAge: null, includeSubdomains: false, preload: false },
+		});
+		const clean = tls({ minTlsVersion: "1.2", sslMode: "strict", alwaysUseHttps: "on", hsts: { enabled: true, maxAge: 31536000, includeSubdomains: true, preload: true } });
+		const dirtyReport = buildPqcReport(inputs({ settings: new Map([["z1", dirty]]) }));
+		const cleanReport = buildPqcReport(inputs({ settings: new Map([["z1", clean]]) }));
+		expect(dirtyReport.zones[0].tlsFindings.length).toBeGreaterThan(0);
+		expect(cleanReport.zones[0].tlsFindings.length).toBe(0);
+		expect(dirtyReport.rows[0].verdict).toBe(cleanReport.rows[0].verdict);
+		expect(dirtyReport.rows[0].inbound).toBe(cleanReport.rows[0].inbound);
+		expect(dirtyReport.rows[0].origin).toBe(cleanReport.rows[0].origin);
+	});
+});
+
 // --- the route ------------------------------------------------------------
 
 const list = (result: unknown[]) => ({ success: true, result, result_info: { total_pages: 1 } });
@@ -245,6 +324,8 @@ function mockUpstream(opts: { dnsStatus?: number } = {}) {
 					{ id: "min_tls_version", value: "1.2" },
 					{ id: "ssl", value: "flexible" },
 					{ id: "ciphers", value: ["ECDHE-RSA-AES128-GCM-SHA256", "AES128-SHA"] },
+					{ id: "always_use_https", value: "off" },
+					{ id: "security_header", value: { strict_transport_security: { enabled: true, max_age: 86400, include_subdomains: false, preload: false } } },
 				]),
 			);
 		}
@@ -281,6 +362,19 @@ describe("GET /api/pqc/report", () => {
 		const ciphers = body.result.zones[0].ciphers;
 		expect(ciphers.mode).toBe("custom");
 		expect(ciphers.counts).toMatchObject({ "aead-fs": 1, "no-fs": 1 });
+	});
+
+	it("carries each zone's TLS hygiene findings, without changing the row verdict", async () => {
+		const res = await app.request(`/api/pqc/report?account_id=${ACCOUNT}`, { headers: auth }, ENV);
+		const body = (await res.json()) as {
+			result: { rows: { verdict: string }[]; zones: { tlsFindings: { id: string; severity: string }[] }[]; totals: { tlsFindings: number } };
+		};
+		const findings = body.result.zones[0].tlsFindings;
+		expect(findings.map((f) => f.id).sort()).toEqual(["always-https-off", "hsts-short"]);
+		expect(body.result.totals.tlsFindings).toBe(2);
+		// Flexible mode already fails the row on the plaintext-origin rule; the hygiene findings
+		// above must not be the reason, and must not change what the row already says.
+		expect(body.result.rows[0].verdict).toBe("not-ready");
 	});
 
 	it("rejects a malformed account id before any upstream call", async () => {

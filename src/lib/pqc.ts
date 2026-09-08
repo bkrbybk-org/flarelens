@@ -59,6 +59,10 @@ export interface ZoneTls {
 	 * not a finding. Null means the setting could not be read at all, which is.
 	 */
 	ciphers: string[] | null;
+	/** "on" | "off". Whether Cloudflare redirects plain HTTP to HTTPS rather than serving it. */
+	alwaysUseHttps: string | null;
+	/** Parsed from the `security_header` setting's `strict_transport_security` object. */
+	hsts: { enabled: boolean; maxAge: number | null; includeSubdomains: boolean; preload: boolean } | null;
 	error?: string;
 }
 
@@ -118,6 +122,8 @@ export interface PqcZoneSummary {
 	sslMode: string | null;
 	/** Allowed TLS 1.0-1.2 cipher suites, graded. See summariseCiphers. */
 	ciphers: CipherSummary;
+	/** Zone-level TLS hygiene findings. Separate axis from key agreement — see zoneTlsFindings. */
+	tlsFindings: TlsFinding[];
 	hostnames: number;
 	ready: number;
 	eligible: number;
@@ -130,7 +136,7 @@ export interface PqcZoneSummary {
 export interface PqcResult {
 	rows: PqcRow[];
 	zones: PqcZoneSummary[];
-	totals: { hostnames: number; ready: number; eligible: number; notReady: number; unknown: number };
+	totals: { hostnames: number; ready: number; eligible: number; notReady: number; unknown: number; tlsFindings: number };
 	/** Per-source failures, so a partial report states what is missing rather than looking complete. */
 	errors: { source: string; message: string }[];
 	/** False when the tunnel list could not be read, so "tunnel origin" cannot be claimed for any row. */
@@ -258,6 +264,90 @@ export function summariseCiphers(ciphers: string[] | null, minTlsVersion: string
 	return { mode: "custom", suites, counts, findings, supersededByTls13 };
 }
 
+export type TlsFindingSeverity = "high" | "medium" | "low";
+
+export interface TlsFinding {
+	id: string;
+	severity: TlsFindingSeverity;
+	title: string;
+	detail: string;
+	remediation: string;
+}
+
+const HSTS_PRELOAD_FLOOR_SECONDS = 15552000; // 180 days — the minimum preload lists require is a year, so anything short of this narrows the window on purpose.
+
+/**
+ * Zone-level TLS hygiene, as a separate axis from PQC readiness.
+ *
+ * Nothing here can move a verdict: these are configuration choices about the classical TLS
+ * handshake (version floor, origin certificate validation, HSTS), not about key agreement. A zone
+ * can fail every rule below and still be `ready` on every hostname, and that is correct — grading
+ * verdicts on the two axes together would make a config fix look like it improved PQC coverage,
+ * which it does not.
+ *
+ * Each rule reads its own inputs and stays silent on null: a setting that could not be fetched is
+ * unknown, and an unknown is never a finding (that would be inventing a fail) nor a pass (the
+ * codebase's central rule).
+ */
+export function zoneTlsFindings(tls: ZoneTls): TlsFinding[] {
+	const findings: TlsFinding[] = [];
+
+	if (tls.minTlsVersion === "1.0" || tls.minTlsVersion === "1.1") {
+		findings.push({
+			id: "min-tls",
+			severity: "high",
+			title: "Minimum TLS version below 1.2",
+			detail: "A client can negotiate down to a TLS version with known weaknesses. PCI DSS requires 1.2 as the floor.",
+			remediation: "Raise Minimum TLS Version to 1.2.",
+		});
+	}
+
+	// Only "full" is flagged here. Flexible/Off are already reported as a plaintext origin leg by
+	// the verdict itself, and strict/origin_pull already validate the origin certificate.
+	if (tls.sslMode === "full") {
+		findings.push({
+			id: "ssl-mode-not-strict",
+			severity: "medium",
+			title: "SSL mode is Full, not Full (strict)",
+			detail: "Cloudflare encrypts to the origin but does not validate the origin certificate, so the origin leg is vulnerable to an active machine-in-the-middle.",
+			remediation: "Move to Full (strict) once the origin serves a valid certificate.",
+		});
+	}
+
+	if (tls.hsts !== null && tls.hsts.enabled === false) {
+		findings.push({
+			id: "hsts-off",
+			severity: "medium",
+			title: "HSTS is off",
+			detail: "Without HSTS a first request over plain HTTP is possible and strippable.",
+			remediation: "Enable HSTS.",
+		});
+	}
+
+	if (tls.hsts !== null && tls.hsts.enabled === true && tls.hsts.maxAge !== null && tls.hsts.maxAge < HSTS_PRELOAD_FLOOR_SECONDS) {
+		findings.push({
+			id: "hsts-short",
+			severity: "low",
+			title: "HSTS max-age is short",
+			detail: "A short max-age narrows the protection window; preload lists require at least a year.",
+			remediation: "Raise HSTS max-age to at least 180 days (15552000 seconds), a year to qualify for preload.",
+		});
+	}
+
+	if (tls.alwaysUseHttps === "off") {
+		findings.push({
+			id: "always-https-off",
+			severity: "medium",
+			title: "Always Use HTTPS is off",
+			detail: "Plain HTTP requests are served rather than redirected.",
+			remediation: "Turn on Always Use HTTPS.",
+		});
+	}
+
+	const order: Record<TlsFindingSeverity, number> = { high: 0, medium: 1, low: 2 };
+	return findings.sort((a, b) => order[a.severity] - order[b.severity]);
+}
+
 function classifyInbound(record: DnsRecord, tls: ZoneTls): { state: InboundState; reason: string } {
 	if (!record.proxied) {
 		return {
@@ -332,7 +422,15 @@ export function buildPqcReport(inputs: PqcInputs): PqcResult {
 	const zones: PqcZoneSummary[] = [];
 
 	for (const zone of inputs.zones) {
-		const tls = inputs.settings.get(zone.id) ?? { tls13: null, minTlsVersion: null, sslMode: null, ciphers: null, error: "Settings not fetched" };
+		const tls = inputs.settings.get(zone.id) ?? {
+			tls13: null,
+			minTlsVersion: null,
+			sslMode: null,
+			ciphers: null,
+			alwaysUseHttps: null,
+			hsts: null,
+			error: "Settings not fetched",
+		};
 		const records = (inputs.records.get(zone.id) ?? []).filter((r) => PROXIABLE_TYPES.has(r.type.toUpperCase()));
 		const summary: PqcZoneSummary = {
 			zoneId: zone.id,
@@ -341,6 +439,7 @@ export function buildPqcReport(inputs: PqcInputs): PqcResult {
 			minTlsVersion: tls.minTlsVersion,
 			sslMode: tls.sslMode,
 			ciphers: summariseCiphers(tls.ciphers, tls.minTlsVersion),
+			tlsFindings: zoneTlsFindings(tls),
 			hostnames: 0,
 			ready: 0,
 			eligible: 0,
@@ -388,6 +487,7 @@ export function buildPqcReport(inputs: PqcInputs): PqcResult {
 			eligible: rows.filter((r) => r.verdict === "eligible").length,
 			notReady: rows.filter((r) => r.verdict === "not-ready").length,
 			unknown: rows.filter((r) => r.verdict === "unknown").length,
+			tlsFindings: zones.reduce((sum, z) => sum + z.tlsFindings.length, 0),
 		},
 		errors: inputs.errors,
 		tunnelsKnown: inputs.tunnelsKnown,
@@ -453,7 +553,9 @@ interface CfSetting {
  */
 async function fetchZoneTls(zoneId: string, token: string): Promise<ZoneTls> {
 	const res = await restList<CfSetting>(`/zones/${zoneId}/settings`, token);
-	if (res.error) return { tls13: null, minTlsVersion: null, sslMode: null, ciphers: null, error: res.error };
+	if (res.error) {
+		return { tls13: null, minTlsVersion: null, sslMode: null, ciphers: null, alwaysUseHttps: null, hsts: null, error: res.error };
+	}
 	const byId = new Map(res.result.filter((s) => s.id).map((s) => [s.id as string, s.value]));
 	const str = (value: unknown): string | null => (typeof value === "string" ? value : null);
 	// An absent `ciphers` setting is an empty selection — Cloudflare's defaults — not an
@@ -465,6 +567,28 @@ async function fetchZoneTls(zoneId: string, token: string): Promise<ZoneTls> {
 		minTlsVersion: str(byId.get("min_tls_version")),
 		sslMode: str(byId.get("ssl")),
 		ciphers,
+		alwaysUseHttps: str(byId.get("always_use_https")),
+		hsts: parseHsts(byId.get("security_header")),
+	};
+}
+
+/**
+ * `security_header` nests HSTS under `strict_transport_security`. Any shape mismatch — the key
+ * missing, a wrong type on a field — is reported as null (unreadable), never as a guessed value:
+ * a malformed response is not evidence the setting is off, and treating it as "on" would be
+ * inventing a pass on data that failed to parse.
+ */
+function parseHsts(value: unknown): ZoneTls["hsts"] {
+	if (typeof value !== "object" || value === null) return null;
+	const sts = (value as Record<string, unknown>).strict_transport_security;
+	if (typeof sts !== "object" || sts === null) return null;
+	const s = sts as Record<string, unknown>;
+	if (typeof s.enabled !== "boolean") return null;
+	return {
+		enabled: s.enabled,
+		maxAge: typeof s.max_age === "number" ? s.max_age : null,
+		includeSubdomains: s.include_subdomains === true,
+		preload: s.preload === true,
 	};
 }
 
