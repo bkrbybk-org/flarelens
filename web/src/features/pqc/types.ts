@@ -16,12 +16,29 @@ export interface PqcRow {
 	reasons: string[];
 }
 
+export type CipherGrade = "aead-fs" | "legacy-cbc" | "no-fs" | "broken" | "tls13";
+
+export interface CipherSuite {
+	name: string;
+	grade: CipherGrade;
+	note: string;
+}
+
+export interface CipherSummary {
+	mode: "default" | "custom" | "unreadable";
+	suites: CipherSuite[];
+	counts: Record<CipherGrade, number>;
+	findings: string[];
+	supersededByTls13: boolean;
+}
+
 export interface PqcZoneSummary {
 	zoneId: string;
 	zoneName: string;
 	tls13: string | null;
 	minTlsVersion: string | null;
 	sslMode: string | null;
+	ciphers: CipherSummary;
 	hostnames: number;
 	ready: number;
 	eligible: number;

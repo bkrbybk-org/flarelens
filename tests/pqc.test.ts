@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
-import { buildPqcReport, type DnsRecord, type PqcInputs, type ZoneTls } from "../src/lib/pqc";
+import { buildPqcReport, gradeCipher, summariseCiphers, type DnsRecord, type PqcInputs, type ZoneTls } from "../src/lib/pqc";
 
 /**
  * Cover for post-quantum readiness classification.
@@ -14,7 +14,7 @@ const ACCOUNT = "11111111111111111111111111111111";
 const ENV = { ASSETS: { fetch: async () => new Response("", { status: 404 }) } };
 const auth = { Authorization: "Bearer caller-token" };
 
-const tls = (over: Partial<ZoneTls> = {}): ZoneTls => ({ tls13: "on", minTlsVersion: "1.2", sslMode: "full", ...over });
+const tls = (over: Partial<ZoneTls> = {}): ZoneTls => ({ tls13: "on", minTlsVersion: "1.2", sslMode: "full", ciphers: [], ...over });
 const rec = (over: Partial<DnsRecord> = {}): DnsRecord => ({ name: "app.example.com", type: "A", proxied: true, content: "203.0.113.10", ...over });
 
 function inputs(over: Partial<PqcInputs> = {}): PqcInputs {
@@ -89,7 +89,7 @@ describe("verdicts", () => {
 	});
 
 	it("reports unreadable settings as unknown rather than assuming the default", () => {
-		const row = only({ settings: new Map([["z1", { tls13: null, minTlsVersion: null, sslMode: null, error: "Authentication error" }]]) });
+		const row = only({ settings: new Map([["z1", { tls13: null, minTlsVersion: null, sslMode: null, ciphers: null, error: "Authentication error" }]]) });
 		expect(row.verdict).toBe("unknown");
 		expect(row.inbound).toBe("unknown");
 	});
@@ -138,7 +138,7 @@ describe("inventory", () => {
 		// Dropping it would look identical to a zone that genuinely has no hostnames.
 		const report = buildPqcReport(
 			inputs({
-				settings: new Map([["z1", { tls13: null, minTlsVersion: null, sslMode: null, error: "Authentication error" }]]),
+				settings: new Map([["z1", { tls13: null, minTlsVersion: null, sslMode: null, ciphers: null, error: "Authentication error" }]]),
 				records: new Map([["z1", []]]),
 			}),
 		);
@@ -164,6 +164,69 @@ describe("inventory", () => {
 	});
 });
 
+describe("cipher suites", () => {
+	it("grades forward secrecy and AEAD independently", () => {
+		expect(gradeCipher("ECDHE-ECDSA-AES128-GCM-SHA256").grade).toBe("aead-fs");
+		expect(gradeCipher("ECDHE-RSA-CHACHA20-POLY1305").grade).toBe("aead-fs");
+		// Forward-secret but CBC: the padding-oracle family.
+		expect(gradeCipher("ECDHE-RSA-AES128-SHA256").grade).toBe("legacy-cbc");
+		// AEAD but static RSA key exchange — recorded traffic stays readable to whoever later
+		// obtains the certificate key, which is the same exposure PQC key agreement closes.
+		expect(gradeCipher("AES128-GCM-SHA256").grade).toBe("no-fs");
+		expect(gradeCipher("AES256-SHA").grade).toBe("no-fs");
+	});
+
+	it("calls out the obsolete families whatever else they carry", () => {
+		for (const name of ["DES-CBC3-SHA", "ECDHE-RSA-RC4-SHA", "ECDHE-RSA-DES-CBC3-SHA", "NULL-MD5"]) {
+			expect(gradeCipher(name).grade, name).toBe("broken");
+		}
+	});
+
+	it("marks Cloudflare's AEAD-prefixed names as the unconfigurable TLS 1.3 suites", () => {
+		expect(gradeCipher("AEAD-AES128-GCM-SHA256").grade).toBe("tls13");
+		expect(gradeCipher("AEAD-CHACHA20-POLY1305-SHA256").note).toMatch(/not configurable/);
+	});
+
+	it("treats an empty list as Cloudflare's defaults and does not grade it", () => {
+		// Customising needs Advanced Certificate Manager, and the defaults are not visible through
+		// the API — grading a zone down for a list it cannot see would be noise.
+		const summary = summariseCiphers([], "1.2");
+		expect(summary.mode).toBe("default");
+		expect(summary.findings).toEqual([]);
+		expect(summary.suites).toEqual([]);
+	});
+
+	it("separates an unreadable setting from an empty one", () => {
+		expect(summariseCiphers(null, null).mode).toBe("unreadable");
+	});
+
+	it("counts and reports what a custom list allows", () => {
+		const summary = summariseCiphers(
+			["ECDHE-ECDSA-AES128-GCM-SHA256", "ECDHE-RSA-AES128-SHA", "AES128-GCM-SHA256", "DES-CBC3-SHA"],
+			"1.2",
+		);
+		expect(summary.mode).toBe("custom");
+		expect(summary.counts).toMatchObject({ "aead-fs": 1, "legacy-cbc": 1, "no-fs": 1, broken: 1 });
+		expect(summary.findings[0]).toMatch(/obsolete/i);
+		expect(summary.findings.some((f) => /forward secrecy/i.test(f))).toBe(true);
+	});
+
+	it("says a custom list is unreachable when the zone floor is already TLS 1.3", () => {
+		// Cipher suite selection applies to TLS 1.0-1.2 only.
+		const summary = summariseCiphers(["ECDHE-RSA-AES128-SHA"], "1.3");
+		expect(summary.supersededByTls13).toBe(true);
+		expect(summary.findings.some((f) => /1\.3/.test(f))).toBe(true);
+	});
+
+	it("carries the summary onto the zone, and cipher posture never moves a hostname verdict", () => {
+		const weak = buildPqcReport(inputs({ settings: new Map([["z1", tls({ ciphers: ["AES128-GCM-SHA256"] })]]) }));
+		const clean = buildPqcReport(inputs());
+		expect(weak.zones[0].ciphers.counts["no-fs"]).toBe(1);
+		// Same verdict either way: ciphers are TLS 1.2 and below, key agreement is TLS 1.3.
+		expect(weak.rows[0].verdict).toBe(clean.rows[0].verdict);
+	});
+});
+
 // --- the route ------------------------------------------------------------
 
 const list = (result: unknown[]) => ({ success: true, result, result_info: { total_pages: 1 } });
@@ -181,6 +244,7 @@ function mockUpstream(opts: { dnsStatus?: number } = {}) {
 					{ id: "tls_1_3", value: "on" },
 					{ id: "min_tls_version", value: "1.2" },
 					{ id: "ssl", value: "flexible" },
+					{ id: "ciphers", value: ["ECDHE-RSA-AES128-GCM-SHA256", "AES128-SHA"] },
 				]),
 			);
 		}
@@ -209,6 +273,14 @@ describe("GET /api/pqc/report", () => {
 		// Flexible mode: the origin leg is plain HTTP, so this cannot pass however good the front is.
 		expect(body.result.rows[0]).toMatchObject({ fqdn: "app.example.com", verdict: "not-ready" });
 		expect(body.result.totals.hostnames).toBe(1);
+	});
+
+	it("carries each zone's cipher posture", async () => {
+		const res = await app.request(`/api/pqc/report?account_id=${ACCOUNT}`, { headers: auth }, ENV);
+		const body = (await res.json()) as { result: { zones: { ciphers: { mode: string; counts: Record<string, number> } }[] } };
+		const ciphers = body.result.zones[0].ciphers;
+		expect(ciphers.mode).toBe("custom");
+		expect(ciphers.counts).toMatchObject({ "aead-fs": 1, "no-fs": 1 });
 	});
 
 	it("rejects a malformed account id before any upstream call", async () => {

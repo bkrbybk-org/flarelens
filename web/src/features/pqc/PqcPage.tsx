@@ -4,7 +4,7 @@ import { RefreshIcon, SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { Session } from "../../hooks/useSession";
 import { usePqcReport } from "./usePqcReport";
-import type { InboundState, OriginState, PqcRow, Verdict } from "./types";
+import type { CipherGrade, CipherSummary, InboundState, OriginState, PqcRow, PqcZoneSummary, Verdict } from "./types";
 
 const CARD = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
@@ -50,6 +50,69 @@ function LegChip({ label, good, bad }: { label: string; good: boolean; bad: bool
 			? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
 			: "bg-zinc-500/10 text-zinc-500 dark:text-zinc-400";
 	return <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${tone}`}>{label}</span>;
+}
+
+const CIPHER_TONE: Record<CipherGrade, string> = {
+	"aead-fs": "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+	tls13: "bg-cf/15 text-cf",
+	"legacy-cbc": "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+	"no-fs": "bg-red-500/10 text-red-600 dark:text-red-400",
+	broken: "bg-red-600/20 text-red-700 dark:text-red-300",
+};
+
+const CIPHER_GRADE_LABEL: Record<CipherGrade, string> = {
+	"aead-fs": "AEAD + forward secrecy",
+	tls13: "TLS 1.3",
+	"legacy-cbc": "CBC",
+	"no-fs": "no forward secrecy",
+	broken: "obsolete",
+};
+
+/** One zone's cipher posture. Collapsed unless there is something to answer for. */
+function CipherPanel({ zone }: { zone: PqcZoneSummary }) {
+	const c: CipherSummary = zone.ciphers;
+
+	if (c.mode === "unreadable") {
+		return <span className="text-xs text-amber-600 dark:text-amber-400">unreadable</span>;
+	}
+	if (c.mode === "default") {
+		return (
+			<span className="text-xs text-zinc-500 dark:text-zinc-400" title="No custom selection, so Cloudflare's default suites apply. Customising needs Advanced Certificate Manager.">
+				Cloudflare default{c.supersededByTls13 ? " · TLS 1.3 only, so unused" : ""}
+			</span>
+		);
+	}
+
+	return (
+		<details className="min-w-0">
+			<summary className="cursor-pointer select-none text-xs">
+				<span className="font-medium">{c.suites.length} custom</span>
+				{(["broken", "no-fs", "legacy-cbc", "aead-fs"] as CipherGrade[])
+					.filter((grade) => c.counts[grade])
+					.map((grade) => (
+						<span key={grade} className={`ml-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium ${CIPHER_TONE[grade]}`}>
+							{c.counts[grade]} {CIPHER_GRADE_LABEL[grade]}
+						</span>
+					))}
+			</summary>
+			{c.findings.length > 0 && (
+				<ul className="mt-1.5 space-y-0.5 text-xs text-zinc-600 dark:text-zinc-300">
+					{c.findings.map((f) => (
+						<li key={f}>{f}</li>
+					))}
+				</ul>
+			)}
+			<ul className="mt-1.5 flex flex-wrap gap-1">
+				{c.suites.map((suite) => (
+					<li key={suite.name}>
+						<span className={`rounded px-1.5 py-0.5 font-mono text-[11px] ${CIPHER_TONE[suite.grade]}`} title={suite.note}>
+							{suite.name}
+						</span>
+					</li>
+				))}
+			</ul>
+		</details>
+	);
 }
 
 function Kpi({ label, value, hint, tone }: { label: string; value: number; hint: string; tone?: string }) {
@@ -100,6 +163,14 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 			{ header: "cloudflare_to_origin", value: (r) => ORIGIN_LABEL[r.origin] },
 			{ header: "verdict", value: (r) => VERDICT_LABEL[r.verdict] },
 			{ header: "reasons", value: (r) => r.reasons.join(" ") },
+			{
+				header: "zone_ciphers",
+				value: (r) => {
+					const zone = (result?.zones ?? []).find((z) => z.zoneId === r.zoneId);
+					if (!zone || zone.ciphers.mode !== "custom") return zone?.ciphers.mode ?? "";
+					return zone.ciphers.suites.map((s) => `${s.name} (${s.grade})`).join(" | ");
+				},
+			},
 		]);
 		downloadCsv(`pqc-readiness-${new Date().toISOString().slice(0, 10)}.csv`, csv);
 	}
@@ -195,6 +266,16 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 
 			<section className={`${CARD} mb-4`}>
 				<h2 className="mb-3 text-sm font-semibold">Zones</h2>
+				{/* Cipher suites are a separate axis from key agreement, and conflating them would
+				    misread the page: a zone can offer X25519MLKEM768 and still allow a suite with
+				    no forward secrecy, which is the same harvest-now exposure by another route. */}
+				<p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+					Cipher suites cover TLS 1.0–1.2 only — TLS 1.3 suites are fixed and not configurable — so they do not
+					change any verdict above. They are the other half of the same exposure: a suite with no forward secrecy
+					leaves recorded traffic readable to whoever later obtains the certificate key, with or without a quantum
+					computer. Customising the list needs Advanced Certificate Manager; zones without it read “Cloudflare
+					default”.
+				</p>
 				<div className="overflow-x-auto">
 					<table className="w-full text-sm">
 						<thead className="text-left text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -203,6 +284,7 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 								<th className="py-1.5 pr-3 font-medium">TLS 1.3</th>
 								<th className="py-1.5 pr-3 font-medium">Min TLS</th>
 								<th className="py-1.5 pr-3 font-medium">SSL mode</th>
+								<th className="py-1.5 pr-3 font-medium">Cipher suites (TLS 1.0–1.2)</th>
 								<th className="py-1.5 pr-3 text-right font-medium">Hostnames</th>
 								<th className="py-1.5 pr-3 text-right font-medium">Not ready</th>
 							</tr>
@@ -218,6 +300,9 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 									<td className={`py-1.5 pr-3 ${zone.sslMode === "off" || zone.sslMode === "flexible" ? "text-red-600 dark:text-red-400" : ""}`}>
 										{zone.sslMode ?? "unreadable"}
 										{zone.error && <span className="ml-2 text-xs text-amber-600 dark:text-amber-400">{zone.error}</span>}
+									</td>
+									<td className="py-1.5 pr-3 align-top">
+										<CipherPanel zone={zone} />
 									</td>
 									<td className="py-1.5 pr-3 text-right tabular-nums">{zone.hostnames}</td>
 									<td className={`py-1.5 pr-3 text-right tabular-nums ${zone.notReady ? "text-red-600 dark:text-red-400" : ""}`}>

@@ -2,7 +2,7 @@
 
 Status snapshot, last reviewed **2026-09-05** (second pass, against a full read of the tree) against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
 
-**TL;DR** — Fourteen sections, 521 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
+**TL;DR** — Fourteen sections, 530 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
 Running version `c065d631`, deployed 2026-09-07 16:31 UTC.
 
 ---
@@ -99,7 +99,7 @@ documents, so no caller text reaches a query.
 | [src/lib/access-usage.ts](src/lib/access-usage.ts) | Access login telemetry; folds success/failure rows and resolves app/IdP uuids to names |
 | [src/lib/gateway-usage.ts](src/lib/gateway-usage.ts) | Gateway DNS + HTTP telemetry; conservative block classification, multi-value category handling |
 | [src/lib/access-tunnels.ts](src/lib/access-tunnels.ts) | Tunnel Map: joins Access apps, tunnel ingress and private routes, and classifies each destination's origin kind |
-| [src/lib/pqc.ts](src/lib/pqc.ts) | Post-quantum readiness: zone TLS settings + DNS inventory + tunnel and Worker origins, classified into two legs and one verdict. `buildPqcReport` is pure and carries the classification rules |
+| [src/lib/pqc.ts](src/lib/pqc.ts) | Post-quantum readiness: zone TLS settings + DNS inventory + tunnel and Worker origins, classified into two legs and one verdict, plus `gradeCipher`/`summariseCiphers` for the zone's TLS 1.0–1.2 suite list. `buildPqcReport` is pure and carries the classification rules |
 | [src/lib/request-trace.ts](src/lib/request-trace.ts) | Ray ID forensics: schema-swept field selection, adaptive retry around per-zone entitlements and Cloudflare's field ceiling |
 | [src/lib/workers-analytics.ts](src/lib/workers-analytics.ts) | Workers invocation metrics; script list degrades when the scope is absent |
 | [src/lib/workers-ai.ts](src/lib/workers-ai.ts) | Workers AI inference metrics; folds rows split by `errorCode` |
@@ -217,6 +217,10 @@ Disconnect clears the store.
     is plain HTTP.
   The deprecated `origin_post_quantum_encryption` API is deliberately not read; Cloudflare
   documents it as a no-op.
+  The zone table also grades allowed TLS 1.0–1.2 cipher suites, read from the same settings
+  call: forward secrecy and AEAD judged independently, obsolete families (RC4, 3DES,
+  export-grade, MD5) called out. It never moves a verdict — cipher selection does not apply to
+  TLS 1.3 — and an empty list is reported as “Cloudflare default” rather than graded.
 
 **Incidents**
 - 2026-09-07: **server mode broke for every gated route.** The Access application was recreated, which changed its AUD, so JWT verification failed audience check and the SPA fell back to asking for a token. Found while testing an unrelated route — the control route failed the same way, which ruled out the new code. Fixed by reading the live AUD from the login redirect and updating `CF_ACCESS_AUD`. See the constraints section in [README.md](README.md).

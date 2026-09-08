@@ -12,7 +12,7 @@ Ops dashboard for Cloudflare: a single pane of glass for reviewing an account's 
 | `#/request` | Request Trace | account or zone | Everything Cloudflare records about one HTTP request, found by Ray ID: WAF attack scores, bot score and decision, JA3/JA4 fingerprints, TLS, device type, method, path, query, referer, content scanning, edge and origin timings, every firewall rule that matched, and — where a payload-logging rule captured it — the request body, decrypted in the browser. Fields beyond the curated groups are swept from the schema, so detail Cloudflare adds later appears without a code change. Field selection follows a live schema probe, and absence is reported as inconclusive because `httpRequestsAdaptive` is adaptively sampled |
 | `#/tunnels` | Tunnel Map | account | The chain behind a self-hosted app: public hostname → Access application and its policy decisions → Cloudflare Tunnel → origin service. Flags both gaps — a tunnel ingress with no Access app in front of it, and an Access app whose hostname no tunnel serves |
 | `#/gateway` | Gateway Usage | account | Zero Trust Gateway: DNS resolver queries and Gateway HTTP requests over time, split allowed/blocked, with top categories, policies, hosts and actions |
-| `#/pqc` | PQC Readiness | account | Post-quantum coverage per hostname: every A/AAAA/CNAME record in the account's zones, split by the two TLS legs — visitor→Cloudflare (proxied and TLS 1.3 on, so X25519MLKEM768 is offered) and Cloudflare→origin (tunnel, Cloudflare-hosted, automatic key exchange, or plain HTTP). Ranked worst first, with per-zone TLS settings and CSV export |
+| `#/pqc` | PQC Readiness | account | Post-quantum coverage per hostname: every A/AAAA/CNAME record in the account's zones, split by the two TLS legs — visitor→Cloudflare (proxied and TLS 1.3 on, so X25519MLKEM768 is offered) and Cloudflare→origin (tunnel, Cloudflare-hosted, automatic key exchange, or plain HTTP). Ranked worst first, with per-zone TLS settings and CSV export. The zone table also grades each zone's allowed TLS 1.0–1.2 cipher suites — forward secrecy and AEAD judged separately, obsolete families called out |
 | `#/waf` | WAF Analytics | account or zone | `firewallEventsAdaptive` telemetry correlated against ruleset metadata: KPIs, events-over-time, per-ruleset/rule tables, action-drift detection, per-rule drill-down |
 | `#/ai-security` | AI Security for Apps | account or zone | Prompt-injection, PII, unsafe-topic and custom-topic detections on LLM traffic: KPIs, detections over time, endpoint/country/session breakdowns, ranked mitigations, and a flagged-request table with per-row prompt decryption |
 | `#/cache` | Cache Rules | zone | Cache rules with last-match traffic attribution, hit-ratio health grade, insights, URL tester (client-side wirefilter evaluation) |
@@ -252,6 +252,15 @@ Measured adoption is a separate matter: the `ClientTLSKeyExchangeGroup` field (v
 dataset and Log Explorer, not in the GraphQL Analytics schema this app reads. If it appears in
 `httpRequestsAdaptiveGroups`, PQC Readiness can gain a measured column; until then it reports
 configuration, not observed traffic.
+
+**Cipher suites and key agreement are separate axes.** The zone `ciphers` setting selects
+allowed suites for **TLS 1.0–1.2 only** — TLS 1.3 suites are fixed and cannot be configured — so
+it never changes a PQC verdict. It is graded anyway because it carries the same exposure by
+another route: a suite without an `ECDHE-`/`DHE-` prefix has no forward secrecy, so traffic
+recorded today stays readable to whoever later obtains the certificate's private key, quantum
+computer or not. An empty list means Cloudflare's defaults and is reported as such, not graded:
+customising needs Advanced Certificate Manager, the defaults are not visible through the API, and
+marking a zone down for a list it cannot see or edit would be noise.
 
 **Gateway reports an outcome as free text, not a boolean.** Gateway HTTP rows carry the policy
 `action` (`allow`, `block`, `quarantine`, `isolate`, `off`, …) and DNS rows carry a camelCase

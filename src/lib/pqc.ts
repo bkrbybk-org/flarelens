@@ -46,14 +46,43 @@ export interface PqcZone {
 	name: string;
 }
 
-/** The three zone settings that decide both legs. Null means the setting could not be read. */
+/** The zone settings that decide both legs. Null means the setting could not be read. */
 export interface ZoneTls {
 	/** "on" | "off" */
 	tls13: string | null;
 	minTlsVersion: string | null;
 	/** "off" | "flexible" | "full" | "strict" | "origin_pull" */
 	sslMode: string | null;
+	/**
+	 * Allowed cipher suites for TLS 1.0-1.2, as configured. Empty means Cloudflare's own defaults
+	 * — customising this needs Advanced Certificate Manager, so most zones are empty and that is
+	 * not a finding. Null means the setting could not be read at all, which is.
+	 */
+	ciphers: string[] | null;
 	error?: string;
+}
+
+export type CipherGrade = "aead-fs" | "legacy-cbc" | "no-fs" | "broken" | "tls13";
+
+export interface CipherSuite {
+	name: string;
+	grade: CipherGrade;
+	/** Why it is graded that way, for the row's tooltip. */
+	note: string;
+}
+
+export interface CipherSummary {
+	/** "default" when the zone has no custom list, so Cloudflare's defaults apply. */
+	mode: "default" | "custom" | "unreadable";
+	suites: CipherSuite[];
+	counts: Record<CipherGrade, number>;
+	/** Zone-level observations, worst first. Empty when there is nothing to say. */
+	findings: string[];
+	/**
+	 * True when the list cannot affect any connection: cipher suite selection applies to TLS
+	 * 1.0-1.2 only, so a zone whose minimum is already 1.3 negotiates none of these.
+	 */
+	supersededByTls13: boolean;
 }
 
 export interface DnsRecord {
@@ -87,6 +116,8 @@ export interface PqcZoneSummary {
 	tls13: string | null;
 	minTlsVersion: string | null;
 	sslMode: string | null;
+	/** Allowed TLS 1.0-1.2 cipher suites, graded. See summariseCiphers. */
+	ciphers: CipherSummary;
 	hostnames: number;
 	ready: number;
 	eligible: number;
@@ -135,6 +166,96 @@ const CLOUDFLARE_ORIGIN_SUFFIXES = [".workers.dev", ".pages.dev", ".r2.dev", ".c
 function isCloudflareOrigin(target: string): boolean {
 	const host = normaliseHost(target);
 	return CLOUDFLARE_ORIGIN_SUFFIXES.some((suffix) => host.endsWith(suffix));
+}
+
+/**
+ * Grade one cipher suite name, in Cloudflare's OpenSSL-style spelling.
+ *
+ * Two properties matter and they are independent:
+ *
+ *   forward secrecy   An `ECDHE-`/`DHE-` prefix means the session key is ephemeral, so recording
+ *                     today's traffic and stealing the certificate key later does not decrypt it.
+ *                     A suite without it is exactly the harvest-now-decrypt-later exposure this
+ *                     page is about, quantum computer or not.
+ *   AEAD              GCM or ChaCha20-Poly1305 authenticate as they encrypt. The `-SHA`/`-SHA256`
+ *                     suites are CBC with a bolted-on MAC, the family every padding-oracle attack
+ *                     since BEAST has targeted.
+ *
+ * `AEAD-` prefixed names are Cloudflare's spelling of the TLS 1.3 suites. They are listed in the
+ * compliance sets but cannot be selected: TLS 1.3 ciphers are not configurable.
+ */
+export function gradeCipher(name: string): CipherSuite {
+	const upper = name.trim().toUpperCase();
+
+	if (/RC4|NULL|EXPORT|MD5|DES-CBC3|3DES/.test(upper)) {
+		return { name, grade: "broken", note: "Obsolete: RC4, 3DES, export-grade or MD5. Broken in practice, not merely dated." };
+	}
+	if (upper.startsWith("AEAD-")) {
+		return { name, grade: "tls13", note: "A TLS 1.3 suite. Always forward-secret and AEAD, and not configurable — listing it changes nothing." };
+	}
+
+	const forwardSecret = upper.startsWith("ECDHE-") || upper.startsWith("DHE-");
+	const aead = upper.includes("GCM") || upper.includes("CHACHA20-POLY1305");
+
+	if (!forwardSecret) {
+		return {
+			name,
+			grade: "no-fs",
+			note: "Static RSA key exchange: no forward secrecy, so traffic recorded today is readable by anyone who later obtains the certificate's private key.",
+		};
+	}
+	if (!aead) {
+		return { name, grade: "legacy-cbc", note: "Forward-secret but CBC rather than AEAD — the mode behind the padding-oracle family of attacks." };
+	}
+	return { name, grade: "aead-fs", note: "Forward secrecy and AEAD. What a TLS 1.2 suite should be." };
+}
+
+const EMPTY_COUNTS: Record<CipherGrade, number> = { "aead-fs": 0, "legacy-cbc": 0, "no-fs": 0, broken: 0, tls13: 0 };
+
+/**
+ * Grade a zone's whole list.
+ *
+ * An empty list is reported as "Cloudflare default" and NOT graded. Cloudflare's defaults are
+ * chosen for compatibility and do include CBC suites, but they are Cloudflare's to change, they
+ * are not visible through this API, and customising them needs an ACM subscription — grading a
+ * zone down for a list it cannot see and may not be entitled to edit would be noise.
+ */
+export function summariseCiphers(ciphers: string[] | null, minTlsVersion: string | null): CipherSummary {
+	if (ciphers === null) {
+		return { mode: "unreadable", suites: [], counts: { ...EMPTY_COUNTS }, findings: [], supersededByTls13: false };
+	}
+
+	const supersededByTls13 = minTlsVersion === "1.3";
+	if (ciphers.length === 0) {
+		return {
+			mode: "default",
+			suites: [],
+			counts: { ...EMPTY_COUNTS },
+			findings: [],
+			supersededByTls13,
+		};
+	}
+
+	const suites = ciphers.map(gradeCipher).sort((a, b) => a.name.localeCompare(b.name));
+	const counts = { ...EMPTY_COUNTS };
+	for (const suite of suites) counts[suite.grade]++;
+
+	const findings: string[] = [];
+	if (counts.broken) {
+		findings.push(`${counts.broken} obsolete suite(s) allowed (RC4, 3DES, export-grade or MD5). Remove them.`);
+	}
+	if (counts["no-fs"]) {
+		findings.push(
+			`${counts["no-fs"]} suite(s) with no forward secrecy. A recorded session stays decryptable to whoever later obtains the certificate key — the same exposure post-quantum key agreement exists to close.`,
+		);
+	}
+	if (counts["legacy-cbc"]) {
+		findings.push(`${counts["legacy-cbc"]} CBC suite(s) allowed. Forward-secret, but not AEAD.`);
+	}
+	if (supersededByTls13 && suites.length) {
+		findings.push("Minimum TLS version is 1.3, so none of these are reachable: cipher suite selection applies to TLS 1.0-1.2 only.");
+	}
+	return { mode: "custom", suites, counts, findings, supersededByTls13 };
 }
 
 function classifyInbound(record: DnsRecord, tls: ZoneTls): { state: InboundState; reason: string } {
@@ -211,7 +332,7 @@ export function buildPqcReport(inputs: PqcInputs): PqcResult {
 	const zones: PqcZoneSummary[] = [];
 
 	for (const zone of inputs.zones) {
-		const tls = inputs.settings.get(zone.id) ?? { tls13: null, minTlsVersion: null, sslMode: null, error: "Settings not fetched" };
+		const tls = inputs.settings.get(zone.id) ?? { tls13: null, minTlsVersion: null, sslMode: null, ciphers: null, error: "Settings not fetched" };
 		const records = (inputs.records.get(zone.id) ?? []).filter((r) => PROXIABLE_TYPES.has(r.type.toUpperCase()));
 		const summary: PqcZoneSummary = {
 			zoneId: zone.id,
@@ -219,6 +340,7 @@ export function buildPqcReport(inputs: PqcInputs): PqcResult {
 			tls13: tls.tls13,
 			minTlsVersion: tls.minTlsVersion,
 			sslMode: tls.sslMode,
+			ciphers: summariseCiphers(tls.ciphers, tls.minTlsVersion),
 			hostnames: 0,
 			ready: 0,
 			eligible: 0,
@@ -331,13 +453,18 @@ interface CfSetting {
  */
 async function fetchZoneTls(zoneId: string, token: string): Promise<ZoneTls> {
 	const res = await restList<CfSetting>(`/zones/${zoneId}/settings`, token);
-	if (res.error) return { tls13: null, minTlsVersion: null, sslMode: null, error: res.error };
+	if (res.error) return { tls13: null, minTlsVersion: null, sslMode: null, ciphers: null, error: res.error };
 	const byId = new Map(res.result.filter((s) => s.id).map((s) => [s.id as string, s.value]));
 	const str = (value: unknown): string | null => (typeof value === "string" ? value : null);
+	// An absent `ciphers` setting is an empty selection — Cloudflare's defaults — not an
+	// unreadable one. Null is reserved for "the call failed", which is a different report.
+	const cipherValue = byId.get("ciphers");
+	const ciphers = Array.isArray(cipherValue) ? cipherValue.filter((c): c is string => typeof c === "string") : [];
 	return {
 		tls13: str(byId.get("tls_1_3")),
 		minTlsVersion: str(byId.get("min_tls_version")),
 		sslMode: str(byId.get("ssl")),
+		ciphers,
 	};
 }
 
