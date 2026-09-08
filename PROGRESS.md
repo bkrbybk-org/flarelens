@@ -2,19 +2,19 @@
 
 Status snapshot, last reviewed **2026-09-05** (second pass, against a full read of the tree) against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
 
-**TL;DR** — Thirteen sections, 485 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
+**TL;DR** — Fourteen sections, 521 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section has been exercised against real account data through an Access service token.
 Running version `c065d631`, deployed 2026-09-07 16:31 UTC.
 
 ---
 
 ## Sections
 
-Thirteen routes, grouped in the sidebar by Cloudflare product area:
+Fourteen routes, grouped in the sidebar by Cloudflare product area:
 
 | Group | Routes |
 |---|---|
 | Zero Trust | `#/access`, `#/groups`, `#/access-usage`, `#/tunnels`, `#/gateway` |
-| Security | `#/waf`, `#/ai-security`, `#/request` |
+| Security | `#/waf`, `#/ai-security`, `#/request`, `#/pqc` |
 | Performance | `#/cache` |
 | Developer Platform | `#/workers`, `#/workers-ai`, `#/cost` |
 | Audit | `#/findings` |
@@ -71,6 +71,7 @@ of the calling token — see the P2 entry below.
 | `POST /api/ai-security/analyze` | account or zone | AI Security (one fan-out builds every panel) |
 | `POST /api/access/usage` | account | Access Usage. Upstream caps this dataset at 1 week |
 | `POST /api/request/trace` | account or zone | Request Trace — Ray ID lookup across zones, schema-driven field selection |
+| `GET /api/pqc/report` | account (optional zone) | PQC Readiness — zones, their TLS settings, and every A/AAAA/CNAME record classified per TLS leg |
 | `GET /api/access/tunnels` | account | Tunnel Map — joins Access apps, their policies (reusable ones resolved), tunnel ingress rules and private routes |
 | `POST /api/gateway/usage` | account | Gateway Usage (DNS resolver + Gateway HTTP) |
 | `GET /api/workers/scripts` | account | Workers Analytics filter — needs `Workers Scripts: Read`, degrades if absent |
@@ -98,10 +99,11 @@ documents, so no caller text reaches a query.
 | [src/lib/access-usage.ts](src/lib/access-usage.ts) | Access login telemetry; folds success/failure rows and resolves app/IdP uuids to names |
 | [src/lib/gateway-usage.ts](src/lib/gateway-usage.ts) | Gateway DNS + HTTP telemetry; conservative block classification, multi-value category handling |
 | [src/lib/access-tunnels.ts](src/lib/access-tunnels.ts) | Tunnel Map: joins Access apps, tunnel ingress and private routes, and classifies each destination's origin kind |
+| [src/lib/pqc.ts](src/lib/pqc.ts) | Post-quantum readiness: zone TLS settings + DNS inventory + tunnel and Worker origins, classified into two legs and one verdict. `buildPqcReport` is pure and carries the classification rules |
 | [src/lib/request-trace.ts](src/lib/request-trace.ts) | Ray ID forensics: schema-swept field selection, adaptive retry around per-zone entitlements and Cloudflare's field ceiling |
 | [src/lib/workers-analytics.ts](src/lib/workers-analytics.ts) | Workers invocation metrics; script list degrades when the scope is absent |
 | [src/lib/workers-ai.ts](src/lib/workers-ai.ts) | Workers AI inference metrics; folds rows split by `errorCode` |
-| [src/lib/ai-sec/](src/lib/ai-sec/) | AI Security: zone fan-out, schema-capability probing, per-token edge caching, and the `buildDashboard` aggregation |
+| [src/lib/ai-sec/](src/lib/ai-sec/) | AI Security: zone fan-out, schema-capability probing, per-token edge caching of the **aggregate half only** (rows are never cached), and the `buildDashboard` aggregation |
 | [web/src/hooks/useTimeRange.ts](web/src/hooks/useTimeRange.ts) | Shared analytics window in minutes, hash-synced, clamped per section |
 | [web/src/components/chart/ChartHover.tsx](web/src/components/chart/ChartHover.tsx) | Hover readout for every inline-SVG chart: bucket hit-testing and measured, clamped placement |
 | [web/src/features/ai-security/matchedData.ts](web/src/features/ai-security/matchedData.ts) | HPKE decryption of logged prompts. Browser-only; the key never reaches the Worker or storage |
@@ -157,6 +159,7 @@ Disconnect clears the store.
 | `tests/waf-aggregate.test.ts` | Ruleset/rule correlation, action drift, zero-traffic + disabled rules, id/ref dedupe |
 | `tests/waf-meta.test.ts` | Merge order survives the concurrent scope fetch |
 | `tests/findings.test.ts` | Every audit check, plus the snapshot account-scoping guard |
+| `tests/pqc.test.ts` | Every readiness verdict, the inventory filter and ordering, and the route including the DNS-scope degradation |
 | `tests/rules.test.ts` | `describeRule` per rule type, `resolvePolicy`, decision tones |
 | `tests/csv.test.ts` | RFC 4180 escaping edge cases |
 
@@ -202,6 +205,19 @@ Disconnect clears the store.
 - `fa17935` `767b858` Tunnel Map — Access app → tunnel → origin, with both gaps surfaced (a tunnel ingress nobody gates; a destination with no route). Classifies by application type, because WARP, App Launcher, Browser Isolation, Worker and private destinations legitimately have no tunnel and were all being flagged.
 - `bb4efac` `22c4db3` Request Trace — Ray ID forensics across zones. Field selection is swept from the schema rather than hard-coded, with adaptive retry around per-zone entitlements and Cloudflare's 70-field ceiling. Where a payload-logging rule captured the body, it is decrypted in the browser with the AI Security key panel.
 
+- **PQC Readiness** (2026-09-08) — one page answering "which of our names are post-quantum, and
+  which are not". Inventory is every A/AAAA/CNAME record across the account's zones; each is
+  classified on both TLS legs and given one verdict. Three deliberate calls, all of which make the
+  report read worse than a naive one and all of which are correct:
+  - A Full-mode origin is **eligible**, never ready. Automatic key exchange prefers
+    `X25519MLKEM768` when the origin supports it, but Cloudflare publishes no per-zone scan
+    result, so claiming compliance would be inventing evidence.
+  - A DNS-only record is **not ready**, not partially covered — Cloudflare terminates no TLS for it.
+  - Flexible/Off SSL mode is **not ready** however good the inbound leg is, because the origin leg
+    is plain HTTP.
+  The deprecated `origin_post_quantum_encryption` API is deliberately not read; Cloudflare
+  documents it as a no-op.
+
 **Incidents**
 - 2026-09-07: **server mode broke for every gated route.** The Access application was recreated, which changed its AUD, so JWT verification failed audience check and the SPA fell back to asking for a token. Found while testing an unrelated route — the control route failed the same way, which ruled out the new code. Fixed by reading the live AUD from the login redirect and updating `CF_ACCESS_AUD`. See the constraints section in [README.md](README.md).
 
@@ -221,23 +237,60 @@ Disconnect clears the store.
 |---|---|---|---|
 | P1 | **No git remote** — `git remote -v` is empty | Single copy on this machine; no backup, no PR flow, and nothing enforces `npm run check` before a deploy | `git remote add origin …`, push, then a GitHub Actions workflow running `npm run check` on PR and deploying on merge |
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules |
-| P2 | **Bound token lacks `Workers Scripts: Read`** — re-verified 2026-09-08, `/api/workers/scripts` still returns 403 | Two sections are affected: Workers Analytics lists only workers that had traffic in the window, and the Tunnel Map cannot identify an Access app served by a Worker on a custom domain, so ten of them read as "no route found" rather than "Worker" | Add the scope in the Cloudflare dashboard, then `wrangler secret put CF_API_TOKEN`. No code change needed |
-| P2 | **AI Security telemetry is cached at the edge** — [queries.ts](src/lib/ai-sec/cf/queries.ts) writes `ZoneResult` to `caches.default`, keyed by a SHA-256 fingerprint of the token, while every other section is `no-store` | Not a leak (per-token namespacing is deliberate and commented), but detection rows including client IPs and payload ciphertext persist at the edge for the TTL | Decide whether that posture is wanted here, and write the decision down either way |
-| P3 | **`buildMitigations` doc/code mismatch** — its comment says a fully blocked critical signal sinks below an unblocked high one; the sort is severity-first, so it does not | Mitigation ranking may not match what the panel claims to recommend | Product decision: reword the comment, or make unmitigated volume outrank severity. `tests/ai-sec-catalog.test.ts` pins current behaviour |
-| P3 | **`graphBuckets` clamps out-of-window events into the edge buckets** rather than excluding them ([chart.ts](web/src/lib/waf/chart.ts)) | An event outside the requested window is silently counted in the first or last bucket. Low impact — events are already fetched for the same window | Exclude instead of clamp; `tests/waf-chart.test.ts` pins the current behaviour and will need updating |
 | — | **Account posture, not an app defect: seven tunnel hostnames have no Access application in front of them** — `app-alpha`, `nexus`, `app-delta` (Tunnel A), `app-bravo`, `private` (Tunnel B), `app-echo`, `app-charlie` | Those origins are reachable without an Access policy. `app-alpha` is deliberately vulnerable software; `app-bravo` exposes RDP | Surfaced by the Tunnel Map. Add Access applications, or confirm each is intentionally public |
-| P3 | **Connect screen does not list the scopes the newer sections need** — [ConnectPage](web/src/components/connect/ConnectPage.tsx) names seven optional permissions, none covering Workers Analytics, Workers AI, Gateway Usage, Access Usage or Cost & Usage | A BYOT operator sees those sections return nothing with no stated reason. Server mode is unaffected | Add them to `OPTIONAL_PERMISSIONS`, matching the table now in the README |
-| P3 | **Three things the standalone `ai-sec-dashboard` had that this app does not** — a live schema-probe readout (which detection fields resolve, so a hidden KPI has a stated reason), a custom absolute time range, and bar-to-events drill-down | Operators lose "why is this KPI missing?" and per-bar navigation; the underlying data is already fetched | Schema readout is the cheap one: `getSchemaCaps` already computes it, nothing renders it. Setup knowledge is captured in [docs/ai-security-setup.md](docs/ai-security-setup.md) |
-| P3 | **Prompt decryption is unverified against a real payload** — the blob parse is proven against live ciphertext, but the HPKE open path has only ever run against blobs the test suite seals itself | A format difference in the real payloads would surface as "could not decrypt" and read as a wrong key | Decrypt one live event with the zone's payload-logging private key. If Cloudflare hands the key out as hex rather than base64, `matchedData.ts` needs to accept both |
-| P3 | **Gateway block classification has never seen a block** — every window queried returned `blocked: 0`, so `isBlockedVerdict` has only run against allowed traffic | A verdict string that names a block in some other form would be counted as allowed, understating the block rate | Check against a window containing a real Gateway block, or confirm the resolver/action vocabulary against Cloudflare's docs |
-| P3 | **[src/lib/waf-meta.ts](src/lib/waf-meta.ts) is only lightly tested** — `cdac5e0` added merge-order coverage, but the managed-`execute` and entrypoint paths are still uncovered | A regression in the uncovered paths still mislabels rules in WAF Analytics | Extend `tests/waf-meta.test.ts` with fixtures for managed rulesets and the custom firewall entrypoint |
 | P3 | 3 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
-| P3 | [.claude/launch.json](.claude/launch.json) hardcodes the nvm `v24.16.0` binary path | Breaks when Node is upgraded | Default Node is now v24, so this can revert to plain `npx` |
 | P4 | `useHashSyncedState` adopts URL params on mount only. Editing the hash to a *different route* while the app is open (e.g. `#/waf?zone=A` → `#/cache?zone=B`) does not adopt the new param, because `App` never unmounts — the write-back then overwrites it | Hand-edited cross-route deep links lose their param. Fresh loads and in-app navigation are unaffected | Key the adoption on `route` as well as mount |
 | P4 | Worker's `CfGroup` interface ([src/index.ts](src/index.ts)) declares only `id`/`name`, but the endpoint passes the full group object through to the client | None at runtime — TS interfaces don't strip fields — but it misleads anyone reading the Worker in isolation | Widen it to match [web/src/types.ts](web/src/types.ts) |
 | P4 | Local directory still named `cf-zt-policy-dashboard/` | Cosmetic mismatch with the Flarelens name | Rename the folder |
 
 ### Recently resolved
+
+- ~~Bound token lacked `Workers Scripts: Read`~~ — scope added 2026-09-08 and verified live
+  through Access: `/api/workers/scripts` returns 8 scripts, and the Tunnel Map now classifies 29
+  rows as tunnel 15 / worker 5 / cloudflare 3 / unknown 6. The five that previously read "no route
+  found" name their Worker (`certs`, `flarelens`, `worker-one`, `worker-two`,
+  `worker-three`). The six still unknown match no Worker script name, so their origins are something
+  else — not a scope gap.
+
+**2026-09-08 — the P2/P3 sweep.** Everything below was closed in one pass; only the two entries
+that need a change in the Cloudflare dashboard are still open above.
+
+- ~~AI Security cached client IPs and payload ciphertext at the edge~~ — the per-zone GraphQL
+  query is now **split**: aggregates (counts, series) are cached under the same token-fingerprint
+  key, per-request rows are re-fetched every load and never written. `RESULT_VERSION` bumped to 6
+  so entries written by the old shape are not read back. Costs a second round trip per zone on a
+  cold cache. Posture and the split are documented in [README.md](README.md).
+- ~~`buildMitigations` doc/code mismatch~~ — decision: severity-first ranking is correct (a block
+  is a live configuration choice that can be removed; the tier is what the category costs when it
+  gets through). Comment rewritten to state that; the test's NOTE calling the comment wrong is
+  gone. No behaviour change.
+- ~~`graphBuckets` clamped out-of-window events into the edge buckets~~ — now excluded. An event
+  exactly at `end` still lands in the last bucket, since the window is inclusive of its own upper
+  bound. `tests/waf-chart.test.ts` updated from pinning the bug to asserting the fix.
+- ~~Connect screen did not list the newer sections' scopes~~ — `OPTIONAL_PERMISSIONS` now carries
+  Cloudflare Tunnel: Read and Workers Scripts: Read, and the Analytics: Read entry names every
+  section behind it. Matches the README table.
+- ~~No live schema-probe readout~~ — `/api/ai-security/analyze` now returns a `schema` block
+  (dataset, probe time, one row per detection field with the field name and what is lost when it
+  is absent), rendered as a collapsed "Detection field coverage" panel. A KPI that is zero because
+  the field does not resolve is now distinguishable from one that is zero because nothing fired.
+  The other two gaps in that entry — custom absolute range and bar drill-down — had already
+  shipped (`isAbsolute` windows; `injectionScores` backs the histogram drill-down).
+- ~~Prompt decryption could reject a correct key~~ — the key is now accepted as base64 **or** hex
+  (with or without `0x`). Every character of a 64-char hex key is legal base64, so it used to
+  decode silently to 48 bytes and report "must be 32 bytes" against a perfectly good key. The
+  live-payload check is still worth doing, but that failure mode is gone.
+- ~~Gateway block classification unverified~~ — checked against Cloudflare's published policy
+  vocabulary (2026-09-08): HTTP `action` is `allow`/`block`/`quarantine`/`isolate`/`off`, DNS
+  `resolverDecision` is camelCase (`blockedOnBlockPolicy`, `allowedOnNoPolicyMatch`,
+  `overrideForSafeSearch`). Only block and quarantine stop traffic and both are matched;
+  `isolate` and the rewrite actions are correctly not blocks. `isBlockedVerdict` is exported and
+  table-tested against that vocabulary, and the reading is written down in the README.
+- ~~`waf-meta.ts` managed-`execute` and entrypoint paths uncovered~~ — four fixtures added: the
+  managed ruleset indexed by its own id, child rules keyed by both id and ref, the custom
+  firewall entrypoint keeping a disabled rule, and a 403 on the detail fetch costing the child
+  names rather than the whole scope.
+- ~~`.claude/launch.json` hardcoded the nvm `v24.16.0` path~~ — plain `npx` again.
 
 - ~~Section snapshots leaked across accounts~~ — the cross-page WAF/Cache store was untagged module
   state that was never cleared, so after switching customers the Findings page showed the previous

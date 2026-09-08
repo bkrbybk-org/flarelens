@@ -12,6 +12,7 @@ Ops dashboard for Cloudflare: a single pane of glass for reviewing an account's 
 | `#/request` | Request Trace | account or zone | Everything Cloudflare records about one HTTP request, found by Ray ID: WAF attack scores, bot score and decision, JA3/JA4 fingerprints, TLS, device type, method, path, query, referer, content scanning, edge and origin timings, every firewall rule that matched, and — where a payload-logging rule captured it — the request body, decrypted in the browser. Fields beyond the curated groups are swept from the schema, so detail Cloudflare adds later appears without a code change. Field selection follows a live schema probe, and absence is reported as inconclusive because `httpRequestsAdaptive` is adaptively sampled |
 | `#/tunnels` | Tunnel Map | account | The chain behind a self-hosted app: public hostname → Access application and its policy decisions → Cloudflare Tunnel → origin service. Flags both gaps — a tunnel ingress with no Access app in front of it, and an Access app whose hostname no tunnel serves |
 | `#/gateway` | Gateway Usage | account | Zero Trust Gateway: DNS resolver queries and Gateway HTTP requests over time, split allowed/blocked, with top categories, policies, hosts and actions |
+| `#/pqc` | PQC Readiness | account | Post-quantum coverage per hostname: every A/AAAA/CNAME record in the account's zones, split by the two TLS legs — visitor→Cloudflare (proxied and TLS 1.3 on, so X25519MLKEM768 is offered) and Cloudflare→origin (tunnel, Cloudflare-hosted, automatic key exchange, or plain HTTP). Ranked worst first, with per-zone TLS settings and CSV export |
 | `#/waf` | WAF Analytics | account or zone | `firewallEventsAdaptive` telemetry correlated against ruleset metadata: KPIs, events-over-time, per-ruleset/rule tables, action-drift detection, per-rule drill-down |
 | `#/ai-security` | AI Security for Apps | account or zone | Prompt-injection, PII, unsafe-topic and custom-topic detections on LLM traffic: KPIs, detections over time, endpoint/country/session breakdowns, ranked mitigations, and a flagged-request table with per-row prompt decryption |
 | `#/cache` | Cache Rules | zone | Cache rules with last-match traffic attribution, hit-ratio health grade, insights, URL tester (client-side wirefilter evaluation) |
@@ -98,6 +99,7 @@ See [PROGRESS.md](PROGRESS.md) for the full route table, hook inventory, storage
 | Zone Analytics: Read | Traffic and hit-ratio data in Cache Rules, and the request/detection telemetry behind AI Security |
 | Analytics: Read | Prompt injection, PII and topic detections in AI Security; Access Usage, Gateway Usage, Workers Analytics, Workers AI and Cost & Usage all read account-scoped GraphQL datasets behind this |
 | Cloudflare Tunnel: Read | Tunnel names, status and ingress rules in the Tunnel Map, and the private network routes. **Cloudflare returns an empty list rather than a 403 when this is missing**, so without it the page cannot tell an account with no tunnels from a token that cannot see them — it says so rather than showing a blank map |
+| Zone: DNS: Read | The hostname inventory behind PQC Readiness. Without it each zone is still listed, carrying its own error and no hostnames, rather than the page reporting a clean but empty account |
 | Workers Scripts: Read | Adds workers with no traffic in the window to the Workers Analytics filter, and lets the Tunnel Map identify an Access application served by a Worker on a custom domain instead of reporting it as having no route. Both degrade rather than fail without it |
 
 ### Reading logged prompts
@@ -194,6 +196,24 @@ the section unreachable, and the sensitive part — the prompt itself — is gat
 zone's payload-logging private key rather than on the API token. The Worker only ever handles
 ciphertext.
 
+### What AI Security caches at the edge
+
+AI Security is the one section that caches upstream data, because a page load fans out a GraphQL
+query per zone. The zone query is **split in two** so that caching costs nothing in exposure:
+
+| Half | Contents | Cached |
+|---|---|---|
+| Aggregates | Request and detection counts, previous-period counts, bucketed series | Yes — `caches.default`, 60s, keyed by a SHA-256 fingerprint of the calling token so one operator's telemetry can never be served to another |
+| Rows | One entry per flagged request: client IP, JA4, host, path, ray ID, and the encrypted prompt | **No.** Re-fetched on every load and discarded with the response |
+
+So what sits at the edge for the TTL is counts and timestamps. Nothing that identifies a
+requester, and no payload ciphertext, is written there. The cost is a second round trip per zone
+on a cold cache; on a warm one only the row query runs.
+
+Bump `RESULT_VERSION` in [queries.ts](src/lib/ai-sec/cf/queries.ts) whenever the cached shape
+changes — it is part of the cache key, so a deploy that changes the shape misses rather than
+reading back stale-shaped JSON.
+
 ## Cloudflare API constraints worth knowing
 
 Behaviour of the upstream API that is not obvious, cost real debugging time, and is not
@@ -213,6 +233,33 @@ ceiling, and parses the number out of the error to trim if the ceiling ever chan
 with `zone '…' does not have access to the field 'fraudattack'`, rejecting the entire query.
 Cloudflare names the offender, so Request Trace drops it and retries rather than losing every
 swept field to one of them.
+
+**The `origin_post_quantum_encryption` zone API is a no-op.** Cloudflare documents requests to
+it as having no effect on key agreement behaviour, and plans to deprecate it. What replaced it is
+[automatic key exchange](https://developers.cloudflare.com/ssl/origin-configuration/automatic-key-exchange/):
+Cloudflare scans active origins roughly every 24 hours and prefers `X25519MLKEM768` when the origin
+supports it. **That scan result is not exposed per zone**, which is why PQC Readiness reports the
+origin leg of a Full-mode zone as *eligible* rather than compliant — the only honest verdict the
+API supports. To settle a specific origin:
+
+```bash
+bssl client -connect <origin>:443 -curves X25519MLKEM768
+```
+
+Measured adoption is a separate matter: the `ClientTLSKeyExchangeGroup` field (values
+`X25519MLKEM768`, `X25519`, `P-256`, `UNK`, `NONE`) exists in the `http_requests` **Logpush**
+dataset and Log Explorer, not in the GraphQL Analytics schema this app reads. If it appears in
+`httpRequestsAdaptiveGroups`, PQC Readiness can gain a measured column; until then it reports
+configuration, not observed traffic.
+
+**Gateway reports an outcome as free text, not a boolean.** Gateway HTTP rows carry the policy
+`action` (`allow`, `block`, `quarantine`, `isolate`, `off`, …) and DNS rows carry a camelCase
+`resolverDecision` (`blockedOnBlockPolicy`, `allowedOnNoPolicyMatch`, `overrideForSafeSearch`, …).
+Gateway Usage counts anything naming a block or a quarantine as blocked and everything else as
+allowed, so a verdict Cloudflare adds later is never silently counted as a block. `isolate` is
+deliberately not a block — the request is served, through Browser Isolation — and the Override,
+Safe Search and YouTube Restricted Mode actions rewrite the answer rather than refusing it, so
+"allowed" here means "not blocked", not "unmodified".
 
 **Recreating the Access application changes its AUD**, and server mode stops working the moment
 it does: every gated route 401s and the SPA falls back to asking for a token. That happened on
