@@ -1,4 +1,5 @@
-import { AeadId, CipherSuite, KdfId, KemId } from "hpke-js";
+import type * as HpkeJs from "hpke-js";
+import type { CipherSuite } from "hpke-js";
 
 /**
  * Decrypt a Cloudflare "matched data" payload — the encrypted prompt that AI Security records
@@ -100,7 +101,34 @@ export function parseMatchedDataBlob(blobBase64: string): ParsedBlob {
 	return { enc: bytes.slice(1, LENGTH_FIELD_OFFSET), ciphertext, plaintextLength: low };
 }
 
-function suite(): CipherSuite {
+// hpke-js is ~130 KB and used only on this one tab, by operators who hold a payload-logging
+// key — most sessions never touch it. Loading it as a dynamic import splits it into its own
+// chunk that only downloads when a decrypt actually runs, instead of on every page load.
+// Cached in a module-level promise so a second decryption on the same page reuses the already-
+// fetched chunk instead of re-importing it.
+let hpkePromise: Promise<typeof HpkeJs> | undefined;
+
+async function suite(): Promise<CipherSuite> {
+	// A rejected promise must not be cached: the chunk fetch can fail transiently (flaky network,
+	// a deploy swapping the asset mid-session), and pinning that rejection would make every later
+	// attempt fail without ever re-fetching. Clearing it on failure keeps the retry honest.
+	if (!hpkePromise) {
+		hpkePromise = import("hpke-js").catch((err) => {
+			hpkePromise = undefined;
+			throw err;
+		});
+	}
+
+	let module: typeof HpkeJs;
+	try {
+		module = await hpkePromise;
+	} catch {
+		// Surfaced through the module's own error type so the panel reports a load failure as
+		// itself, rather than as "could not decrypt" — which would read as a wrong key.
+		throw new MatchedDataError("Could not load the decryption library. Check your connection and try again.");
+	}
+
+	const { AeadId, CipherSuite, KdfId, KemId } = module;
 	return new CipherSuite({ kem: KemId.DhkemX25519HkdfSha256, kdf: KdfId.HkdfSha256, aead: AeadId.Aes256Gcm });
 }
 
@@ -118,7 +146,7 @@ export async function decryptMatchedData(privateKey: string, blobBase64: string)
 		throw new MatchedDataError(`Private key must be ${ENC_LENGTH} bytes; got ${rawKey.length}. Paste it as base64 or hex.`);
 	}
 
-	const cipherSuite = suite();
+	const cipherSuite = await suite();
 	let recipientKey;
 	try {
 		recipientKey = await cipherSuite.kem.importKey("raw", rawKey.slice().buffer, false);
