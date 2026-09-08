@@ -47,7 +47,21 @@ const OPTIONAL_PERMISSIONS = [
 	// AI Security reads the firewallForAi* fields on httpRequestsAdaptive, which sit behind the
 	// zone-scoped analytics permissions rather than a permission of their own. Called out so a
 	// token that opens every other section but returns nothing here has a stated reason.
-	{ label: "Analytics: Read", description: "Prompt injection, PII and topic detections in AI Security. Without it that section loads empty." },
+	{
+		label: "Analytics: Read",
+		description:
+			"Prompt injection, PII and topic detections in AI Security, and the account-scoped GraphQL datasets behind Access Usage, Gateway Usage, Workers Analytics, Workers AI and Cost & Usage. Without it those sections load empty.",
+	},
+	{
+		label: "Cloudflare Tunnel: Read",
+		description:
+			"Tunnel names, status, ingress rules and private routes in the Tunnel Map. Cloudflare returns an empty list rather than a 403 when this is missing, so the page states the ambiguity instead of showing a blank map.",
+	},
+	{
+		label: "Workers Scripts: Read",
+		description:
+			"Adds workers with no traffic in the window to the Workers Analytics filter, and lets the Tunnel Map identify an Access application served by a Worker rather than reporting it as having no route. Both degrade rather than fail without it.",
+	},
 ] as const;
 
 function StatusBadge({ status }: { status: CheckStatus }) {
