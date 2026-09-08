@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
+import { classifyKeyExchange, findKeyExchangeDimension, unavailableReason } from "../src/lib/pqc-adoption";
 import { buildPqcReport, gradeCipher, summariseCiphers, zoneTlsFindings, type DnsRecord, type PqcInputs, type ZoneTls } from "../src/lib/pqc";
 
 /**
@@ -396,5 +397,48 @@ describe("GET /api/pqc/report", () => {
 		const body = (await res.json()) as { result: { rows: unknown[]; errors: { source: string; message: string }[] } };
 		expect(body.result.rows).toHaveLength(0);
 		expect(body.result.errors.some((e) => e.source.includes("DNS records"))).toBe(true);
+	});
+});
+
+// --- measured adoption ----------------------------------------------------
+
+describe("PQC adoption classification", () => {
+	it("counts a hybrid key agreement as post-quantum, by either generation's name", () => {
+		expect(classifyKeyExchange("X25519MLKEM768")).toBe("pqc");
+		// The obsolete draft hybrid, still worth counting where it appears.
+		expect(classifyKeyExchange("X25519Kyber768Draft00")).toBe("pqc");
+	});
+
+	it("counts a named classical group as classical", () => {
+		expect(classifyKeyExchange("X25519")).toBe("classical");
+		expect(classifyKeyExchange("P-256")).toBe("classical");
+	});
+
+	it("keeps UNK and NONE out of the classical bucket", () => {
+		// NONE means no TLS and UNK means Cloudflare could not tell; neither is evidence of a
+		// classical handshake, and folding them into `classical` would understate adoption by
+		// blaming traffic that was never measured.
+		expect(classifyKeyExchange("UNK")).toBe("indeterminate");
+		expect(classifyKeyExchange("NONE")).toBe("indeterminate");
+		expect(classifyKeyExchange("")).toBe("indeterminate");
+	});
+
+	it("finds a key-exchange dimension by shape rather than one hardcoded spelling", () => {
+		expect(findKeyExchangeDimension(["clientSSLProtocol", "clientTLSKeyExchangeGroup"])).toBe("clientTLSKeyExchangeGroup");
+		expect(findKeyExchangeDimension(["clientSSLKeyExchange"])).toBe("clientSSLKeyExchange");
+	});
+
+	it("does not mistake a cipher or protocol dimension for a key agreement", () => {
+		// A cipher suite is not a key agreement. Reporting cipher data as post-quantum adoption
+		// would be wrong rather than merely imprecise, so these must not match.
+		expect(findKeyExchangeDimension(["clientSSLProtocol", "clientSSLCipher", "edgeResponseStatus"])).toBeNull();
+	});
+
+	it("states the alternative when the schema cannot answer", () => {
+		const reason = unavailableReason(["clientSSLProtocol"]);
+		expect(reason).toMatch(/Log Explorer/);
+		expect(reason).toMatch(/clientSSLProtocol/);
+		// Must never read as "zero adoption".
+		expect(reason).not.toMatch(/\b0%/);
 	});
 });

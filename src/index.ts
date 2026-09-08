@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { assertAllowedScope, resolveAuth, type AuthEnv } from "./lib/auth";
 import { TunnelMapError, fetchTunnelMap } from "./lib/access-tunnels";
 import { PqcError, fetchPqcReport, type PqcZone } from "./lib/pqc";
+import { emptyAdoption, fetchAdoption, probeAdoptionDimension, unavailableReason } from "./lib/pqc-adoption";
 import { RequestTraceError, normaliseRayId, traceRequest } from "./lib/request-trace";
 import { MAX_AI_RANGE_MS, WorkersAiError, fetchWorkersAi, isAiGranularity } from "./lib/workers-ai";
 import {
@@ -853,6 +854,20 @@ app.get("/api/access/tunnels", async (c) => {
 // PQC readiness (post-quantum coverage per hostname)
 
 /**
+ * Window for measured adoption: the last 24 hours.
+ *
+ * Fixed rather than driven by the shared range picker, because this section is a configuration
+ * inventory and does not otherwise carry a time range. A day is long enough to average over a
+ * traffic cycle and short enough to reflect a client population that is changing month by month.
+ * Both bounds go through toISOString(), the same injection boundary every other route uses.
+ */
+function adoptionWindow(): { since: string; until: string } {
+	const until = new Date();
+	const since = new Date(until.getTime() - 24 * 60 * 60 * 1000);
+	return { since: since.toISOString(), until: until.toISOString() };
+}
+
+/**
  * Post-quantum readiness for every proxiable hostname in the account.
  *
  * Zone-wide by design: the settings that decide the answer (TLS 1.3, SSL mode) are zone settings,
@@ -892,7 +907,22 @@ app.get("/api/pqc/report", async (c) => {
 		.map((z) => ({ id: z.id, name: z.name || z.id }));
 
 	try {
-		return c.json({ success: true, result: await fetchPqcReport(accountId, token, zones) });
+		const report = await fetchPqcReport(accountId, token, zones);
+
+		// Measured adoption is a capability question, not a given: the key-exchange dimension may
+		// not exist in this account's schema at all. Probe, then either measure or say why not —
+		// never report 0% for a question the schema cannot answer. See lib/pqc-adoption.ts.
+		const probe = await probeAdoptionDimension(token);
+		let adoption = probe.dimension
+			? await fetchAdoption(token, zones, adoptionWindow(), probe.dimension)
+			: emptyAdoption(probe.error ?? unavailableReason(probe.candidates), probe.candidates);
+		if (probe.dimension && adoption.errors.length === zones.length && zones.length > 0) {
+			// Every zone failed: the dimension introspects but cannot actually be queried, which
+			// is a different failure from it being absent and is worth saying so.
+			adoption = emptyAdoption(`The ${probe.dimension} dimension exists but no zone could be queried: ${adoption.errors[0].message}`, probe.candidates);
+		}
+
+		return c.json({ success: true, result: { ...report, adoption } });
 	} catch (err) {
 		const status = err instanceof PqcError ? err.status : 502;
 		const message = err instanceof Error ? err.message : "Failed to build the PQC report";

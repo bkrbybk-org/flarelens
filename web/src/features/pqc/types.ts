@@ -59,6 +59,25 @@ export interface PqcZoneSummary {
 	error?: string;
 }
 
+export interface HostAdoption {
+	fqdn: string;
+	pqc: number;
+	classical: number;
+	indeterminate: number;
+}
+
+/** Measured adoption, when this account's GraphQL schema can express it. See src/lib/pqc-adoption.ts. */
+export interface AdoptionResult {
+	available: boolean;
+	dimension: string | null;
+	candidatesSeen: string[];
+	reason: string;
+	window: { since: string; until: string } | null;
+	hosts: HostAdoption[];
+	totals: { pqc: number; classical: number; indeterminate: number };
+	errors: { source: string; message: string }[];
+}
+
 export interface PqcResult {
 	rows: PqcRow[];
 	zones: PqcZoneSummary[];
@@ -66,4 +85,6 @@ export interface PqcResult {
 	errors: { source: string; message: string }[];
 	tunnelsKnown: boolean;
 	workersKnown: boolean;
+	/** Optional so an older cached response, or a test fixture, renders without it. */
+	adoption?: AdoptionResult;
 }

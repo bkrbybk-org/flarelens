@@ -4,7 +4,7 @@ import { RefreshIcon, SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { Session } from "../../hooks/useSession";
 import { usePqcReport } from "./usePqcReport";
-import type { CipherGrade, CipherSummary, InboundState, OriginState, PqcRow, PqcZoneSummary, TlsFindingSeverity, Verdict } from "./types";
+import type { AdoptionResult, CipherGrade, CipherSummary, InboundState, OriginState, PqcRow, PqcZoneSummary, TlsFindingSeverity, Verdict } from "./types";
 
 const CARD = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
@@ -159,6 +159,94 @@ function TlsPostureSection({ zones }: { zones: PqcZoneSummary[] }) {
 					</li>
 				))}
 			</ul>
+		</section>
+	);
+}
+
+/**
+ * Measured adoption, or an honest account of why there is none.
+ *
+ * The unavailable case is deliberately as prominent as the available one: an operator who reads
+ * "0% post-quantum" and an operator who reads "this cannot be measured here" must take different
+ * actions, and only one of those is a configuration problem.
+ */
+function AdoptionPanel({ adoption }: { adoption: AdoptionResult }) {
+	if (!adoption.available) {
+		return (
+			<section className={`${CARD} mb-4`}>
+				<h2 className="mb-2 text-sm font-semibold">Measured adoption — not available on this account</h2>
+				<p className="text-sm text-zinc-600 dark:text-zinc-300">{adoption.reason}</p>
+				{adoption.candidatesSeen.length > 0 && (
+					<p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+						TLS-related dimensions the schema does expose:{" "}
+						<span className="font-mono">{adoption.candidatesSeen.join(", ")}</span>
+					</p>
+				)}
+			</section>
+		);
+	}
+
+	const { pqc, classical, indeterminate } = adoption.totals;
+	const measured = pqc + classical;
+	const share = measured > 0 ? (pqc / measured) * 100 : null;
+
+	return (
+		<section className={`${CARD} mb-4`}>
+			<div className="mb-3 flex flex-wrap items-baseline gap-2">
+				<h2 className="text-sm font-semibold">Measured adoption</h2>
+				<span className="text-xs text-zinc-500 dark:text-zinc-400">
+					last 24h · <span className="font-mono">{adoption.dimension}</span>
+				</span>
+			</div>
+
+			{/* A share of nothing is not 0% — a window with no TLS traffic has no answer to give. */}
+			{share === null ? (
+				<p className="text-sm text-zinc-500 dark:text-zinc-400">No TLS requests in the window, so there is no share to report.</p>
+			) : (
+				<p className="text-sm">
+					<span className="text-2xl font-semibold tabular-nums">{share.toFixed(1)}%</span>{" "}
+					<span className="text-zinc-500 dark:text-zinc-400">
+						of {measured.toLocaleString()} measured requests negotiated a post-quantum hybrid key agreement
+						{indeterminate > 0 && `, with ${indeterminate.toLocaleString()} more where the group was not determined or TLS was not used`}.
+					</span>
+				</p>
+			)}
+
+			{adoption.errors.map((e) => (
+				<p key={e.source} className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+					{e.source}: {e.message}
+				</p>
+			))}
+
+			{adoption.hosts.length > 0 && (
+				<div className="mt-3 overflow-x-auto">
+					<table className="w-full text-sm">
+						<thead className="text-left text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+							<tr>
+								<th className="py-1.5 pr-3 font-medium">Hostname</th>
+								<th className="py-1.5 pr-3 text-right font-medium">Post-quantum</th>
+								<th className="py-1.5 pr-3 text-right font-medium">Classical</th>
+								<th className="py-1.5 pr-3 text-right font-medium">Share</th>
+							</tr>
+						</thead>
+						<tbody>
+							{adoption.hosts.slice(0, 25).map((host) => {
+								const total = host.pqc + host.classical;
+								return (
+									<tr key={host.fqdn} className="border-t border-zinc-100 dark:border-zinc-800">
+										<td className="py-1.5 pr-3">{host.fqdn}</td>
+										<td className="py-1.5 pr-3 text-right tabular-nums">{host.pqc.toLocaleString()}</td>
+										<td className="py-1.5 pr-3 text-right tabular-nums">{host.classical.toLocaleString()}</td>
+										<td className="py-1.5 pr-3 text-right tabular-nums">
+											{total > 0 ? `${((host.pqc / total) * 100).toFixed(1)}%` : "—"}
+										</td>
+									</tr>
+								);
+							})}
+						</tbody>
+					</table>
+				</div>
+			)}
 		</section>
 	);
 }
@@ -325,6 +413,8 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 					bssl client -connect &lt;origin&gt;:443 -curves X25519MLKEM768
 				</pre>
 			</div>
+
+			{result?.adoption && <AdoptionPanel adoption={result.adoption} />}
 
 			<section className={`${CARD} mb-4`}>
 				<h2 className="mb-3 text-sm font-semibold">Zones</h2>
