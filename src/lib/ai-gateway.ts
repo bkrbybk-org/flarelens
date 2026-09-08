@@ -255,6 +255,24 @@ export interface AiGatewayUsageResult {
 		cache: AiGatewayDatasetStatus;
 		spend: AiGatewayDatasetStatus;
 	};
+	/**
+	 * What the schema probe actually resolved.
+	 *
+	 * Reported rather than kept internal because a metric reading zero has two very different
+	 * causes — no traffic recorded it, or no field was found to sum — and only this tells them
+	 * apart. It is also the fastest way to correct a wrong resolution: the names are right here
+	 * in the response rather than buried in a query string.
+	 */
+	schema: {
+		datasetsSeen: string[];
+		requestsDataset: string | null;
+		gatewayDimension: string | null;
+		modelDimension: string | null;
+		tokensInField: string | null;
+		tokensOutField: string | null;
+		cacheStatusDimension: string | null;
+		costField: string | null;
+	};
 }
 
 interface GraphqlEnvelope<T> {
@@ -528,5 +546,15 @@ export async function fetchAiGatewayUsage(
 		byModel: fields.requests.model ? foldBreakdown(account?.byModel || [], fields.requests.model) : [],
 		truncated: seriesRows.length >= SERIES_LIMIT,
 		datasets: { errors: errorsStatus, cache: cacheStatus, spend: spendStatus },
+		schema: {
+			datasetsSeen: fields.datasetsSeen,
+			requestsDataset: fields.requests.name,
+			gatewayDimension: fields.requests.gateway,
+			modelDimension: fields.requests.model,
+			tokensInField: fields.requests.tokensIn,
+			tokensOutField: fields.requests.tokensOut,
+			cacheStatusDimension: fields.cache?.status ?? null,
+			costField: fields.spend?.cost ?? null,
+		},
 	};
 }
