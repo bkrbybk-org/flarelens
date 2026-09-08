@@ -247,6 +247,12 @@ into that project only, so the node project's Workers-shaped globals stay untouc
   first probe failed *quietly* by matching `cachedTokensIn` and `abnormalCostSessions` — real
   fields that answer different questions and report zero.
 
+- **Access Groups gained tabs** (2026-09-08) — Rule groups and Reusable policies. The account's
+  reusable policies were already fetched by `/api/data` and already used to resolve group
+  references, but nothing rendered them, so a policy attached to no application was invisible.
+  That is the case the new tab calls out by name: it is either dead configuration or a policy
+  someone believes is in force. Deep-linkable as `#/groups?tab=policies`.
+
 **Incidents**
 - 2026-09-07: **server mode broke for every gated route.** The Access application was recreated, which changed its AUD, so JWT verification failed audience check and the SPA fell back to asking for a token. Found while testing an unrelated route — the control route failed the same way, which ruled out the new code. Fixed by reading the live AUD from the login redirect and updating `CF_ACCESS_AUD`. See the constraints section in [README.md](README.md).
 

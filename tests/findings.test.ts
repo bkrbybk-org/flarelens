@@ -12,8 +12,7 @@ import {
 	policyReferencesGroup,
 	sortFindings,
 	wafFindings,
-	type Finding,
-} from "../web/src/lib/findings";
+	type Finding, reusablePolicyUsedBy } from "../web/src/lib/findings";
 import type { CacheAnalysis } from "../web/src/features/cache/types";
 import type { RuleReviewRow } from "../web/src/lib/waf/types";
 import type { CfApp, CfGroup, CfPolicy } from "../web/src/types";
@@ -226,5 +225,35 @@ describe("section snapshots are scoped by account", () => {
 		clearSectionSnapshots();
 		expect(readWafSnapshot("acc-A")).toBeNull();
 		expect(readCacheSnapshot("acc-A")).toBeNull();
+	});
+});
+
+describe("reusablePolicyUsedBy", () => {
+	const policy = (id: string, name: string) => ({ id, name, decision: "allow" });
+	const app = (name: string, policyIds: string[]) => ({
+		id: `app-${name}`,
+		name,
+		policies: policyIds.map((id) => ({ id })),
+	});
+
+	it("names every application that attaches a policy by reference", () => {
+		const map = reusablePolicyUsedBy(
+			[policy("p1", "Staff only"), policy("p2", "Contractors")],
+			[app("wiki", ["p1"]), app("grafana", ["p1", "p2"])] as never,
+		);
+		expect(map.get("p1")).toEqual(["wiki", "grafana"]);
+		expect(map.get("p2")).toEqual(["grafana"]);
+	});
+
+	it("reports an unattached policy as attached to nothing", () => {
+		// Worth surfacing: it is either dead configuration, or a policy someone believes is in
+		// force. Both are things an operator wants to see on this tab.
+		const map = reusablePolicyUsedBy([policy("orphan", "Old vendor access")], [app("wiki", ["p1"])] as never);
+		expect(map.get("orphan")).toEqual([]);
+	});
+
+	it("keeps an entry for every policy, so a lookup never returns undefined", () => {
+		const map = reusablePolicyUsedBy([policy("p1", "One"), policy("p2", "Two")], [] as never);
+		expect([...map.keys()].sort()).toEqual(["p1", "p2"]);
 	});
 });

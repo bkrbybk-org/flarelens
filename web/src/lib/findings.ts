@@ -93,6 +93,28 @@ export function groupUsedBy(
 	return map;
 }
 
+/**
+ * Reusable policy id → names of the applications that attach it.
+ *
+ * An application attaches a reusable policy by reference: the app's own policy entry carries the
+ * reusable policy's id and no rules of its own, which is exactly what resolvePolicy keys on. A
+ * policy nothing references is worth seeing — it is either dead configuration or a policy someone
+ * expected to be in force.
+ */
+export function reusablePolicyUsedBy(policies: CfPolicy[], apps: CfApp[]): Map<string, string[]> {
+	const map = new Map<string, string[]>();
+	for (const policy of policies) {
+		const names: string[] = [];
+		for (const app of apps) {
+			if (app.policies.some((attached) => attached.id === policy.id)) {
+				names.push(app.name || app.id);
+			}
+		}
+		map.set(policy.id, names);
+	}
+	return map;
+}
+
 export function accessFindings(apps: CfApp[], reusableMap: Record<string, CfPolicy>): Finding[] {
 	const findings: Finding[] = [];
 	for (const app of apps) {

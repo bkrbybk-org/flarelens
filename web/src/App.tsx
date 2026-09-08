@@ -279,6 +279,8 @@ export default function App() {
 							groupsError={data.data?.groups_error || false}
 							apps={data.data?.apps || []}
 							reusableMap={data.reusableMap}
+							reusablePolicies={data.data?.reusable_policies || []}
+							reusablePoliciesError={data.data?.reusable_policies_error || false}
 							loading={data.loading}
 							error={data.error}
 							progressPercent={data.progress.percent}
