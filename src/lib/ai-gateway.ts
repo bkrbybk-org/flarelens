@@ -28,63 +28,149 @@
  *   MEDIUM — plausible camelCase of a documented Logpush/dashboard field, unconfirmed as GraphQL
  *   LOW    — no direct precedent; could easily be named, shaped or scoped differently
  */
-const FIELDS = {
-	requests: {
-		// HIGH — "aiGatewayXAdaptiveGroups" matches gatewayResolverQueriesAdaptiveGroups /
-		// gatewayL7RequestsAdaptiveGroups / aiInferenceAdaptiveGroups exactly.
-		dataset: "aiGatewayRequestsAdaptiveGroups",
-		// MEDIUM — the AI Gateway dashboard is gateway-scoped, so *some* gateway identifier
-		// dimension should exist; "gatewayId" mirrors "modelId" on aiInferenceAdaptiveGroups.
-		// Could instead be "gatewayTag" or the gateway's slug under a different key.
-		gatewayId: "gatewayId",
-		// MEDIUM — mirrors modelId on aiInferenceAdaptiveGroups. AI Gateway's own Logpush
-		// dataset names this field "model", so "model" (not "modelId") is used here instead.
-		model: "model",
-		// LOW — no precedent in this repo. AI Gateway proxies many providers per gateway, so a
-		// provider dimension separate from the model string is likely but unconfirmed.
-		provider: "provider",
-		// LOW — Logpush's `tokens_in`/`tokens_out` are per-request scalars; whether the
-		// Analytics API exposes their SUM under these exact names (vs. e.g. "totalTokensIn")
-		// is unconfirmed. Named to match totalInputTokens/totalOutputTokens's "totalX" shape.
-		sumTokensIn: "totalTokensIn",
-		sumTokensOut: "totalTokensOut",
-		// LOW — cost may not be exposed on the requests dataset at all, which is exactly why
-		// aiGatewaySpendSessionsAdaptiveGroups exists as a separate, dedicated source below.
-		// Attempted here too, opportunistically, since the task description allows for it
-		// ("cost if exposed"); if the field or dataset name is wrong this alias just degrades.
-		sumCost: "totalCost",
-	},
-	errors: {
-		// HIGH — same dataset-naming convention as above.
-		dataset: "aiGatewayErrorsAdaptiveGroups",
-		// MEDIUM — mirrors errorCode on aiInferenceAdaptiveGroups, where 0 means "no error".
-		// An errors-only dataset more plausibly has no zero bucket at all (every row IS an
-		// error), so isError() below does not special-case a zero code the way workers-ai.ts
-		// does — every row returned by this dataset counts.
-		errorCode: "errorCode",
-		// LOW — an HTTP status code dimension, if the dataset carries one.
-		statusCode: "statusCode",
-	},
-	cache: {
-		// HIGH — same dataset-naming convention.
-		dataset: "aiGatewayCacheAdaptiveGroups",
-		// LOW — AI Gateway's dashboard shows a HIT/MISS/DYNAMIC-style cache status; the
-		// dimension holding it could be a string enum ("cacheStatus") or a boolean ("cached").
-		// A string enum is assumed since that is what Cloudflare's own cache UIs use elsewhere
-		// (cf-cache-status), and isCacheHit() below is written as a substring test for the same
-		// reason isBlockedVerdict() is in gateway-usage.ts — an unfamiliar value must not be
-		// silently miscounted.
-		cacheStatus: "cacheStatus",
-	},
-	spend: {
-		// HIGH — same dataset-naming convention.
-		dataset: "aiGatewaySpendSessionsAdaptiveGroups",
-		// LOW — "session" in the dataset name suggests this may be structured very differently
-		// from the other three (e.g. one row per billing session rather than per request), so
-		// even the aggregate field below is a guess about shape, not just name.
-		sumCost: "totalCost",
-	},
-} as const;
+/**
+ * Field names are RESOLVED FROM THE SCHEMA, not hardcoded.
+ *
+ * The first version of this module guessed them from Cloudflare's naming conventions and was
+ * wrong on the first real request: `unknown field "totalTokensIn"`. Guessing then correcting by
+ * redeploy is one round trip per wrong name, and the names are not documented anywhere.
+ *
+ * So this asks instead, the way Request Trace and AI Security already do: introspect the account
+ * type for its aiGateway* datasets, introspect each dataset's aggregates and dimensions, and
+ * build every query only out of names that actually exist. A dataset or field this account does
+ * not expose leaves its panel empty with a stated reason, which is the same contract the rest of
+ * the section already had for a missing scope.
+ */
+interface DatasetCaps {
+	/** The dataset's real name on the account type. */
+	name: string;
+	/** Names available inside `sum { ... }`. */
+	sums: string[];
+	dimensions: string[];
+}
+
+interface ResolvedFields {
+	requests: (DatasetCaps & { gateway: string | null; model: string | null; provider: string | null; tokensIn: string | null; tokensOut: string | null }) | null;
+	errors: DatasetCaps | null;
+	cache: (DatasetCaps & { status: string | null }) | null;
+	spend: (DatasetCaps & { cost: string | null }) | null;
+	/** Every aiGateway* dataset the schema exposes, so an absence can be evidenced rather than asserted. */
+	datasetsSeen: string[];
+}
+
+const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+const pick = (names: string[], pattern: RegExp) => names.find((n) => pattern.test(norm(n))) ?? null;
+
+const TYPE_REF = "name ofType { name ofType { name ofType { name ofType { name } } } }";
+
+const ACCOUNT_FIELDS_QUERY = `
+query ProbeAccount {
+  __type(name: "account") { fields { name type { ${TYPE_REF} } } }
+}`;
+
+const TYPE_FIELDS_QUERY = `
+query ProbeType($name: String!) {
+  __type(name: $name) { fields { name type { ${TYPE_REF} } } }
+}`;
+
+interface TypeRef {
+	name: string | null;
+	ofType: TypeRef | null;
+}
+
+interface IntrospectionResponse {
+	__type: { fields: { name: string; type: TypeRef }[] | null } | null;
+}
+
+function unwrapType(type: TypeRef | null | undefined): string | null {
+	let cursor: TypeRef | null | undefined = type;
+	while (cursor) {
+		if (cursor.name) return cursor.name;
+		cursor = cursor.ofType;
+	}
+	return null;
+}
+
+async function introspect(token: string, query: string, variables?: Record<string, unknown>): Promise<IntrospectionResponse | null> {
+	const response = await fetch(GRAPHQL_ENDPOINT, {
+		method: "POST",
+		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+		body: JSON.stringify({ query, variables }),
+	});
+	if (response.status === 401 || response.status === 403) {
+		throw new AiGatewayUsageError("Cloudflare API request failed", response.status);
+	}
+	try {
+		const body = (await response.json()) as { data?: IntrospectionResponse; errors?: unknown[] };
+		return body.errors?.length ? null : (body.data ?? null);
+	} catch {
+		return null;
+	}
+}
+
+/** One dataset's aggregate and dimension names, or null when the account does not expose it. */
+async function probeDataset(token: string, accountFields: { name: string; type: TypeRef }[], pattern: RegExp): Promise<DatasetCaps | null> {
+	const field = accountFields.find((f) => pattern.test(norm(f.name)));
+	const typeName = unwrapType(field?.type);
+	if (!field || !typeName) return null;
+
+	const rowType = await introspect(token, TYPE_FIELDS_QUERY, { name: typeName });
+	const rowFields = rowType?.__type?.fields ?? [];
+
+	const readNames = async (holder: string): Promise<string[]> => {
+		const inner = unwrapType(rowFields.find((f) => f.name === holder)?.type);
+		if (!inner) return [];
+		const type = await introspect(token, TYPE_FIELDS_QUERY, { name: inner });
+		return (type?.__type?.fields ?? []).map((f) => f.name);
+	};
+
+	return { name: field.name, sums: await readNames("sum"), dimensions: await readNames("dimensions") };
+}
+
+/**
+ * Cached per token for the lifetime of the isolate.
+ *
+ * Introspection costs four or five round trips and the schema does not change between requests;
+ * re-probing on every page load would double this section's latency for nothing. Keyed by token
+ * so two operators with different entitlements never share a resolution.
+ */
+const schemaCache = new Map<string, { value: ResolvedFields; expires: number }>();
+const SCHEMA_TTL_MS = 10 * 60 * 1000;
+
+export async function resolveAiGatewayFields(token: string, cacheKey: string): Promise<ResolvedFields> {
+	const hit = schemaCache.get(cacheKey);
+	if (hit && hit.expires > Date.now()) return hit.value;
+
+	const account = await introspect(token, ACCOUNT_FIELDS_QUERY);
+	const accountFields = account?.__type?.fields ?? [];
+	const datasetsSeen = accountFields.map((f) => f.name).filter((n) => norm(n).startsWith("aigateway"));
+
+	const [requests, errors, cache, spend] = await Promise.all([
+		probeDataset(token, accountFields, /^aigateway.*request/),
+		probeDataset(token, accountFields, /^aigateway.*error/),
+		probeDataset(token, accountFields, /^aigateway.*cache/),
+		probeDataset(token, accountFields, /^aigateway.*spend/),
+	]);
+
+	const value: ResolvedFields = {
+		requests: requests && {
+			...requests,
+			gateway: pick(requests.dimensions, /gateway/),
+			model: pick(requests.dimensions, /model/),
+			provider: pick(requests.dimensions, /provider/),
+			// Token counts are the field names that were wrong first time round; match on shape.
+			tokensIn: pick(requests.sums, /token.*in|input.*token|promptttoken|prompttoken/),
+			tokensOut: pick(requests.sums, /token.*out|output.*token|completiontoken/),
+		},
+		errors,
+		cache: cache && { ...cache, status: pick(cache.dimensions, /cach|status|hit/) },
+		spend: spend && { ...spend, cost: pick(spend.sums, /cost|spend|amount/) },
+		datasetsSeen,
+	};
+
+	schemaCache.set(cacheKey, { value, expires: Date.now() + SCHEMA_TTL_MS });
+	return value;
+}
 
 const GRAPHQL_ENDPOINT = "https://api.cloudflare.com/client/v4/graphql";
 
@@ -135,8 +221,9 @@ export interface AiGatewayDatasetStatus {
 
 export interface AiGatewayTotals {
 	requests: number;
-	tokensIn: number;
-	tokensOut: number;
+	/** null when the schema exposes no such aggregate — never a confident 0. */
+	tokensIn: number | null;
+	tokensOut: number | null;
 	/** null when the spend dataset (or its cost field) is unavailable — never coerced to 0. */
 	cost: number | null;
 	/** null when the errors dataset is unavailable. */
@@ -196,49 +283,68 @@ async function postGraphql<T>(accountId: string, token: string, query: string, v
 	return { account: envelope.data?.viewer?.accounts?.[0] };
 }
 
-function requestsQuery(timeDimension: string): string {
-	const f = FIELDS.requests;
+/** Emit a `sum { ... }` selection only when at least one aggregate resolved; an empty one is invalid. */
+function sumSelection(names: (string | null)[]): string {
+	const present = names.filter((n): n is string => !!n);
+	return present.length ? `sum { ${present.join(" ")} }` : "";
+}
+
+/** Same for `dimensions { ... }`. */
+function dimensionSelection(names: (string | null)[]): string {
+	const present = names.filter((n): n is string => !!n);
+	return present.length ? `dimensions { ${present.join(" ")} }` : "";
+}
+
+function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["requests"]>): string {
+	// A breakdown whose dimension does not exist is omitted entirely rather than queried against
+	// a guessed name — the whole document fails on one unknown field, taking the series with it.
+	const gatewayAlias = f.gateway
+		? `
+      byGateway: ${f.name}(
+        filter: { datetime_geq: $since, datetime_leq: $until }
+        limit: $breakdownLimit
+        orderBy: [count_DESC]
+      ) {
+        count
+        ${dimensionSelection([f.gateway])}
+      }`
+		: "";
+	const modelAlias = f.model || f.provider
+		? `
+      byModel: ${f.name}(
+        filter: { datetime_geq: $since, datetime_leq: $until }
+        limit: $breakdownLimit
+        orderBy: [count_DESC]
+      ) {
+        count
+        ${dimensionSelection([f.model, f.provider])}
+      }`
+		: "";
+
 	return `
 query AiGatewayRequests($accountTag: string!, $since: Time!, $until: Time!, $seriesLimit: Int!, $breakdownLimit: Int!) {
   viewer {
     accounts(filter: { accountTag: $accountTag }) {
-      series: ${f.dataset}(
+      series: ${f.name}(
         filter: { datetime_geq: $since, datetime_leq: $until }
         limit: $seriesLimit
         orderBy: [${timeDimension}_ASC]
       ) {
         count
         dimensions { ${timeDimension} }
-        sum { ${f.sumTokensIn} ${f.sumTokensOut} ${f.sumCost} }
-      }
-      byGateway: ${f.dataset}(
-        filter: { datetime_geq: $since, datetime_leq: $until }
-        limit: $breakdownLimit
-        orderBy: [count_DESC]
-      ) {
-        count
-        dimensions { ${f.gatewayId} }
-      }
-      byModel: ${f.dataset}(
-        filter: { datetime_geq: $since, datetime_leq: $until }
-        limit: $breakdownLimit
-        orderBy: [count_DESC]
-      ) {
-        count
-        dimensions { ${f.model} ${f.provider} }
-      }
+        ${sumSelection([f.tokensIn, f.tokensOut])}
+      }${gatewayAlias}${modelAlias}
     }
   }
 }`;
 }
 
-function errorsQuery(): string {
-	const f = FIELDS.errors;
+function errorsQuery(f: DatasetCaps): string {
 	return `
 query AiGatewayErrors($accountTag: string!, $since: Time!, $until: Time!, $breakdownLimit: Int!) {
   viewer {
     accounts(filter: { accountTag: $accountTag }) {
-      total: ${f.dataset}(filter: { datetime_geq: $since, datetime_leq: $until }, limit: $breakdownLimit) {
+      total: ${f.name}(filter: { datetime_geq: $since, datetime_leq: $until }, limit: $breakdownLimit) {
         count
       }
     }
@@ -246,33 +352,31 @@ query AiGatewayErrors($accountTag: string!, $since: Time!, $until: Time!, $break
 }`;
 }
 
-function cacheQuery(): string {
-	const f = FIELDS.cache;
+function cacheQuery(f: NonNullable<ResolvedFields["cache"]>): string {
 	return `
 query AiGatewayCache($accountTag: string!, $since: Time!, $until: Time!, $breakdownLimit: Int!) {
   viewer {
     accounts(filter: { accountTag: $accountTag }) {
-      byStatus: ${f.dataset}(
+      byStatus: ${f.name}(
         filter: { datetime_geq: $since, datetime_leq: $until }
         limit: $breakdownLimit
         orderBy: [count_DESC]
       ) {
         count
-        dimensions { ${f.cacheStatus} }
+        ${dimensionSelection([f.status])}
       }
     }
   }
 }`;
 }
 
-function spendQuery(): string {
-	const f = FIELDS.spend;
+function spendQuery(f: NonNullable<ResolvedFields["spend"]>): string {
 	return `
 query AiGatewaySpend($accountTag: string!, $since: Time!, $until: Time!, $breakdownLimit: Int!) {
   viewer {
     accounts(filter: { accountTag: $accountTag }) {
-      total: ${f.dataset}(filter: { datetime_geq: $since, datetime_leq: $until }, limit: $breakdownLimit) {
-        sum { ${f.sumCost} }
+      total: ${f.name}(filter: { datetime_geq: $since, datetime_leq: $until }, limit: $breakdownLimit) {
+        ${sumSelection([f.cost])}
       }
     }
   }
@@ -316,29 +420,41 @@ export async function fetchAiGatewayUsage(
 	const timeDimension = TIME_DIMENSION[options.granularity];
 	const variables = { since: options.since, until: options.until, seriesLimit: SERIES_LIMIT, breakdownLimit: BREAKDOWN_LIMIT };
 
-	// The requests dataset is load-bearing: without it there is no series, no totals base, and
-	// no breakdowns, so a failure here throws exactly like every other section's single fetch.
+	const fields = await resolveAiGatewayFields(token, accountId);
+
+	// No requests dataset means this account has no AI Gateway analytics at all — a stated
+	// absence, not an error, and not an empty chart implying zero traffic.
+	if (!fields.requests) {
+		const seen = fields.datasetsSeen.length ? ` The schema exposes ${fields.datasetsSeen.join(", ")}.` : "";
+		throw new AiGatewayUsageError(
+			`This account's GraphQL schema exposes no AI Gateway requests dataset, so there is nothing to report.${seen}`,
+			502,
+		);
+	}
+
 	interface RequestsAccount {
 		series?: RawRow[];
 		byGateway?: RawRow[];
 		byModel?: RawRow[];
 	}
-	const { account } = await postGraphql<RequestsAccount>(accountId, token, requestsQuery(timeDimension), variables);
+	const { account } = await postGraphql<RequestsAccount>(accountId, token, requestsQuery(timeDimension, fields.requests), variables);
 	const seriesRows = account?.series || [];
 	const series = foldSeries(seriesRows, timeDimension);
 	const requests = series.reduce((sum, p) => sum + p.requests, 0);
-	const tokensIn = seriesRows.reduce((sum, row) => sum + (row.sum?.[FIELDS.requests.sumTokensIn] ?? 0), 0);
-	const tokensOut = seriesRows.reduce((sum, row) => sum + (row.sum?.[FIELDS.requests.sumTokensOut] ?? 0), 0);
-	const inlineCost = seriesRows.reduce((sum, row) => sum + (row.sum?.[FIELDS.requests.sumCost] ?? 0), 0);
-	const inlineCostSeen = seriesRows.some((row) => row.sum?.[FIELDS.requests.sumCost] !== undefined);
 
-	// The three supplementary datasets each degrade independently: a wrong field/dataset name
-	// (or a genuinely absent scope) empties that one panel with a stated reason instead of
-	// taking the whole section down. Run them concurrently since none depends on another.
+	// A token field the schema does not expose stays null rather than summing to a confident 0.
+	const sumOf = (field: string | null): number | null =>
+		field ? seriesRows.reduce((total, row) => total + (row.sum?.[field] ?? 0), 0) : null;
+	const tokensIn = sumOf(fields.requests.tokensIn);
+	const tokensOut = sumOf(fields.requests.tokensOut);
+
+	// The three supplementary datasets each degrade independently: an absent dataset (or a
+	// dimension this account does not carry) empties that one panel with a stated reason instead
+	// of taking the whole section down. Run them concurrently since none depends on another.
 	const [errorsOutcome, cacheOutcome, spendOutcome] = await Promise.allSettled([
-		postGraphql<{ total?: RawRow[] }>(accountId, token, errorsQuery(), variables),
-		postGraphql<{ byStatus?: RawRow[] }>(accountId, token, cacheQuery(), variables),
-		postGraphql<{ total?: RawRow[] }>(accountId, token, spendQuery(), variables),
+		fields.errors ? postGraphql<{ total?: RawRow[] }>(accountId, token, errorsQuery(fields.errors), variables) : Promise.reject(new Error("This account's schema exposes no AI Gateway errors dataset")),
+		fields.cache ? postGraphql<{ byStatus?: RawRow[] }>(accountId, token, cacheQuery(fields.cache), variables) : Promise.reject(new Error("This account's schema exposes no AI Gateway cache dataset")),
+		fields.spend ? postGraphql<{ total?: RawRow[] }>(accountId, token, spendQuery(fields.spend), variables) : Promise.reject(new Error("This account's schema exposes no AI Gateway spend dataset")),
 	]);
 
 	const reasonOf = (outcome: PromiseSettledResult<unknown>): string =>
@@ -360,27 +476,32 @@ export async function fetchAiGatewayUsage(
 	let cacheHits: number | null = null;
 	let cacheMisses: number | null = null;
 	const cacheStatus: AiGatewayDatasetStatus = { available: false };
-	if (cacheOutcome.status === "fulfilled") {
+	if (cacheOutcome.status === "fulfilled" && fields.cache?.status) {
 		const rows = cacheOutcome.value.account?.byStatus || [];
 		cacheHits = 0;
 		cacheMisses = 0;
 		for (const row of rows) {
-			if (isCacheHit(row.dimensions?.[FIELDS.cache.cacheStatus])) cacheHits += row.count;
+			if (isCacheHit(row.dimensions?.[fields.cache.status])) cacheHits += row.count;
 			else cacheMisses += row.count;
 		}
 		cacheStatus.available = true;
 	} else {
-		cacheStatus.reason = reasonOf(cacheOutcome);
+		// Present but with no status dimension is still unusable: hits and misses would be
+		// indistinguishable, and reporting every row as a miss would invent a 0% hit rate.
+		cacheStatus.reason = cacheOutcome.status === "fulfilled" ? "The cache dataset exposes no status dimension, so hits cannot be told from misses" : reasonOf(cacheOutcome);
 	}
 
-	let cost: number | null = inlineCostSeen ? inlineCost : null;
+	let cost: number | null = null;
 	const spendStatus: AiGatewayDatasetStatus = { available: false };
-	if (spendOutcome.status === "fulfilled") {
+	if (spendOutcome.status === "fulfilled" && fields.spend?.cost) {
 		const rows = spendOutcome.value.account?.total || [];
-		if (rows.length) cost = rows.reduce((sum, row) => sum + (row.sum?.[FIELDS.spend.sumCost] ?? 0), 0);
+		// No rows stays null rather than 0: until this has been seen against real data, an empty
+		// spend result cannot be told apart from a dataset that does not answer in this shape,
+		// and a confident $0 is the more damaging of the two readings.
+		if (rows.length) cost = rows.reduce((sum, row) => sum + (row.sum?.[fields.spend!.cost as string] ?? 0), 0);
 		spendStatus.available = true;
 	} else {
-		spendStatus.reason = reasonOf(spendOutcome);
+		spendStatus.reason = spendOutcome.status === "fulfilled" ? "The spend dataset exposes no cost aggregate" : reasonOf(spendOutcome);
 	}
 
 	const cacheDenominator = cacheHits !== null && cacheMisses !== null ? cacheHits + cacheMisses : 0;
@@ -403,8 +524,8 @@ export async function fetchAiGatewayUsage(
 		timeDimension,
 		series,
 		totals,
-		byGateway: foldBreakdown(account?.byGateway || [], FIELDS.requests.gatewayId),
-		byModel: foldBreakdown(account?.byModel || [], FIELDS.requests.model),
+		byGateway: fields.requests.gateway ? foldBreakdown(account?.byGateway || [], fields.requests.gateway) : [],
+		byModel: fields.requests.model ? foldBreakdown(account?.byModel || [], fields.requests.model) : [],
 		truncated: seriesRows.length >= SERIES_LIMIT,
 		datasets: { errors: errorsStatus, cache: cacheStatus, spend: spendStatus },
 	};

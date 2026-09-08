@@ -23,7 +23,34 @@ const row = (dims: Record<string, string | number>, count: number, sum: Record<s
 	sum,
 });
 
+/** The four dataset names an account with AI Gateway exposes. */
+const DEFAULT_DATASETS = [
+	"aiGatewayRequestsAdaptiveGroups",
+	"aiGatewayErrorsAdaptiveGroups",
+	"aiGatewayCacheAdaptiveGroups",
+	"aiGatewaySpendSessionsAdaptiveGroups",
+];
+
+/**
+ * Aggregates and dimensions per dataset, keyed by dataset name. These are the names the code
+ * discovers rather than assumes — the point of the probe is that a different spelling here
+ * changes the emitted query instead of breaking it.
+ */
+const DEFAULT_SCHEMA = {
+	sums: {
+		aiGatewayRequestsAdaptiveGroupsType: ["totalTokensIn", "totalTokensOut"],
+		aiGatewaySpendSessionsAdaptiveGroupsType: ["totalCost"],
+	} as Record<string, string[]>,
+	dimensions: {
+		aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "gatewayId", "model", "provider"],
+		aiGatewayCacheAdaptiveGroupsType: ["cacheStatus"],
+		aiGatewayErrorsAdaptiveGroupsType: ["errorCode"],
+	} as Record<string, string[]>,
+};
+
 interface MockOpts {
+	datasets?: string[];
+	schema?: { sums: Record<string, string[]>; dimensions: Record<string, string[]> };
 	primary?: Record<string, unknown>;
 	primaryFail?: boolean;
 	errorsAccount?: Record<string, unknown>;
@@ -45,9 +72,44 @@ function mockUpstream(opts: MockOpts) {
 		if (!url.includes("/graphql")) {
 			return jsonResponse({ success: true, result: [] });
 		}
-		const body = JSON.parse(String(init?.body ?? "{}")) as { query: string };
+		const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables?: { name?: string } };
 		graphqlBodies.push(body);
 		const q = body.query;
+
+		// Field names are resolved from the schema at runtime, so the mock has to answer
+		// introspection before any data query is issued. This is also where a "field absent"
+		// case is expressed: drop a name from these lists and the code must degrade, not guess.
+		if (q.includes("ProbeAccount")) {
+			return jsonResponse({
+				data: {
+					__type: {
+						fields: (opts.datasets ?? DEFAULT_DATASETS).map((name) => ({ name, type: { name: `${name}Type`, ofType: null } })),
+					},
+				},
+			});
+		}
+		if (q.includes("ProbeType")) {
+			const name = String(body.variables?.name ?? "");
+			// Row type: point `sum` and `dimensions` at their own probe-able types.
+			if (name.endsWith("AdaptiveGroupsType")) {
+				return jsonResponse({
+					data: {
+						__type: {
+							fields: [
+								{ name: "count", type: { name: "uint64", ofType: null } },
+								{ name: "sum", type: { name: `${name}Sum`, ofType: null } },
+								{ name: "dimensions", type: { name: `${name}Dimensions`, ofType: null } },
+							],
+						},
+					},
+				});
+			}
+			const schema = opts.schema ?? DEFAULT_SCHEMA;
+			const names = name.endsWith("Sum")
+				? schema.sums[name.replace("Sum", "")] ?? []
+				: schema.dimensions[name.replace("Dimensions", "")] ?? [];
+			return jsonResponse({ data: { __type: { fields: names.map((n) => ({ name: n, type: { name: "string", ofType: null } })) } } });
+		}
 
 		if (q.includes("AiGatewayErrors")) {
 			if (opts.errorsFail) return jsonResponse({ errors: [{ message: "unknown field on AiGatewayErrorsAdaptiveGroups" }] });
