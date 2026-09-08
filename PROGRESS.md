@@ -258,7 +258,6 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | P3 | 3 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 | P4 | `useHashSyncedState` adopts URL params on mount only. Editing the hash to a *different route* while the app is open (e.g. `#/waf?zone=A` → `#/cache?zone=B`) does not adopt the new param, because `App` never unmounts — the write-back then overwrites it | Hand-edited cross-route deep links lose their param. Fresh loads and in-app navigation are unaffected | Key the adoption on `route` as well as mount |
 | P4 | Worker's `CfGroup` interface ([src/index.ts](src/index.ts)) declares only `id`/`name`, but the endpoint passes the full group object through to the client | None at runtime — TS interfaces don't strip fields — but it misleads anyone reading the Worker in isolation | Widen it to match [web/src/types.ts](web/src/types.ts) |
-| P4 | Local directory still named `cf-zt-policy-dashboard/` | Cosmetic mismatch with the Flarelens name | Rename the folder |
 
 ### Recently resolved
 
