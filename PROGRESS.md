@@ -285,7 +285,6 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 
 | # | Issue | Impact | Fix |
 |---|---|---|---|
-| P1 | **No git remote** — `git remote -v` is empty | Single copy on this machine; no backup, no PR flow, and nothing enforces `npm run check` before a deploy | `git remote add origin …`, push, then a GitHub Actions workflow running `npm run check` on PR and deploying on merge |
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules |
 | P2 | **Bound token lacks `Zone: DNS: Read` and `Zone Settings: Read`** — verified against the deployed endpoint 2026-09-08: `/api/pqc/report` returns all four zones with every field null | PQC Readiness has no rows at all. Each zone states its own failure, so the page does not read as a clean account, but it answers nothing until the scopes are added | Add both in the Cloudflare dashboard. If a new token is minted rather than the existing one edited, `wrangler secret put CF_API_TOKEN` too |
 | P3 | 4 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
@@ -293,6 +292,13 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | P4 | Worker's `CfGroup` interface ([src/index.ts](src/index.ts)) declares only `id`/`name`, but the endpoint passes the full group object through to the client | None at runtime — TS interfaces don't strip fields — but it misleads anyone reading the Worker in isolation | Widen it to match [web/src/types.ts](web/src/types.ts) |
 
 ### Recently resolved
+
+- ~~No git remote, and nothing enforcing the gate~~ — published at
+  `bkrbybk-org/flarelens` with a GitHub Actions workflow running `npm run check` and
+  `npm run lint` on every push and pull request. There is deliberately no deploy job: deployment
+  needs account, zone and Access ids that this repository does not carry, and supplying them as
+  Actions secrets would put the deployment's identity back into a public repo by another route.
+  Deploys stay local, through the gitignored `wrangler.local.jsonc` and `npm run deploy:live`.
 
 - ~~Bound token lacked `Workers Scripts: Read`~~ — scope added 2026-09-08 and verified live
   through Access: `/api/workers/scripts` returns 8 scripts, and the Tunnel Map now classifies 29
