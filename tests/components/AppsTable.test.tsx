@@ -35,10 +35,10 @@ const apps: CfApp[] = [
 	app({ id: "a3", name: "Charlie Corp", domain: "charlie.example.com" }),
 ];
 
-function renderTable() {
+function renderTable(overrideApps: CfApp[] = apps) {
 	return render(
 		<AppsTable
-			apps={apps}
+			apps={overrideApps}
 			loading={false}
 			ctx={ctx}
 			reusableMap={{}}
@@ -88,5 +88,26 @@ describe("AppsTable", () => {
 		expect(screen.getAllByText("Acme Widgets").length).toBeGreaterThan(0);
 		expect(screen.getAllByText("Bravo Systems").length).toBeGreaterThan(0);
 		expect(screen.getAllByText("Charlie Corp").length).toBeGreaterThan(0);
+	});
+});
+
+describe("logins column", () => {
+	// The column exists to answer "is anyone using this app". Zero and unknown are different
+	// answers, and rendering both as blank would collapse them into one.
+	it("shows a real count, and marks zero as its own state", () => {
+		renderTable([
+			app({ id: "a1", name: "Busy app", logins_7d: 42 } as Partial<CfApp>),
+			app({ id: "a2", name: "Quiet app", logins_7d: 0 } as Partial<CfApp>),
+		]);
+		expect(screen.getAllByText("42").length).toBeGreaterThan(0);
+		expect(screen.getAllByText("0").length).toBeGreaterThan(0);
+	});
+
+	it("renders unreadable telemetry as a dash, not as zero", () => {
+		// A table of zeros would claim nobody uses any of these applications, which is a
+		// different statement from "the telemetry could not be read".
+		renderTable([app({ id: "a1", name: "Unknown app", logins_7d: null } as Partial<CfApp>)]);
+		expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+		expect(screen.queryAllByText("0")).toHaveLength(0);
 	});
 });

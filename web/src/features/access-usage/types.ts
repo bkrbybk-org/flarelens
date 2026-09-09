@@ -20,6 +20,8 @@ export interface AccessUsagePoint {
 
 export interface AccessBreakdownRow {
 	key: string;
+	/** Present on the per-application breakdown only: the raw uuid behind `key`. */
+	appId?: string;
 	success: number;
 	failure: number;
 	total: number;

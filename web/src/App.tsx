@@ -3,6 +3,7 @@ import { fetchAccounts, fetchConfig } from "./api/client";
 import type { CfAccount } from "./types";
 import { ConnectPage } from "./components/connect/ConnectPage";
 import { Dashboard } from "./features/access/Dashboard";
+import { useAppLogins } from "./features/access/useAppLogins";
 import { GroupsPage } from "./features/access/GroupsPage";
 import { CachePage } from "./features/cache/CachePage";
 import { FindingsPage } from "./features/findings/FindingsPage";
@@ -156,6 +157,29 @@ export default function App() {
 		[data.data?.lists],
 	);
 
+	// Login activity for the Applications table. Loaded only on that route: it is a separate
+	// GraphQL dataset behind a different permission, and no other section reads it.
+	const appLogins = useAppLogins();
+	const loadAppLogins = appLogins.load;
+	useEffect(() => {
+		if (route !== "access" || !session?.token || !session.accountId) return;
+		loadAppLogins(session.token, session.accountId);
+	}, [route, session?.token, session?.accountId, loadAppLogins]);
+
+	/**
+	 * Applications carrying their 7-day login count.
+	 *
+	 * null, not 0, while the telemetry is unread or unreadable: a table full of zeros would
+	 * claim nobody uses any of these applications, which is a different statement entirely.
+	 */
+	const appsWithLogins = useMemo(() => {
+		const apps = data.data?.apps || [];
+		if (!appLogins.loaded || appLogins.error) {
+			return apps.map((app) => ({ ...app, logins_7d: null }));
+		}
+		return apps.map((app) => ({ ...app, logins_7d: appLogins.byApp[app.id] ?? 0 }));
+	}, [data.data?.apps, appLogins.loaded, appLogins.error, appLogins.byApp]);
+
 	const ctx = useMemo<RuleContext>(
 		() => ({
 			groupName: (id) => data.groupMap[id] || id,
@@ -269,7 +293,8 @@ export default function App() {
 				<main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
 					{route === "access" && (
 						<Dashboard
-							apps={data.data?.apps || []}
+							apps={appsWithLogins}
+							loginsError={appLogins.error}
 							idpCount={data.data?.idps.length || 0}
 							loading={data.loading}
 							error={data.error}

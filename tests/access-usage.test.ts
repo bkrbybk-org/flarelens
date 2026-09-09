@@ -81,10 +81,21 @@ describe("POST /api/access/usage", () => {
 	it("resolves app uuids to names, keeping unmatched ids visible", async () => {
 		// An id with no match is usually a deleted app; dropping it would silently lose logins.
 		const { result } = (await (await usage({ accountId: ACCOUNT, ...win() })).json()) as {
-			result: { byApp: { key: string; total: number }[] };
+			result: { byApp: { key: string; appId?: string; total: number }[] };
 		};
-		expect(result.byApp[0]).toEqual({ key: "Certificates Tracking", success: 90, failure: 5, total: 95 });
+		expect(result.byApp[0]).toEqual({ key: "Certificates Tracking", appId: "app-uuid-1", success: 90, failure: 5, total: 95 });
 		expect(result.byApp[1].key).toBe("deleted-app-uuid");
+	});
+
+	it("keeps the raw uuid so a caller can join on it rather than on a display name", async () => {
+		// The Applications table joins these counts back onto the application list. Names repeat,
+		// get renamed, and are missing for a deleted app; the uuid is the only stable key.
+		const { result } = (await (await usage({ accountId: ACCOUNT, ...win() })).json()) as {
+			result: { byApp: { key: string; appId?: string }[] };
+		};
+		expect(result.byApp.every((row) => typeof row.appId === "string" && row.appId.length > 0)).toBe(true);
+		// The unresolved row keeps its uuid in both fields, so the join still succeeds for it.
+		expect(result.byApp[1].appId).toBe("deleted-app-uuid");
 	});
 
 	it("orders breakdowns by total descending", async () => {

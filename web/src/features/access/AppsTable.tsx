@@ -26,7 +26,7 @@ import { DecisionBadge, ErrorBadge, PolicyChip, Tag } from "./PolicyChip";
 import { SkeletonCards, SkeletonRows } from "./SkeletonRows";
 
 // Order matters: drives default column order when the user has not saved one
-const DEFAULT_VISIBLE = ["name", "destinations", "tags", "allowed_idps", "policies", "updated_at", "type", "session_duration"];
+const DEFAULT_VISIBLE = ["name", "destinations", "tags", "allowed_idps", "policies", "logins_7d", "updated_at", "type", "session_duration"];
 const HIDDEN_KEYS = new Set(["policies_error"]);
 
 interface AppsTableProps {
@@ -129,6 +129,9 @@ export function formatCellText(col: string, app: CfApp, ctx: RuleContext, reusab
 	if ((col === "updated_at" || col === "created_at") && value != null) {
 		return formatLocalDateTime(value);
 	}
+	// Null means the telemetry could not be read; zero means it was read and nobody signed in.
+	// Exporting both as an empty cell would erase that distinction.
+	if (col === "logins_7d") return value === null || value === undefined ? "unavailable" : String(value);
 	if (value === null || value === undefined) return "";
 	if (typeof value === "boolean") return value ? "True" : "False";
 	if (Array.isArray(value)) return value.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join(", ");
@@ -171,6 +174,28 @@ function renderCell(col: string, app: CfApp, ctx: RuleContext, reusableMap: Reco
 	}
 	if (col === "name") {
 		return <span className="font-medium">{String(value ?? "-")}</span>;
+	}
+	if (col === "logins_7d") {
+		if (value === null || value === undefined) {
+			return (
+				<span className="text-zinc-400" title="Login telemetry could not be read for this account.">
+					—
+				</span>
+			);
+		}
+		const count = Number(value);
+		return (
+			<span
+				className={`tabular-nums ${count === 0 ? "text-amber-600 dark:text-amber-400" : ""}`}
+				title={
+					count === 0
+						? "No logins in the last 7 days. Cloudflare caps this dataset at one week, so this means 'not this week', not 'never'."
+						: undefined
+				}
+			>
+				{count.toLocaleString()}
+			</span>
+		);
 	}
 	return <DefaultCell value={value} />;
 }

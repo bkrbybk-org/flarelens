@@ -101,6 +101,7 @@ export function formatColumnLabel(col: string): string {
 	if (col === "updated_at") return "Updated";
 	if (col === "created_at") return "Created";
 	if (col === "allowed_idps") return "Identity Providers";
+	if (col === "logins_7d") return "Logins (7d)";
 	if (col === "self_hosted_domains") return "Domains";
 	return col.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
 }

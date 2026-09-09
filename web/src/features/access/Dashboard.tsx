@@ -16,6 +16,8 @@ interface DashboardProps {
 	progressRunning: boolean;
 	ctx: RuleContext;
 	reusableMap: Record<string, CfPolicy>;
+	/** Set when the Logins (7d) column could not be filled; the table says so rather than showing zeros. */
+	loginsError?: string | null;
 	prefs: Prefs;
 	updatePrefs: (patch: Partial<Prefs>) => void;
 }
@@ -23,7 +25,7 @@ interface DashboardProps {
 export function Dashboard({
 	apps, idpCount, loading, error,
 	progressPercent, progressRunning,
-	ctx, reusableMap, prefs, updatePrefs,
+	ctx, reusableMap, loginsError, prefs, updatePrefs,
 }: DashboardProps) {
 	const [selectedApp, setSelectedApp] = useState<CfApp | null>(null);
 
@@ -34,6 +36,14 @@ export function Dashboard({
 			{error && (
 				<div role="alert" className="rounded-xl border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
 					{error}
+				</div>
+			)}
+
+			{/* Stated rather than left as an empty column: a reader who sees dashes needs to know
+			    whether nobody signed in or nobody could read the telemetry. */}
+			{loginsError && (
+				<div role="status" className="rounded-xl border border-amber-300/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+					Logins (7d) unavailable — {loginsError}
 				</div>
 			)}
 

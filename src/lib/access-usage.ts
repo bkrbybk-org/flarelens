@@ -54,6 +54,8 @@ export interface AccessUsagePoint {
 
 export interface AccessBreakdownRow {
 	key: string;
+	/** Present on the per-application breakdown only: the raw uuid behind `key`. */
+	appId?: string;
 	success: number;
 	failure: number;
 	total: number;
@@ -226,8 +228,12 @@ export async function fetchAccessUsage(
 		granularity: options.granularity,
 		timeDimension,
 		series,
+		// `appId` is kept alongside the readable key: a caller joining this back onto the
+		// application list must match on the uuid, not on a name that may be duplicated,
+		// renamed, or absent for a deleted app.
 		byApp: foldBreakdown(account?.byApp || [], "appId").map((row) => ({
 			...row,
+			appId: row.key,
 			key: row.key === "(unknown)" ? row.key : label(row.key, options.appNames),
 		})),
 		byIdentityProvider: foldBreakdown(account?.byIdp || [], "identityProvider").map((row) => ({

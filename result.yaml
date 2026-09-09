@@ -1,0 +1,2007 @@
+---
+endpoints:
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: GET /health
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 252
+      confidence: 100
+      snippet: '250: }); | 252: app.get("/health", (c) => c.json({ status: "ok" }));
+        | 254: /** Accounts the caller may use. In server mode the deployment allowlist
+        narrows the list. */'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 252
+      confidence: 96
+      snippet: '250: }); | 252: app.get("/health", (c) => c.json({ status: "ok" }));
+        | 254: /** Accounts the caller may use. In server mode the deployment allowlist
+        narrows the list. */'
+  callees: []
+  url: /health
+  method: GET
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 252
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: GET /api/accounts
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 255
+      confidence: 100
+      snippet: '254: /** Accounts the caller may use. In server mode the deployment
+        allowlist narrows the list. */ | 255: app.get("/api/accounts", async (c) =>
+        { | 256: const auth = await resolveAuth(c.req.raw, c.env); | 257: if (!auth.ok)
+        {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 255
+      confidence: 96
+      snippet: '254: /** Accounts the caller may use. In server mode the deployment
+        allowlist narrows the list. */ | 255: app.get("/api/accounts", async (c) =>
+        { | 256: const auth = await resolveAuth(c.req.raw, c.env); | 257: if (!auth.ok)
+        {'
+  callees: []
+  url: /api/accounts
+  method: GET
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 255
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: GET /api/config
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 276
+      confidence: 100
+      snippet: '274: * itself is never part of the response — only the mode and the
+        account list it can reach. | 275: */ | 276: app.get("/api/config", async (c)
+        => { | 277: const auth = await resolveAuth(c.req.raw, c.env); | 278: const
+        version = c.env.CF_V'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 276
+      confidence: 96
+      snippet: '274: * itself is never part of the response — only the mode and the
+        account list it can reach. | 275: */ | 276: app.get("/api/config", async (c)
+        => { | 277: const auth = await resolveAuth(c.req.raw, c.env); | 278: const
+        version = c.env.CF_V'
+  callees: []
+  url: /api/config
+  method: GET
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 276
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: resolveAuth
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 301
+      confidence: 92
+      snippet: '300: app.get("/api/zones", async (c) => { | 301: const auth = await
+        resolveAuth(c.req.raw, c.env); | 302: if (!auth.ok) {'
+    - kind: callee
+      name: c.json
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 303
+      confidence: 92
+      snippet: '302: if (!auth.ok) { | 303: return c.json({ success: false, errors:
+        [{ message: auth.message }] }, auth.status); | 304: }'
+    - kind: callee
+      name: c.req.query
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 306
+      confidence: 92
+      snippet: '305: const token = auth.auth.token; | 306: const accountId = c.req.query("account_id");
+        | 307: if (!accountId) {'
+    - kind: callee
+      name: assertAllowedScope
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 310
+      confidence: 92
+      snippet: '309: } | 310: const scope = assertAllowedScope(auth.auth, c.env, {
+        accountId }); | 311: if (scope) {'
+    - kind: callee
+      name: encodeURIComponent
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 314
+      confidence: 92
+      snippet: '313: } | 314: const res = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`,
+        token); | 315: if (res.status !== 200) {'
+    - kind: callee
+      name: res.result.map
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 318
+      confidence: 92
+      snippet: '317: } | 318: return c.json({ success: true, result: res.result.map((z)
+        => ({ id: z.id, name: z.name })) }); | 319: });'
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: GET /api/zones
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 300
+      confidence: 100
+      snippet: '298: }); | 300: app.get("/api/zones", async (c) => { | 301: const
+        auth = await resolveAuth(c.req.raw, c.env); | 302: if (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 300
+      confidence: 96
+      snippet: '298: }); | 300: app.get("/api/zones", async (c) => { | 301: const
+        auth = await resolveAuth(c.req.raw, c.env); | 302: if (!auth.ok) {'
+  callees:
+  - name: resolveAuth
+    path: ./src/index.ts
+    line: 301
+  - name: c.json
+    path: ./src/index.ts
+    line: 303
+  - name: c.req.query
+    path: ./src/index.ts
+    line: 306
+  - name: assertAllowedScope
+    path: ./src/index.ts
+    line: 310
+  - name: encodeURIComponent
+    path: ./src/index.ts
+    line: 314
+  - name: res.result.map
+    path: ./src/index.ts
+    line: 318
+  url: /api/zones
+  method: GET
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 300
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: GET /api/data
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 321
+      confidence: 100
+      snippet: '319: }); | 321: app.get("/api/data", async (c) => { | 322: const auth
+        = await resolveAuth(c.req.raw, c.env); | 323: if (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 321
+      confidence: 96
+      snippet: '319: }); | 321: app.get("/api/data", async (c) => { | 322: const auth
+        = await resolveAuth(c.req.raw, c.env); | 323: if (!auth.ok) {'
+  callees: []
+  url: /api/data
+  method: GET
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 321
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: POST /api/ai-security/analyze
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 543
+      confidence: 100
+      snippet: '541: * from a token missing Analytics scope is not a 500 and should
+        not read like one). | 542: */ | 543: app.post("/api/ai-security/analyze",
+        async (c) => { | 544: const auth = await resolveAuth(c.req.raw, c.env, { allowServerMode:
+        c.env.AI'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 543
+      confidence: 96
+      snippet: '541: * from a token missing Analytics scope is not a 500 and should
+        not read like one). | 542: */ | 543: app.post("/api/ai-security/analyze",
+        async (c) => { | 544: const auth = await resolveAuth(c.req.raw, c.env, { allowServerMode:
+        c.env.AI'
+    - kind: state_change
+      name: POST
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 543
+      confidence: 88
+      snippet: '541: * from a token missing Analytics scope is not a 500 and should
+        not read like one). | 542: */ | 543: app.post("/api/ai-security/analyze",
+        async (c) => { | 544: const auth = await resolveAuth(c.req.raw, c.env, { allowServerMode:
+        c.env.AI'
+    - kind: guard_absence
+      name: POST
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 543
+      confidence: 28
+      snippet: '541: * from a token missing Analytics scope is not a 500 and should
+        not read like one). | 542: */ | 543: app.post("/api/ai-security/analyze",
+        async (c) => { | 544: const auth = await resolveAuth(c.req.raw, c.env, { allowServerMode:
+        c.env.AI'
+  callees: []
+  url: /api/ai-security/analyze
+  method: POST
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 543
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: POST /api/waf/events
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 584
+      confidence: 100
+      snippet: '582: }); | 584: app.post("/api/waf/events", async (c) => { | 585:
+        const auth = await resolveAuth(c.req.raw, c.env); | 586: if (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 584
+      confidence: 96
+      snippet: '582: }); | 584: app.post("/api/waf/events", async (c) => { | 585:
+        const auth = await resolveAuth(c.req.raw, c.env); | 586: if (!auth.ok) {'
+    - kind: state_change
+      name: POST
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 584
+      confidence: 88
+      snippet: '582: }); | 584: app.post("/api/waf/events", async (c) => { | 585:
+        const auth = await resolveAuth(c.req.raw, c.env); | 586: if (!auth.ok) {'
+    - kind: guard_absence
+      name: POST
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 584
+      confidence: 28
+      snippet: '582: }); | 584: app.post("/api/waf/events", async (c) => { | 585:
+        const auth = await resolveAuth(c.req.raw, c.env); | 586: if (!auth.ok) {'
+  callees: []
+  url: /api/waf/events
+  method: POST
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 584
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: resolveAuth
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 685
+      confidence: 92
+      snippet: '684: app.get("/api/waf/rulesets", async (c) => { | 685: const auth
+        = await resolveAuth(c.req.raw, c.env); | 686: if (!auth.ok) {'
+    - kind: callee
+      name: c.json
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 687
+      confidence: 92
+      snippet: '686: if (!auth.ok) { | 687: return c.json({ success: false, errors:
+        [{ message: auth.message }] }, auth.status); | 688: }'
+    - kind: callee
+      name: validHexId
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 690
+      confidence: 92
+      snippet: '689: const token = auth.auth.token; | 690: const accountId = validHexId(c.req.query("account_id"));
+        | 691: if (!accountId) {'
+    - kind: callee
+      name: c.req.query
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 690
+      confidence: 92
+      snippet: '689: const token = auth.auth.token; | 690: const accountId = validHexId(c.req.query("account_id"));
+        | 691: if (!accountId) {'
+    - kind: callee
+      name: assertAllowedScope
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 698
+      confidence: 92
+      snippet: '697: } | 698: const scope = assertAllowedScope(auth.auth, c.env, {
+        accountId, zoneId }); | 699: if (scope) {'
+    - kind: callee
+      name: scopes.push
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 706
+      confidence: 92
+      snippet: '705: if (zoneId) { | 706: scopes.push({ kind: "zones", id: zoneId,
+        source: "zone" }); | 707: } else if (includeZones) {'
+    - kind: callee
+      name: encodeURIComponent
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 708
+      confidence: 92
+      snippet: '707: } else if (includeZones) { | 708: const zonesRes = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`,
+        token); | 709: if (zonesRes.status === 200) {'
+    - kind: callee
+      name: zonesRes.result.map
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 710
+      confidence: 92
+      snippet: '709: if (zonesRes.status === 200) { | 710: scopes.push(...zonesRes.result.map((z)
+        => ({ kind: "zones" as const, id: z.id, source: `zone:${z.name || z.id}` })));
+        | 711: }'
+    - kind: callee
+      name: mapWithConcurrency
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 721
+      confidence: 92
+      snippet: '720: // exactly as the old sequential loop did. | 721: const perScope
+        = await mapWithConcurrency(scopes, 5, async (scope) => { | 722: const scopeMeta:
+        RuleMetaMap = {};'
+    - kind: callee
+      name: collectRulesetsForScope
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 723
+      confidence: 92
+      snippet: '722: const scopeMeta: RuleMetaMap = {}; | 723: await collectRulesetsForScope(scope,
+        token, scopeMeta); | 724: return scopeMeta;'
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: GET /api/waf/rulesets
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 684
+      confidence: 100
+      snippet: '682: }); | 684: app.get("/api/waf/rulesets", async (c) => { | 685:
+        const auth = await resolveAuth(c.req.raw, c.env); | 686: if (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 684
+      confidence: 96
+      snippet: '682: }); | 684: app.get("/api/waf/rulesets", async (c) => { | 685:
+        const auth = await resolveAuth(c.req.raw, c.env); | 686: if (!auth.ok) {'
+  callees:
+  - name: resolveAuth
+    path: ./src/index.ts
+    line: 685
+  - name: c.json
+    path: ./src/index.ts
+    line: 687
+  - name: validHexId
+    path: ./src/index.ts
+    line: 690
+  - name: c.req.query
+    path: ./src/index.ts
+    line: 690
+  - name: assertAllowedScope
+    path: ./src/index.ts
+    line: 698
+  - name: scopes.push
+    path: ./src/index.ts
+    line: 706
+  - name: encodeURIComponent
+    path: ./src/index.ts
+    line: 708
+  - name: zonesRes.result.map
+    path: ./src/index.ts
+    line: 710
+  - name: mapWithConcurrency
+    path: ./src/index.ts
+    line: 721
+  - name: collectRulesetsForScope
+    path: ./src/index.ts
+    line: 723
+  url: /api/waf/rulesets
+  method: GET
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 684
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: POST /api/gateway/usage
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 743
+      confidence: 100
+      snippet: '741: // Zero Trust Gateway usage (DNS resolver + Gateway HTTP) | 743:
+        app.post("/api/gateway/usage", async (c) => { | 744: const auth = await resolveAuth(c.req.raw,
+        c.env); | 745: if (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 743
+      confidence: 96
+      snippet: '741: // Zero Trust Gateway usage (DNS resolver + Gateway HTTP) | 743:
+        app.post("/api/gateway/usage", async (c) => { | 744: const auth = await resolveAuth(c.req.raw,
+        c.env); | 745: if (!auth.ok) {'
+    - kind: state_change
+      name: POST
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 743
+      confidence: 88
+      snippet: '741: // Zero Trust Gateway usage (DNS resolver + Gateway HTTP) | 743:
+        app.post("/api/gateway/usage", async (c) => { | 744: const auth = await resolveAuth(c.req.raw,
+        c.env); | 745: if (!auth.ok) {'
+    - kind: guard_absence
+      name: POST
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 743
+      confidence: 28
+      snippet: '741: // Zero Trust Gateway usage (DNS resolver + Gateway HTTP) | 743:
+        app.post("/api/gateway/usage", async (c) => { | 744: const auth = await resolveAuth(c.req.raw,
+        c.env); | 745: if (!auth.ok) {'
+  callees: []
+  url: /api/gateway/usage
+  method: POST
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 743
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: POST /api/workers-ai/usage
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 788
+      confidence: 100
+      snippet: '786: // Workers AI (inference volume, neurons, tokens, models) | 788:
+        app.post("/api/workers-ai/usage", async (c) => { | 789: const auth = await
+        resolveAuth(c.req.raw, c.env); | 790: if (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 788
+      confidence: 96
+      snippet: '786: // Workers AI (inference volume, neurons, tokens, models) | 788:
+        app.post("/api/workers-ai/usage", async (c) => { | 789: const auth = await
+        resolveAuth(c.req.raw, c.env); | 790: if (!auth.ok) {'
+    - kind: state_change
+      name: POST
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 788
+      confidence: 88
+      snippet: '786: // Workers AI (inference volume, neurons, tokens, models) | 788:
+        app.post("/api/workers-ai/usage", async (c) => { | 789: const auth = await
+        resolveAuth(c.req.raw, c.env); | 790: if (!auth.ok) {'
+    - kind: guard_absence
+      name: POST
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 788
+      confidence: 28
+      snippet: '786: // Workers AI (inference volume, neurons, tokens, models) | 788:
+        app.post("/api/workers-ai/usage", async (c) => { | 789: const auth = await
+        resolveAuth(c.req.raw, c.env); | 790: if (!auth.ok) {'
+  callees: []
+  url: /api/workers-ai/usage
+  method: POST
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 788
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: POST /api/ai-gateway/usage
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 834
+      confidence: 100
+      snippet: '832: // unverified-field-name caveat: this has never been run against
+        a real account) | 834: app.post("/api/ai-gateway/usage", async (c) => { |
+        835: const auth = await resolveAuth(c.req.raw, c.env); | 836: if (!auth.ok)
+        {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 834
+      confidence: 96
+      snippet: '832: // unverified-field-name caveat: this has never been run against
+        a real account) | 834: app.post("/api/ai-gateway/usage", async (c) => { |
+        835: const auth = await resolveAuth(c.req.raw, c.env); | 836: if (!auth.ok)
+        {'
+    - kind: state_change
+      name: POST
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 834
+      confidence: 88
+      snippet: '832: // unverified-field-name caveat: this has never been run against
+        a real account) | 834: app.post("/api/ai-gateway/usage", async (c) => { |
+        835: const auth = await resolveAuth(c.req.raw, c.env); | 836: if (!auth.ok)
+        {'
+    - kind: guard_absence
+      name: POST
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 834
+      confidence: 28
+      snippet: '832: // unverified-field-name caveat: this has never been run against
+        a real account) | 834: app.post("/api/ai-gateway/usage", async (c) => { |
+        835: const auth = await resolveAuth(c.req.raw, c.env); | 836: if (!auth.ok)
+        {'
+  callees: []
+  url: /api/ai-gateway/usage
+  method: POST
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 834
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: POST /api/request/trace
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 879
+      confidence: 100
+      snippet: '877: // Per-request forensics by Ray ID | 879: app.post("/api/request/trace",
+        async (c) => { | 880: const auth = await resolveAuth(c.req.raw, c.env); |
+        881: if (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 879
+      confidence: 96
+      snippet: '877: // Per-request forensics by Ray ID | 879: app.post("/api/request/trace",
+        async (c) => { | 880: const auth = await resolveAuth(c.req.raw, c.env); |
+        881: if (!auth.ok) {'
+    - kind: state_change
+      name: POST
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 879
+      confidence: 88
+      snippet: '877: // Per-request forensics by Ray ID | 879: app.post("/api/request/trace",
+        async (c) => { | 880: const auth = await resolveAuth(c.req.raw, c.env); |
+        881: if (!auth.ok) {'
+    - kind: guard_absence
+      name: POST
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 879
+      confidence: 28
+      snippet: '877: // Per-request forensics by Ray ID | 879: app.post("/api/request/trace",
+        async (c) => { | 880: const auth = await resolveAuth(c.req.raw, c.env); |
+        881: if (!auth.ok) {'
+  callees: []
+  url: /api/request/trace
+  method: POST
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 879
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: resolveAuth
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 934
+      confidence: 92
+      snippet: '933: app.get("/api/access/tunnels", async (c) => { | 934: const auth
+        = await resolveAuth(c.req.raw, c.env); | 935: if (!auth.ok) {'
+    - kind: callee
+      name: c.json
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 936
+      confidence: 92
+      snippet: '935: if (!auth.ok) { | 936: return c.json({ success: false, errors:
+        [{ message: auth.message }] }, auth.status); | 937: }'
+    - kind: callee
+      name: validHexId
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 938
+      confidence: 92
+      snippet: '937: } | 938: const accountId = validHexId(c.req.query("account_id"));
+        | 939: if (!accountId) {'
+    - kind: callee
+      name: c.req.query
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 938
+      confidence: 92
+      snippet: '937: } | 938: const accountId = validHexId(c.req.query("account_id"));
+        | 939: if (!accountId) {'
+    - kind: callee
+      name: assertAllowedScope
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 942
+      confidence: 92
+      snippet: '941: } | 942: const scope = assertAllowedScope(auth.auth, c.env, {
+        accountId }); | 943: if (scope) {'
+    - kind: callee
+      name: Promise.all
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 948
+      confidence: 92
+      snippet: '947: const token = auth.auth.token; | 948: const [appsRes, policiesRes]
+        = await Promise.all([ | 949: fetchCloudflareAll<CfApp>(`/accounts/${accountId}/access/apps`,
+        token),'
+    - kind: callee
+      name: mapWithConcurrency
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 962
+      confidence: 92
+      snippet: '961: const reusable = new Map((policiesRes.status === 200 ? policiesRes.result
+        : []).map((p) => [p.id, p])); | 962: const withPolicies = await mapWithConcurrency(appsRes.result,
+        5, async (appItem) => { | 963: const res = await fetchCloudfla'
+    - kind: callee
+      name: Array.isArray
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 965
+      confidence: 92
+      snippet: '964: const policies = (res.status === 200 ? res.result : []).map((p)
+        => { | 965: const hasRules = Array.isArray(p.include) || Array.isArray(p.exclude)
+        || Array.isArray(p.require); | 966: const source = !hasRules && reusable.has(p.id)
+        ? { ..'
+    - kind: callee
+      name: reusable.has
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 966
+      confidence: 92
+      snippet: '965: const hasRules = Array.isArray(p.include) || Array.isArray(p.exclude)
+        || Array.isArray(p.require); | 966: const source = !hasRules && reusable.has(p.id)
+        ? { ...reusable.get(p.id), ...p } : p; | 967: return { name: source.name,
+        decision'
+    - kind: callee
+      name: reusable.get
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 966
+      confidence: 92
+      snippet: '965: const hasRules = Array.isArray(p.include) || Array.isArray(p.exclude)
+        || Array.isArray(p.require); | 966: const source = !hasRules && reusable.has(p.id)
+        ? { ...reusable.get(p.id), ...p } : p; | 967: return { name: source.name,
+        decision'
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: GET /api/access/tunnels
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 933
+      confidence: 100
+      snippet: '931: * stale page: the mapping is only meaningful if both halves come
+        from the same moment. | 932: */ | 933: app.get("/api/access/tunnels", async
+        (c) => { | 934: const auth = await resolveAuth(c.req.raw, c.env); | 935: if
+        (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 933
+      confidence: 96
+      snippet: '931: * stale page: the mapping is only meaningful if both halves come
+        from the same moment. | 932: */ | 933: app.get("/api/access/tunnels", async
+        (c) => { | 934: const auth = await resolveAuth(c.req.raw, c.env); | 935: if
+        (!auth.ok) {'
+  callees:
+  - name: resolveAuth
+    path: ./src/index.ts
+    line: 934
+  - name: c.json
+    path: ./src/index.ts
+    line: 936
+  - name: validHexId
+    path: ./src/index.ts
+    line: 938
+  - name: c.req.query
+    path: ./src/index.ts
+    line: 938
+  - name: assertAllowedScope
+    path: ./src/index.ts
+    line: 942
+  - name: Promise.all
+    path: ./src/index.ts
+    line: 948
+  - name: mapWithConcurrency
+    path: ./src/index.ts
+    line: 962
+  - name: Array.isArray
+    path: ./src/index.ts
+    line: 965
+  - name: reusable.has
+    path: ./src/index.ts
+    line: 966
+  - name: reusable.get
+    path: ./src/index.ts
+    line: 966
+  url: /api/access/tunnels
+  method: GET
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 933
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: resolveAuth
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1010
+      confidence: 92
+      snippet: '1009: app.get("/api/pqc/report", async (c) => { | 1010: const auth
+        = await resolveAuth(c.req.raw, c.env); | 1011: if (!auth.ok) {'
+    - kind: callee
+      name: c.json
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1012
+      confidence: 92
+      snippet: '1011: if (!auth.ok) { | 1012: return c.json({ success: false, errors:
+        [{ message: auth.message }] }, auth.status); | 1013: }'
+    - kind: callee
+      name: validHexId
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1014
+      confidence: 92
+      snippet: '1013: } | 1014: const accountId = validHexId(c.req.query("account_id"));
+        | 1015: if (!accountId) {'
+    - kind: callee
+      name: c.req.query
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1014
+      confidence: 92
+      snippet: '1013: } | 1014: const accountId = validHexId(c.req.query("account_id"));
+        | 1015: if (!accountId) {'
+    - kind: callee
+      name: assertAllowedScope
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1023
+      confidence: 92
+      snippet: '1022: } | 1023: const scope = assertAllowedScope(auth.auth, c.env,
+        zoneId ? { accountId, zoneId } : { accountId }); | 1024: if (scope) {'
+    - kind: callee
+      name: encodeURIComponent
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1029
+      confidence: 92
+      snippet: '1028: const token = auth.auth.token; | 1029: const zonesRes = await
+        fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`,
+        token); | 1030: if (zonesRes.status !== 200) {'
+    - kind: callee
+      name: zonesRes.result.filter().map
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1034
+      confidence: 92
+      snippet: '1034: const zones: PqcZone[] = zonesRes.result | 1035: .filter((z)
+        => !zoneId || z.id === zoneId)'
+    - kind: callee
+      name: fetchPqcReport
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1039
+      confidence: 92
+      snippet: '1038: try { | 1039: const report = await fetchPqcReport(accountId,
+        token, zones);'
+    - kind: callee
+      name: probeAdoptionDimension
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1044
+      confidence: 92
+      snippet: '1043: // never report 0% for a question the schema cannot answer.
+        See lib/pqc-adoption.ts. | 1044: const probe = await probeAdoptionDimension(token);
+        | 1045: let adoption = probe.dimension'
+    - kind: callee
+      name: fetchAdoption
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1046
+      confidence: 92
+      snippet: '1045: let adoption = probe.dimension | 1046: ? await fetchAdoption(token,
+        zones, adoptionWindow(), probe.dimension) | 1047: : emptyAdoption(probe.error
+        ?? unavailableReason(probe.candidates), probe.candidates);'
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: GET /api/pqc/report
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1009
+      confidence: 100
+      snippet: '1007: * own error and no rows, rather than the page reporting an empty,
+        clean-looking account. | 1008: */ | 1009: app.get("/api/pqc/report", async
+        (c) => { | 1010: const auth = await resolveAuth(c.req.raw, c.env); | 1011:
+        if (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1009
+      confidence: 96
+      snippet: '1007: * own error and no rows, rather than the page reporting an empty,
+        clean-looking account. | 1008: */ | 1009: app.get("/api/pqc/report", async
+        (c) => { | 1010: const auth = await resolveAuth(c.req.raw, c.env); | 1011:
+        if (!auth.ok) {'
+  callees:
+  - name: resolveAuth
+    path: ./src/index.ts
+    line: 1010
+  - name: c.json
+    path: ./src/index.ts
+    line: 1012
+  - name: validHexId
+    path: ./src/index.ts
+    line: 1014
+  - name: c.req.query
+    path: ./src/index.ts
+    line: 1014
+  - name: assertAllowedScope
+    path: ./src/index.ts
+    line: 1023
+  - name: encodeURIComponent
+    path: ./src/index.ts
+    line: 1029
+  - name: zonesRes.result.filter().map
+    path: ./src/index.ts
+    line: 1034
+  - name: fetchPqcReport
+    path: ./src/index.ts
+    line: 1039
+  - name: probeAdoptionDimension
+    path: ./src/index.ts
+    line: 1044
+  - name: fetchAdoption
+    path: ./src/index.ts
+    line: 1046
+  url: /api/pqc/report
+  method: GET
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1009
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: POST /api/access/usage
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1072
+      confidence: 100
+      snippet: '1070: * serving" without the response becoming a per-person access
+        log. | 1071: */ | 1072: app.post("/api/access/usage", async (c) => { | 1073:
+        const auth = await resolveAuth(c.req.raw, c.env); | 1074: if (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1072
+      confidence: 96
+      snippet: '1070: * serving" without the response becoming a per-person access
+        log. | 1071: */ | 1072: app.post("/api/access/usage", async (c) => { | 1073:
+        const auth = await resolveAuth(c.req.raw, c.env); | 1074: if (!auth.ok) {'
+    - kind: state_change
+      name: POST
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 1072
+      confidence: 88
+      snippet: '1070: * serving" without the response becoming a per-person access
+        log. | 1071: */ | 1072: app.post("/api/access/usage", async (c) => { | 1073:
+        const auth = await resolveAuth(c.req.raw, c.env); | 1074: if (!auth.ok) {'
+    - kind: guard_absence
+      name: POST
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 1072
+      confidence: 28
+      snippet: '1070: * serving" without the response becoming a per-person access
+        log. | 1071: */ | 1072: app.post("/api/access/usage", async (c) => { | 1073:
+        const auth = await resolveAuth(c.req.raw, c.env); | 1074: if (!auth.ok) {'
+  callees: []
+  url: /api/access/usage
+  method: POST
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1072
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: resolveAuth
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1140
+      confidence: 92
+      snippet: '1139: app.get("/api/workers/scripts", async (c) => { | 1140: const
+        auth = await resolveAuth(c.req.raw, c.env); | 1141: if (!auth.ok) {'
+    - kind: callee
+      name: c.json
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1142
+      confidence: 92
+      snippet: '1141: if (!auth.ok) { | 1142: return c.json({ success: false, errors:
+        [{ message: auth.message }] }, auth.status); | 1143: }'
+    - kind: callee
+      name: validHexId
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1144
+      confidence: 92
+      snippet: '1143: } | 1144: const accountId = validHexId(c.req.query("account_id"));
+        | 1145: if (!accountId) {'
+    - kind: callee
+      name: c.req.query
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1144
+      confidence: 92
+      snippet: '1143: } | 1144: const accountId = validHexId(c.req.query("account_id"));
+        | 1145: if (!accountId) {'
+    - kind: callee
+      name: assertAllowedScope
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1148
+      confidence: 92
+      snippet: '1147: } | 1148: const scope = assertAllowedScope(auth.auth, c.env,
+        { accountId }); | 1149: if (scope) {'
+    - kind: callee
+      name: listWorkerScripts
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1154
+      confidence: 92
+      snippet: '1153: try { | 1154: return c.json({ success: true, result: await listWorkerScripts(accountId,
+        auth.auth.token) }); | 1155: } catch (err) {'
+    sources:
+    - kind: request_input
+      name: query.account_id
+      source: param
+      description: Query-string parameter supplied by the caller.
+      path: ./src/index.ts
+      line: 1139
+      confidence: 84
+      snippet: '1138: /** Script names on the account, for the Workers section''s
+        per-worker filter. */ | 1139: app.get("/api/workers/scripts", async (c) =>
+        { | 1140: const auth = await resolveAuth(c.req.raw, c.env); | 1141: if (!auth.ok)
+        {'
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: GET /api/workers/scripts
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1139
+      confidence: 100
+      snippet: '1138: /** Script names on the account, for the Workers section''s
+        per-worker filter. */ | 1139: app.get("/api/workers/scripts", async (c) =>
+        { | 1140: const auth = await resolveAuth(c.req.raw, c.env); | 1141: if (!auth.ok)
+        {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1139
+      confidence: 96
+      snippet: '1138: /** Script names on the account, for the Workers section''s
+        per-worker filter. */ | 1139: app.get("/api/workers/scripts", async (c) =>
+        { | 1140: const auth = await resolveAuth(c.req.raw, c.env); | 1141: if (!auth.ok)
+        {'
+    - kind: identifier_input
+      name: query.account_id
+      source: param
+      description: Identifier-like input frequently drives authorization and object
+        lookup decisions
+      path: ./src/index.ts
+      line: 1139
+      confidence: 74
+      snippet: '1138: /** Script names on the account, for the Workers section''s
+        per-worker filter. */ | 1139: app.get("/api/workers/scripts", async (c) =>
+        { | 1140: const auth = await resolveAuth(c.req.raw, c.env); | 1141: if (!auth.ok)
+        {'
+    - kind: idor
+      name: query.account_id
+      source: param_tagger:Hunt
+      description: This parameter may be vulnerable to Insecure Direct Object Reference
+        (IDOR) attacks. Matched by parameter-name heuristic.
+      path: ./src/index.ts
+      line: 1139
+      confidence: 58
+      snippet: '1138: /** Script names on the account, for the Workers section''s
+        per-worker filter. */ | 1139: app.get("/api/workers/scripts", async (c) =>
+        { | 1140: const auth = await resolveAuth(c.req.raw, c.env); | 1141: if (!auth.ok)
+        {'
+  callees:
+  - name: resolveAuth
+    path: ./src/index.ts
+    line: 1140
+  - name: c.json
+    path: ./src/index.ts
+    line: 1142
+  - name: validHexId
+    path: ./src/index.ts
+    line: 1144
+  - name: c.req.query
+    path: ./src/index.ts
+    line: 1144
+  - name: assertAllowedScope
+    path: ./src/index.ts
+    line: 1148
+  - name: listWorkerScripts
+    path: ./src/index.ts
+    line: 1154
+  url: /api/workers/scripts
+  method: GET
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1139
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params:
+  - name: account_id
+    value: ""
+    param_type: query
+    tags:
+    - name: idor
+      description: This parameter may be vulnerable to Insecure Direct Object Reference
+        (IDOR) attacks.
+      tagger: Hunt
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: POST /api/workers/metrics
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1168
+      confidence: 100
+      snippet: '1166: * document, so the parse is the boundary that keeps caller text
+        out of the query. | 1167: */ | 1168: app.post("/api/workers/metrics", async
+        (c) => { | 1169: const auth = await resolveAuth(c.req.raw, c.env); | 1170:
+        if (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1168
+      confidence: 96
+      snippet: '1166: * document, so the parse is the boundary that keeps caller text
+        out of the query. | 1167: */ | 1168: app.post("/api/workers/metrics", async
+        (c) => { | 1169: const auth = await resolveAuth(c.req.raw, c.env); | 1170:
+        if (!auth.ok) {'
+    - kind: state_change
+      name: POST
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 1168
+      confidence: 88
+      snippet: '1166: * document, so the parse is the boundary that keeps caller text
+        out of the query. | 1167: */ | 1168: app.post("/api/workers/metrics", async
+        (c) => { | 1169: const auth = await resolveAuth(c.req.raw, c.env); | 1170:
+        if (!auth.ok) {'
+    - kind: guard_absence
+      name: POST
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 1168
+      confidence: 28
+      snippet: '1166: * document, so the parse is the boundary that keeps caller text
+        out of the query. | 1167: */ | 1168: app.post("/api/workers/metrics", async
+        (c) => { | 1169: const auth = await resolveAuth(c.req.raw, c.env); | 1170:
+        if (!auth.ok) {'
+  callees: []
+  url: /api/workers/metrics
+  method: POST
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1168
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees: []
+    sources: []
+    sinks: []
+    validators: []
+    signals:
+    - kind: route_definition
+      name: POST /api/cache/analyze
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1213
+      confidence: 100
+      snippet: '1211: // Cache rules analysis (ported from cf-cache-analyzer) | 1213:
+        app.post("/api/cache/analyze", async (c) => { | 1214: const auth = await resolveAuth(c.req.raw,
+        c.env); | 1215: if (!auth.ok) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1213
+      confidence: 96
+      snippet: '1211: // Cache rules analysis (ported from cf-cache-analyzer) | 1213:
+        app.post("/api/cache/analyze", async (c) => { | 1214: const auth = await resolveAuth(c.req.raw,
+        c.env); | 1215: if (!auth.ok) {'
+    - kind: state_change
+      name: POST
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 1213
+      confidence: 88
+      snippet: '1211: // Cache rules analysis (ported from cf-cache-analyzer) | 1213:
+        app.post("/api/cache/analyze", async (c) => { | 1214: const auth = await resolveAuth(c.req.raw,
+        c.env); | 1215: if (!auth.ok) {'
+    - kind: guard_absence
+      name: POST
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 1213
+      confidence: 28
+      snippet: '1211: // Cache rules analysis (ported from cf-cache-analyzer) | 1213:
+        app.post("/api/cache/analyze", async (c) => { | 1214: const auth = await resolveAuth(c.req.raw,
+        c.env); | 1215: if (!auth.ok) {'
+  callees: []
+  url: /api/cache/analyze
+  method: POST
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1213
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: c.env.ASSETS.fetch
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1269
+      confidence: 92
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    sources: []
+    sinks:
+    - kind: outbound_http
+      name: fetch
+      source: callee
+      description: Potential outbound HTTP/client sink inferred from code or callee
+        name
+      path: ./src/index.ts
+      line: 1269
+      confidence: 64
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    validators: []
+    signals:
+    - kind: route_definition
+      name: DELETE /*
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 100
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 96
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: state_change
+      name: DELETE
+      source: http_method
+      description: State-changing delete endpoint; review authorization, ownership,
+        and destructive side effects
+      path: ./src/index.ts
+      line: 1268
+      confidence: 88
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: guard_absence
+      name: DELETE
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 1268
+      confidence: 28
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+  callees:
+  - name: c.env.ASSETS.fetch
+    path: ./src/index.ts
+    line: 1269
+  url: /*
+  method: DELETE
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1268
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: c.env.ASSETS.fetch
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1269
+      confidence: 92
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    sources: []
+    sinks:
+    - kind: outbound_http
+      name: fetch
+      source: callee
+      description: Potential outbound HTTP/client sink inferred from code or callee
+        name
+      path: ./src/index.ts
+      line: 1269
+      confidence: 64
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    validators: []
+    signals:
+    - kind: route_definition
+      name: GET /*
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 100
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 96
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+  callees:
+  - name: c.env.ASSETS.fetch
+    path: ./src/index.ts
+    line: 1269
+  url: /*
+  method: GET
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1268
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: c.env.ASSETS.fetch
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1269
+      confidence: 92
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    sources: []
+    sinks:
+    - kind: outbound_http
+      name: fetch
+      source: callee
+      description: Potential outbound HTTP/client sink inferred from code or callee
+        name
+      path: ./src/index.ts
+      line: 1269
+      confidence: 64
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    validators: []
+    signals:
+    - kind: route_definition
+      name: HEAD /*
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 100
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 96
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+  callees:
+  - name: c.env.ASSETS.fetch
+    path: ./src/index.ts
+    line: 1269
+  url: /*
+  method: HEAD
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1268
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: c.env.ASSETS.fetch
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1269
+      confidence: 92
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    sources: []
+    sinks:
+    - kind: outbound_http
+      name: fetch
+      source: callee
+      description: Potential outbound HTTP/client sink inferred from code or callee
+        name
+      path: ./src/index.ts
+      line: 1269
+      confidence: 64
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    validators: []
+    signals:
+    - kind: route_definition
+      name: OPTIONS /*
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 100
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 96
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+  callees:
+  - name: c.env.ASSETS.fetch
+    path: ./src/index.ts
+    line: 1269
+  url: /*
+  method: OPTIONS
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1268
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: c.env.ASSETS.fetch
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1269
+      confidence: 92
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    sources: []
+    sinks:
+    - kind: outbound_http
+      name: fetch
+      source: callee
+      description: Potential outbound HTTP/client sink inferred from code or callee
+        name
+      path: ./src/index.ts
+      line: 1269
+      confidence: 64
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    validators: []
+    signals:
+    - kind: route_definition
+      name: PATCH /*
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 100
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 96
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: state_change
+      name: PATCH
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 1268
+      confidence: 88
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: guard_absence
+      name: PATCH
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 1268
+      confidence: 28
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+  callees:
+  - name: c.env.ASSETS.fetch
+    path: ./src/index.ts
+    line: 1269
+  url: /*
+  method: PATCH
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1268
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: c.env.ASSETS.fetch
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1269
+      confidence: 92
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    sources: []
+    sinks:
+    - kind: outbound_http
+      name: fetch
+      source: callee
+      description: Potential outbound HTTP/client sink inferred from code or callee
+        name
+      path: ./src/index.ts
+      line: 1269
+      confidence: 64
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    validators: []
+    signals:
+    - kind: route_definition
+      name: POST /*
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 100
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 96
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: state_change
+      name: POST
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 1268
+      confidence: 88
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: guard_absence
+      name: POST
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 1268
+      confidence: 28
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+  callees:
+  - name: c.env.ASSETS.fetch
+    path: ./src/index.ts
+    line: 1269
+  url: /*
+  method: POST
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1268
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+- ai_context:
+    guards: []
+    callees:
+    - kind: callee
+      name: c.env.ASSETS.fetch
+      source: callee
+      description: Direct 1-hop handler callee extracted from the endpoint body
+      path: ./src/index.ts
+      line: 1269
+      confidence: 92
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    sources: []
+    sinks:
+    - kind: outbound_http
+      name: fetch
+      source: callee
+      description: Potential outbound HTTP/client sink inferred from code or callee
+        name
+      path: ./src/index.ts
+      line: 1269
+      confidence: 64
+      snippet: '1268: app.all("*", async (c) => { | 1269: const assetResponse = await
+        c.env.ASSETS.fetch(c.req.raw); | 1270: if (assetResponse.status === 404) {'
+    validators: []
+    signals:
+    - kind: route_definition
+      name: PUT /*
+      source: route
+      description: Primary route registration or controller entrypoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 100
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: technology
+      name: js_hono
+      source: detector
+      description: Detected framework or language technology for this endpoint
+      path: ./src/index.ts
+      line: 1268
+      confidence: 96
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: state_change
+      name: PUT
+      source: http_method
+      description: State-changing endpoint; review authz, validation, and side effects
+      path: ./src/index.ts
+      line: 1268
+      confidence: 88
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+    - kind: guard_absence
+      name: PUT
+      source: heuristic
+      description: No auth guard was detected for this state-changing endpoint. This
+        may be real or a heuristic blind spot; review manually.
+      path: ./src/index.ts
+      line: 1268
+      confidence: 28
+      snippet: '1267: // Static assets fallback | 1268: app.all("*", async (c) =>
+        { | 1269: const assetResponse = await c.env.ASSETS.fetch(c.req.raw); | 1270:
+        if (assetResponse.status === 404) {'
+  callees:
+  - name: c.env.ASSETS.fetch
+    path: ./src/index.ts
+    line: 1269
+  url: /*
+  method: PUT
+  internal: false
+  details:
+    code_paths:
+    - path: ./src/index.ts
+      line: 1268
+    technology: js_hono
+  protocol: http
+  kind: ""
+  tags: []
+  params: []
+passive_results: []
+errors:
+- tech: cloudflare_wrangler
+  message: 'skipped 1 file: ./wrangler.jsonc; first error: unexpected token ''}''
+    at line 15, column 5'
