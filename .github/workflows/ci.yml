@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The gate is read-only: it builds and tests, and touches nothing outside the runner.
+permissions:
+  contents: read
+
+# A newer push makes an in-flight run irrelevant; don't pay for both.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Wrangler 4 requires >=22, matching package.json engines.
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # tsc -b, the full test suite, the Vite build, and a wrangler dry-run — the same gate
+      # PROGRESS.md requires before a commit. The dry-run works against the placeholder
+      # wrangler.jsonc because it resolves no credentials and calls no API.
+      - run: npm run check
+
+      # Zero errors is the standard. The known TanStack useReactTable warnings are expected
+      # and do not fail the build; --max-warnings would turn them into false alarms.
+      - run: npm run lint
