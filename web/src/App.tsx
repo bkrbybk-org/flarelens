@@ -162,9 +162,12 @@ export default function App() {
 	const appLogins = useAppLogins();
 	const loadAppLogins = appLogins.load;
 	useEffect(() => {
-		if (route !== "access" || !session?.token || !session.accountId) return;
+		// Guard on the session, never on the token: in server mode the browser holds no
+		// credential and `session.token` is deliberately the empty string, so a truthiness
+		// check on it silently skips the fetch on exactly the deployment this app runs in.
+		if (route !== "access" || !session) return;
 		loadAppLogins(session.token, session.accountId);
-	}, [route, session?.token, session?.accountId, loadAppLogins]);
+	}, [route, session, loadAppLogins]);
 
 	/**
 	 * Applications carrying their 7-day login count.

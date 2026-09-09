@@ -69,3 +69,20 @@ describe("credential resolution stays centralised", () => {
 		}
 	});
 });
+
+describe("server mode has no token to test", () => {
+	// In server mode the browser holds no credential: session.token is deliberately "" and the
+	// Worker uses its own bound token. Any `if (!token)` style guard therefore skips the work on
+	// the very deployment this app runs in, and does it silently — no request, no error, no
+	// banner, just empty data. That is how the Logins (7d) column shipped blank.
+	it("no component gates a data load on the session token being truthy", () => {
+		const sources = ["web/src/App.tsx", "web/src/features/access/Dashboard.tsx"];
+		for (const rel of sources) {
+			const source = readFileSync(join(import.meta.dirname, "..", rel), "utf8");
+			// Strip comments: this file's own explanation of the rule mentions the pattern.
+			const code = source.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+			expect(code, rel).not.toMatch(/!\s*session\??\.?\??\.token/);
+			expect(code, rel).not.toMatch(/session\??\.token\s*&&/);
+		}
+	});
+});
