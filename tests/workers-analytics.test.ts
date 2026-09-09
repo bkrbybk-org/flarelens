@@ -137,7 +137,7 @@ describe("GET /api/workers/scripts", () => {
 	it("returns sorted script names", async () => {
 		const res = await app.request(`/api/workers/scripts?account_id=${ACCOUNT}`, { headers: auth }, ENV);
 		expect(res.status).toBe(200);
-		expect((await res.json() as { result: string[] }).result).toEqual(["flarelens", "app-delta"]);
+		expect((await res.json() as { result: string[] }).result).toEqual(["app-delta", "flarelens"]);
 	});
 
 	it("passes a 403 through so a missing scope reads as a scope problem", async () => {

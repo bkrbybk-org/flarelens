@@ -141,6 +141,21 @@ A Bearer header always wins, so server mode can never silently substitute the bo
 caller's own. With none of the configuration below set, the worker behaves exactly as it always
 has: no token, no data.
 
+### Configuring a deployment
+
+`wrangler.jsonc` ships **placeholder** account, zone and Access identifiers so this repository
+carries no deployment's configuration. Fill them in, or keep your real values out of git entirely:
+
+```bash
+cp wrangler.jsonc wrangler.local.jsonc   # edit with your ids; the file is gitignored
+npm run deploy:live                      # deploys with wrangler.local.jsonc
+```
+
+`npm run deploy` uses the committed `wrangler.jsonc`, which will not deploy anywhere real until
+its placeholders are replaced. Secrets never belong in either file — `CF_API_TOKEN` is set with
+`wrangler secret put CF_API_TOKEN`, and the E2E suite reads its Access service token from a
+gitignored `.dev.vars`.
+
 ### Enabling server mode
 
 Server mode is **off unless all three** are configured, and it will not turn itself on partially:

@@ -10,7 +10,8 @@
     "test": "vitest run",
     "lint": "eslint .",
     "check": "tsc -b && vitest run && vite build && wrangler deploy --dry-run --outdir=dist",
-    "types": "wrangler types"
+    "types": "wrangler types",
+    "deploy:live": "npm run build && wrangler deploy -c wrangler.local.jsonc"
   },
   "engines": {
     "node": ">=22.0.0"

@@ -1,6 +1,8 @@
 node_modules/
 .wrangler/
 .dev.vars
+# Real deployment config: account, zone and Access ids. wrangler.jsonc ships placeholders.
+wrangler.local.jsonc
 .env
 .env.*
 dist/
