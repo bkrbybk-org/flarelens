@@ -1,10 +1,10 @@
 # Flarelens — Progress
 
-Status snapshot, last reviewed **2026-09-12** against a full read of the tree and a live probe of
-the deployed API. See [README.md](README.md) for how to run the app; this file tracks where the
+Status snapshot, last reviewed **2026-09-13** against a full read of the tree, a live probe of
+the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Fifteen sections, 596 tests green, `tsc -b` clean, 0 lint errors (4 known warnings).
+**TL;DR** — Fifteen sections, 613 tests green, `tsc -b` clean, 0 lint errors (4 known warnings).
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
@@ -116,7 +116,7 @@ documents, so no caller text reaches a query.
 | [src/lib/request-trace.ts](src/lib/request-trace.ts) | Ray ID forensics: schema-swept field selection, adaptive retry around per-zone entitlements and Cloudflare's field ceiling |
 | [src/lib/workers-analytics.ts](src/lib/workers-analytics.ts) | Workers invocation metrics; script list degrades when the scope is absent |
 | [src/lib/workers-ai.ts](src/lib/workers-ai.ts) | Workers AI inference metrics; folds rows split by `errorCode` |
-| [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) | AI Gateway proxy usage across four `aiGateway*AdaptiveGroups` datasets. **Every field/dataset name is an unverified guess** — no API token was available to check against a live schema. The requests dataset is load-bearing (throws on failure); errors/cache/spend are fetched separately and degrade independently, each reporting `{ available, reason }` rather than showing zero |
+| [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) | AI Gateway proxy usage across four `aiGateway*AdaptiveGroups` datasets. Dataset, dimension and aggregate names are **resolved from the live schema at runtime** (`resolveAiGatewayFields`, 10-minute module cache) and the response carries the `candidates` it chose between, so a wrong resolution is diagnosable rather than a confident zero. The requests dataset is load-bearing (throws on failure); errors/cache/spend degrade independently, each reporting `{ available, reason }` |
 | [src/lib/ai-sec/](src/lib/ai-sec/) | AI Security: zone fan-out, schema-capability probing, per-token edge caching of the **aggregate half only** (rows are never cached), and the `buildDashboard` aggregation |
 | [web/src/hooks/useTimeRange.ts](web/src/hooks/useTimeRange.ts) | Shared analytics window in minutes, hash-synced, clamped per section |
 | [web/src/components/chart/ChartHover.tsx](web/src/components/chart/ChartHover.tsx) | Hover readout for every inline-SVG chart: bucket hit-testing and measured, clamped placement |
@@ -127,10 +127,26 @@ documents, so no caller text reaches a query.
 | [web/src/lib/findings.ts](web/src/lib/findings.ts) | Pure audit checks per source (`accessFindings`, `groupsFindings`, `wafFindings`, `cacheFindings`), plus the shared `groupUsedBy` cross-reference |
 | [web/src/lib/csv.ts](web/src/lib/csv.ts) | RFC 4180 `toCsv` + `downloadCsv` (quotes fields containing commas/quotes/newlines) |
 | [web/src/lib/sectionSnapshot.ts](web/src/lib/sectionSnapshot.ts) | Account-scoped cross-page store carrying the last WAF/Cache load to Findings — see the note under Frontend |
+| [web/src/lib/ui.ts](web/src/lib/ui.ts) | **Style tokens — single source.** `CARD`, `ALERT_ERROR`/`ALERT_WARN`, `BTN_*`, `INPUT`/`SEARCH_INPUT`/`SELECT`, `BADGE`, `MUTED`, `SECTION_TITLE`, `FOCUS_RING`/`FOCUS_ROW`. Adding a second token for one role is a bug, not a choice |
+| [web/src/components/PageShell.tsx](web/src/components/PageShell.tsx) | The frame every section renders inside: `h-full overflow-auto` + `space-y-4 p-4 md:p-6`. Applications is the deliberate exception — its table owns the scrolling |
+| [web/src/components/StatCard.tsx](web/src/components/StatCard.tsx) | `StatCard` (label over value, optional icon/hint/tone; formats numbers itself) and `StatGrid` (two columns on a phone, `cols` at `lg`) |
+| [web/src/components/EmptyState.tsx](web/src/components/EmptyState.tsx) | `EmptyState` (page), `EmptyNote` (inside a card), `EmptyRow` (inside a table). `loading` is a separate state from empty |
+| [web/src/components/Tabs.tsx](web/src/components/Tabs.tsx) | The full ARIA tabs contract: `aria-controls`/`aria-labelledby` both ways, roving tabindex, Left/Right/Home/End with wrapping |
+| [web/src/hooks/useSectionRefresh.ts](web/src/hooks/useSectionRefresh.ts) | Lets the mounted section register its reload so the top bar's Sync can drive it; single slot, cleared on unmount |
 
 ### Frontend
 
-React 19 + Vite 8 + Tailwind 4 + TanStack Table 8. Feature-folder layout under `web/src/features/{access,waf,cache,findings}/`, shared UI in `web/src/components/` (`ProgressBar`, `table/ColumnFilterPopover`, `Icons`, `shell/{Sidebar,Topbar}`).
+React 19 + Vite 8 + Tailwind 4 + TanStack Table 8. Feature-folder layout under `web/src/features/{access,waf,cache,findings}/`, shared UI in `web/src/components/` (`PageShell`, `StatCard`, `EmptyState`, `Tabs`, `ProgressBar`, `table/ColumnFilterPopover`, `Icons`, `shell/{Sidebar,Topbar}`).
+
+**One of everything.** Sections used to disagree about their own shape: two page frames, two stat-card
+layouts, four empty states with four voices, two sizes of error banner, and a refresh control that
+lived in the top bar on three sections and inside the page on eleven. That drift was structural — a
+new section inherited whichever section its author had copied — so the fix is a shared component
+plus a test that fails when a second copy appears, not a style guide. See
+[web/src/lib/ui.ts](web/src/lib/ui.ts) for the tokens and
+[tests/components/shared-ui.test.tsx](tests/components/shared-ui.test.tsx),
+[tests/refresh-affordance.test.ts](tests/refresh-affordance.test.ts) and
+[tests/shell-layout.test.ts](tests/shell-layout.test.ts) for the pins.
 
 Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/useRoute.ts) parses the path segment, [useHashParams.ts](web/src/hooks/useHashParams.ts) syncs query params. Five sections: `#/access`, `#/groups`, `#/waf`, `#/cache`, `#/findings`. Deep links like `#/waf?zone=…&lookback=1440&tab=rules` win over saved prefs on load, then mirror state back via `replaceState`.
 
@@ -144,6 +160,7 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 | [useZones](web/src/hooks/useZones.ts) | Lazy zone list, cached per account |
 | [useZeroTrustData](web/src/hooks/useZeroTrustData.ts) / [useWafData](web/src/features/waf/useWafData.ts) / [useCacheData](web/src/features/cache/useCacheData.ts) | Per-section fetch + state |
 | [useEstimatedProgress](web/src/hooks/useEstimatedProgress.ts) | Progress bar estimated from the last real load duration |
+| [useSectionRefresh](web/src/hooks/useSectionRefresh.ts) | Puts the mounted section's reload behind the top bar's Sync button |
 
 **Cross-page snapshots.** WAF and Cache data lives in their pages' hooks, which unmount on
 navigation, so [sectionSnapshot.ts](web/src/lib/sectionSnapshot.ts) carries the last load
@@ -183,6 +200,9 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | `tests/components/ConnectPage.test.tsx` | Rendered `ConnectPage`: empty-token submit shows "API Token is required" and calls no fetch; every required/optional permission entry renders |
 | `tests/components/AppsTable.test.tsx` | Rendered `AppsTable`: the global search box narrows visible rows and clearing it restores them |
 | `tests/components/GroupsPage.test.tsx` | Rendered `GroupsPage`: tab order and deep-linking, the policies table's default sort and search, the created column hidden but selectable, a referenced list's name/size/entries, and an unreadable list stating why |
+| `tests/components/shared-ui.test.tsx` | The shared pieces that ended two design generations: number formatting, "loading" vs "empty" staying distinguishable, StatGrid's single breakpoint, and that no page defines its own StatCard, Kpi or EmptyState again |
+| `tests/components/tabs.test.tsx` | The ARIA tabs pattern rather than the markup: each tab points at its panel, arrows move and wrap, exactly one tab is in the tab order |
+| `tests/refresh-affordance.test.ts` | Refresh exists only in the top bar, every reloadable section registers one, and the registration clears on unmount |
 | `tests/ai-gateway.test.ts` | AI Gateway route: series/totals fold, rate arithmetic (never divides by zero), per-dataset degradation when a guessed field name is wrong, validation, auth, `no-store`, 502 on load-bearing failure, and the same "no per-user dimension" privacy assertion as the other aggregate-only sections |
 
 ---
@@ -319,6 +339,20 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 
 ### Recently resolved
 
+- **UI/UX consistency pass across every section (2026-09-13).** An audit against every page found
+  the app had two design generations, split exactly rather than randomly: nine sections framed
+  themselves one way and five another, six drew a headline number one way and three another, and
+  refresh lived in the top bar on three sections and inside the page on eleven under a different
+  name and two different styles. Root cause was the absence of any shared style module — nine
+  byte-identical `CARD` constants, five byte-identical `StatCard` components — so every new page
+  copy-pasted from whichever page its author happened to open. Resolved in four commits: tokens
+  (`web/src/lib/ui.ts`), shared components (`PageShell`, `StatCard`, `EmptyState`, `Tabs`), an
+  accessibility sweep, and one refresh control. Three accessibility defects were fixed along the
+  way — 58 uses of `text-zinc-400` with no dark-mode pair (about 2.8:1 on white, failing WCAG AA),
+  17 elements whose `outline-none` left keyboard focus invisible, and two tab strips carrying half
+  the ARIA pattern with no tabpanel and no arrow keys. Everything that has no runtime failure mode
+  is pinned in tests.
+
 - ~~Bound token lacked `Zone: DNS: Read` and `Zone Settings: Read`~~ — both granted; verified
   against the deployed endpoint 2026-09-12. PQC Readiness now returns **35 hostnames with zero
   errors**: 19 ready, 15 eligible, 1 not-ready, and 13 TLS hygiene findings across four zones.
@@ -425,5 +459,5 @@ diff reuses `describeRule` so rule changes read as sentences rather than JSON.
 - **Commits:** Conventional Commits, imperative subject ≤50 chars, body only when the *why* isn't obvious.
 - **Gate:** `npm run check` (tsc project build → tests → Vite build → wrangler dry-run) must pass before commit. `npm run lint` should show 0 errors (4 known warnings are expected — see P3 above).
 - **Verification pattern:** for anything visual or layout-related, **measure, do not reason**. Two consecutive shell-scrolling fixes were shipped on plausible CSS reasoning before the cause was found by reading `html.scrollHeight` in the running app. The harness is described under Development in [README.md](README.md).
-- **Layout invariants:** the shell is a fixed-height flex column and each section owns its scrolling. `<main>` must keep `relative` (containing block), `overflow-hidden` (clipping) and `min-h-0` (shrinkable), and every section root needs its own `h-full overflow-auto`. [tests/shell-layout.test.ts](tests/shell-layout.test.ts) pins all of it — none of these fail loudly.
+- **Layout invariants:** the shell is a fixed-height flex column and each section owns its scrolling. `<main>` must keep `relative` (containing block), `overflow-hidden` (clipping) and `min-h-0` (shrinkable), and every section renders inside [PageShell](web/src/components/PageShell.tsx), which owns the `h-full overflow-auto` that used to be copied into each page in two spellings. [tests/shell-layout.test.ts](tests/shell-layout.test.ts) pins all of it, including the one deliberate exception (Applications) — none of these fail loudly.
 - **Data honesty (Cache section):** never redistribute unattributed traffic with synthetic weights, never present mock data unlabeled, and let a genuinely quiet zone show zeros. See the note at the end of [README.md](README.md).

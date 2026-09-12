@@ -69,8 +69,26 @@ scrolls inside `<main>`. Three classes on `<main>` hold that together, and all t
 | `overflow-hidden` | Nothing may spill past the region that owns the scrolling |
 | `relative` | **`overflow` does not create a containing block.** Without it, every `sr-only` label and every icon absolutely positioned inside an input anchors to the initial containing block rather than the scroller. Deep in a long page those sit past the fold — one landed at 1444px against a 900px viewport — stretching `<html>` until the *document* scrolls, which drags the sidebar and top bar out of view |
 
-Each section root carries its own `h-full overflow-auto`. A section that loses it is clipped by
-`<main>` with no way to reach the rest of its content.
+Every section renders inside [PageShell](web/src/components/PageShell.tsx), which owns the
+`h-full overflow-auto` that makes the section its own scroll container; a section outside it is
+clipped by `<main>` with no way to reach the rest of its content. Applications is the one
+deliberate exception — its table owns the scrolling so the header can stay put — and the test
+pins the exception as well, so it stays a decision rather than drift.
+
+### One of everything
+
+Anything that appears on more than one page has exactly one definition:
+[web/src/lib/ui.ts](web/src/lib/ui.ts) for style tokens (cards, alerts, buttons, inputs, badges,
+focus rings) and `web/src/components/` for `PageShell`, `StatCard`, `EmptyState` and `Tabs`.
+Refresh lives only in the top bar; a section registers what reloading means for it through
+[useSectionRefresh](web/src/hooks/useSectionRefresh.ts).
+
+This is enforced rather than documented. A second `StatCard`, an empty state with its own shape,
+or a `Refresh` button inside a page fails
+[tests/components/shared-ui.test.tsx](tests/components/shared-ui.test.tsx) or
+[tests/refresh-affordance.test.ts](tests/refresh-affordance.test.ts) — because the previous drift
+did not come from carelessness, it came from each new page copying whichever page its author
+happened to open, and a style guide does not stop that.
 
 Credentials resolve at one choke point, [src/lib/auth.ts](src/lib/auth.ts). In BYOT mode the
 browser keeps the API token in `sessionStorage` and sends it per request as `Authorization:
