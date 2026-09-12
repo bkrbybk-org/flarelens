@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { EmptyState } from "../../components/EmptyState";
 import { BADGE, BADGE_NEUTRAL, BTN_SECONDARY, SEARCH_INPUT } from "../../lib/ui";
 import { actionDrift, aggregateRules, topEntries } from "../../lib/waf/aggregate";
 import { relativeTime, titleCase } from "../../lib/waf/format";
@@ -110,9 +111,7 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 
 			<div className="space-y-3">
 				{pageRows.length === 0 ? (
-					<p className="rounded-xl border border-zinc-200 bg-white px-4 py-12 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-						No rules match the current filters.
-					</p>
+					<EmptyState title="No matching rules" hint="Try a different search or filter." />
 				) : (
 					pageRows.map((row) => <RuleCard key={row.id} row={row} win={win} onSelect={onSelectRule} />)
 				)}

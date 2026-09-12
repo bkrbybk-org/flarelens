@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { EmptyRow, EmptyState } from "../../components/EmptyState";
 import { BTN_SECONDARY, FOCUS_RING, SEARCH_INPUT } from "../../lib/ui";
 import {
 	flexRender,
@@ -553,11 +554,7 @@ export function AppsTable({
 							{loading ? (
 								<SkeletonRows cols={Math.max(visibleCount, 1)} />
 							) : rows.length === 0 ? (
-								<tr>
-									<td colSpan={Math.max(visibleCount, 1)} className="px-4 py-16 text-center text-zinc-500 dark:text-zinc-400">
-										No matching applications.
-									</td>
-								</tr>
+								<EmptyRow colSpan={Math.max(visibleCount, 1)} title="No matching applications" />
 							) : (
 								rows.map((row) => (
 									<tr
@@ -590,9 +587,7 @@ export function AppsTable({
 				{loading ? (
 					<SkeletonCards />
 				) : rows.length === 0 ? (
-					<p className="rounded-xl border border-zinc-200 bg-white px-4 py-12 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-						No matching applications.
-					</p>
+					<EmptyState title="No matching applications" hint="Try a different search or filter." />
 				) : (
 					<div className="space-y-3">
 						{rows.map((row) => {

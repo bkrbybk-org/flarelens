@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, BTN_SECONDARY_SM, CARD, SEARCH_INPUT } from "../../lib/ui";
+import { EmptyNote } from "../../components/EmptyState";
+import { StatCard, StatGrid } from "../../components/StatCard";
+import { PageShell } from "../../components/PageShell";
+import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, BTN_SECONDARY_SM, CARD, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon, SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
@@ -100,8 +103,8 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 	}
 
 	return (
-		<div className="h-full overflow-auto p-4 md:p-6">
-			<div className="mb-4 flex flex-wrap items-center gap-2">
+		<PageShell>
+			<div className="flex flex-wrap items-center gap-2">
 				<div className="relative min-w-0 flex-1 basis-72">
 					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 					<input
@@ -138,13 +141,13 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
+				<div role="alert" className={ALERT_ERROR}>
 					{error}
 				</div>
 			)}
 
 			{result?.errors.map((e) => (
-				<div key={e.source} role="status" className={`mb-4 ${ALERT_WARN}`}>
+				<div key={e.source} role="status" className={ALERT_WARN}>
 					{e.source}: {e.message}
 				</div>
 			))}
@@ -153,7 +156,7 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 			    than 403, so an empty map is ambiguous. Say so instead of rendering a blank table
 			    that looks like a clean bill of health. */}
 			{result && result.tunnels.length === 0 && (
-				<div role="status" className={`mb-4 ${ALERT_WARN}`}>
+				<div role="status" className={ALERT_WARN}>
 					No tunnels were returned for this account. If you expect some, the API token is missing{" "}
 					<strong>Cloudflare Tunnel: Read</strong> — Cloudflare returns an empty list for that rather than an error,
 					so this cannot be told apart from an account with no tunnels. Only the Access half of each row is shown
@@ -161,38 +164,27 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 				</div>
 			)}
 
-			<div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-				<div className={CARD}>
-					<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Tunnels</div>
-					<div className="mt-1 text-2xl font-semibold tabular-nums">{result?.tunnels.length ?? 0}</div>
-				</div>
-				<div className={CARD}>
-					<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Mapped hostnames</div>
-					<div className="mt-1 text-2xl font-semibold tabular-nums">{mapped}</div>
-					<div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">app + tunnel + origin</div>
-				</div>
-				<div className={CARD}>
-					<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Ungated hostnames</div>
-					<div className={`mt-1 text-2xl font-semibold tabular-nums ${ungated ? "text-red-600 dark:text-red-400" : ""}`}>
-						{ungated}
-					</div>
-					<div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">tunnel ingress with no Access app</div>
-				</div>
-				<div className={CARD}>
-					<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">No route found</div>
-					<div className={`mt-1 text-2xl font-semibold tabular-nums ${unrouted ? "text-amber-700 dark:text-amber-400" : ""}`}>
-						{unrouted}
-					</div>
-					<div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">self-hosted, no tunnel ingress</div>
-				</div>
-			</div>
+			<StatGrid cols={4}>
+				<StatCard label="Tunnels" value={result?.tunnels.length ?? 0} />
+				<StatCard label="Mapped hostnames" value={mapped} hint="app + tunnel + origin" />
+				<StatCard
+					label="Ungated hostnames"
+					value={ungated}
+					hint="tunnel ingress with no Access app"
+					tone={ungated ? "text-red-600 dark:text-red-400" : undefined}
+				/>
+				<StatCard
+					label="No route found"
+					value={unrouted}
+					hint="self-hosted, no tunnel ingress"
+					tone={unrouted ? "text-amber-700 dark:text-amber-400" : undefined}
+				/>
+			</StatGrid>
 
-			<section className={`${CARD} mb-4`}>
-				<h2 className="mb-3 text-sm font-semibold">Destination → application → route → origin</h2>
+			<section className={`${CARD}`}>
+				<h2 className={`mb-3 ${SECTION_TITLE}`}>Destination → application → route → origin</h2>
 				{rows.length === 0 ? (
-					<p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">
-						{loading ? "Loading…" : "Nothing to show for this search."}
-					</p>
+					<EmptyNote title="No matching hostnames" loading={loading} />
 				) : (
 					<ul className="space-y-2">
 						{rows.map((row) => (
@@ -254,7 +246,7 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 
 			<div className="grid gap-4 lg:grid-cols-2">
 				<section className={CARD}>
-					<h2 className="mb-3 text-sm font-semibold">Tunnels</h2>
+					<h2 className={`mb-3 ${SECTION_TITLE}`}>Tunnels</h2>
 					{(result?.tunnels.length ?? 0) === 0 ? (
 						<p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">None returned.</p>
 					) : (
@@ -278,7 +270,7 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 				</section>
 
 				<section className={CARD}>
-					<h2 className="mb-3 text-sm font-semibold">Private network routes</h2>
+					<h2 className={`mb-3 ${SECTION_TITLE}`}>Private network routes</h2>
 					{(result?.privateRoutes.length ?? 0) === 0 ? (
 						<p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">None returned.</p>
 					) : (
@@ -296,6 +288,6 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 					)}
 				</section>
 			</div>
-		</div>
+		</PageShell>
 	);
 }

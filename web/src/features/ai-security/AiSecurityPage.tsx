@@ -1,5 +1,8 @@
 import { useEffect, useMemo } from "react";
-import { ALERT_ERROR, ALERT_WARN, CARD } from "../../lib/ui";
+import { EmptyState } from "../../components/EmptyState";
+import { StatGrid } from "../../components/StatCard";
+import { PageShell } from "../../components/PageShell";
+import { ALERT_ERROR, ALERT_WARN, CARD, SECTION_TITLE } from "../../lib/ui";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { ProgressBar } from "../../components/ProgressBar";
@@ -160,132 +163,128 @@ export function AiSecurityPage({ session, zoneId, timeRange, onAuthError }: Prop
 	}, [data]);
 
 	return (
-		<div className="h-full overflow-y-auto">
-			<div className="space-y-4 p-4 md:p-6">
-				{ai.progress.running && <ProgressBar percent={ai.progress.percent} />}
+		<PageShell>
+			{ai.progress.running && <ProgressBar percent={ai.progress.percent} />}
 
-				{ai.error && (
-					<div role="alert" className={ALERT_ERROR}>
-						{ai.error}
-					</div>
-				)}
-
-				<div className="flex flex-wrap items-center gap-2">
-					{/* Window comes from the shared picker in the top bar; shown here so the page
-					    still states what it is looking at. */}
-					<span className="rounded-lg border border-zinc-200 px-2.5 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-						{RANGE_OPTIONS.find(([value]) => value === range)?.[1] ?? range}
-					</span>
-					<button
-						type="button"
-						onClick={() => load(session.token, session.accountId, zoneId, range)}
-						disabled={ai.loading}
-						className="flex items-center gap-2 rounded-lg bg-cf px-3 py-2 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
-					>
-						<RefreshIcon size={14} className={ai.loading ? "animate-spin" : undefined} />
-						Refresh
-					</button>
-					{data && (
-						<span className="text-xs text-zinc-500 dark:text-zinc-400">
-							{data.totalEvents.toLocaleString()} flagged request(s) · {data.window.label}
-						</span>
-					)}
+			{ai.error && (
+				<div role="alert" className={ALERT_ERROR}>
+					{ai.error}
 				</div>
+			)}
 
-				{/* A zone that failed is reported rather than silently dropped: the aggregate would
-				    otherwise be quietly short by that zone's traffic. */}
-				{data?.zonesWithErrors.length ? (
-					<div className={`flex items-start gap-2 ${ALERT_WARN}`}>
-						<AlertIcon size={16} />
-						<span>
-							{data.zonesWithErrors.length} zone(s) failed to load and are missing from these totals:{" "}
-							{data.zonesWithErrors.map((z) => z.zoneName).join(", ")}
-						</span>
-					</div>
-				) : null}
-
-				{ai.result && <SchemaReadoutPanel schema={ai.result.schema} />}
-
-				{!data && !ai.loading && !ai.error && (
-					<p className="py-16 text-center text-sm text-zinc-500 dark:text-zinc-400">
-						No AI Security telemetry loaded yet.
-					</p>
-				)}
-
+			<div className="flex flex-wrap items-center gap-2">
+				{/* Window comes from the shared picker in the top bar; shown here so the page
+				    still states what it is looking at. */}
+				<span className="rounded-lg border border-zinc-200 px-2.5 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+					{RANGE_OPTIONS.find(([value]) => value === range)?.[1] ?? range}
+				</span>
+				<button
+					type="button"
+					onClick={() => load(session.token, session.accountId, zoneId, range)}
+					disabled={ai.loading}
+					className="flex items-center gap-2 rounded-lg bg-cf px-3 py-2 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
+				>
+					<RefreshIcon size={14} className={ai.loading ? "animate-spin" : undefined} />
+					Refresh
+				</button>
 				{data && (
-					<>
-						<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-							{data.kpis
-								.filter((k) => ["llm", "injection", "pii", "unsafe", "custom"].includes(k.id))
-								.map((k) => (
-									<KpiCard key={k.id} kpi={k} spark={sparks[k.id]} />
-								))}
-						</div>
-
-						<div className="grid gap-4 xl:grid-cols-2">
-							<TrendChart
-								title="LLM request volume"
-								series={data.trafficSeries}
-								previous={data.trafficSeriesPrev}
-								summary={trafficSummary}
-							/>
-							<DetectionsChart series={data.detectionSeries} summary={detectionsSummary} />
-						</div>
-
-						<div className="grid gap-4 xl:grid-cols-3">
-							<BarList
-								title="Prompt injection score distribution"
-								items={data.injectionHistogram}
-								emptyText="No scored prompts in this window."
-							/>
-							<BarList title="PII categories in prompts" items={data.piiBreakdown} emptyText="No PII detected." />
-							<BarList title="Unsafe topic categories" items={data.topicBreakdown} emptyText="No unsafe topics detected." />
-						</div>
-
-						<div className="grid gap-4 xl:grid-cols-3">
-							<BarList title="Custom topic categories" items={data.customBreakdown} emptyText="No custom topics matched." />
-							<BarList title="Source IPs" items={data.topIps} emptyText="No flagged requests." />
-							<BarList title="Source countries" items={data.topCountries} emptyText="No flagged requests." />
-						</div>
-
-						<EventsTable events={data.events} truncated={data.truncated} />
-
-						<section className={CARD}>
-							<h2 className="mb-3 text-sm font-semibold">Zone rollup</h2>
-							<div className="overflow-x-auto">
-								<table className="w-full border-collapse text-sm">
-									<thead>
-										<tr className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-											<th className="px-2 py-2 text-left">Zone</th>
-											<th className="px-2 py-2 text-right">LLM requests</th>
-											<th className="px-2 py-2 text-right">Injection</th>
-											<th className="px-2 py-2 text-right">PII</th>
-											<th className="px-2 py-2 text-right">Unsafe</th>
-											<th className="px-2 py-2 text-right">Custom</th>
-											<th className="px-2 py-2 text-left">Status</th>
-										</tr>
-									</thead>
-									<tbody>
-										{data.zoneRollup.map((z) => (
-											<tr key={z.zoneId} className="border-b border-zinc-100 dark:border-zinc-800/60">
-												<td className="px-2 py-1.5">{z.zoneName}</td>
-												<td className="px-2 py-1.5 text-right tabular-nums">{z.llmRequests.toLocaleString()}</td>
-												<td className="px-2 py-1.5 text-right tabular-nums">{z.injection.toLocaleString()}</td>
-												<td className="px-2 py-1.5 text-right tabular-nums">{z.pii.toLocaleString()}</td>
-												<td className="px-2 py-1.5 text-right tabular-nums">{z.unsafe.toLocaleString()}</td>
-												<td className="px-2 py-1.5 text-right tabular-nums">{z.custom.toLocaleString()}</td>
-												<td className="px-2 py-1.5 text-xs">
-													{z.error ? <span className="text-red-600 dark:text-red-400">{z.error}</span> : <span className="text-zinc-500">ok</span>}
-												</td>
-											</tr>
-										))}
-									</tbody>
-								</table>
-							</div>
-						</section>
-					</>
+					<span className="text-xs text-zinc-500 dark:text-zinc-400">
+						{data.totalEvents.toLocaleString()} flagged request(s) · {data.window.label}
+					</span>
 				)}
 			</div>
-		</div>
+
+			{/* A zone that failed is reported rather than silently dropped: the aggregate would
+			    otherwise be quietly short by that zone's traffic. */}
+			{data?.zonesWithErrors.length ? (
+				<div className={`flex items-start gap-2 ${ALERT_WARN}`}>
+					<AlertIcon size={16} />
+					<span>
+						{data.zonesWithErrors.length} zone(s) failed to load and are missing from these totals:{" "}
+						{data.zonesWithErrors.map((z) => z.zoneName).join(", ")}
+					</span>
+				</div>
+			) : null}
+
+			{ai.result && <SchemaReadoutPanel schema={ai.result.schema} />}
+
+			{!data && !ai.loading && !ai.error && (
+				<EmptyState title="No AI Security telemetry loaded yet" hint="Pick a window and refresh." />
+			)}
+
+			{data && (
+				<>
+					<StatGrid cols={5}>
+						{data.kpis
+							.filter((k) => ["llm", "injection", "pii", "unsafe", "custom"].includes(k.id))
+							.map((k) => (
+								<KpiCard key={k.id} kpi={k} spark={sparks[k.id]} />
+							))}
+					</StatGrid>
+
+					<div className="grid gap-4 xl:grid-cols-2">
+						<TrendChart
+							title="LLM request volume"
+							series={data.trafficSeries}
+							previous={data.trafficSeriesPrev}
+							summary={trafficSummary}
+						/>
+						<DetectionsChart series={data.detectionSeries} summary={detectionsSummary} />
+					</div>
+
+					<div className="grid gap-4 xl:grid-cols-3">
+						<BarList
+							title="Prompt injection score distribution"
+							items={data.injectionHistogram}
+							emptyText="No scored prompts in this window."
+						/>
+						<BarList title="PII categories in prompts" items={data.piiBreakdown} emptyText="No PII detected." />
+						<BarList title="Unsafe topic categories" items={data.topicBreakdown} emptyText="No unsafe topics detected." />
+					</div>
+
+					<div className="grid gap-4 xl:grid-cols-3">
+						<BarList title="Custom topic categories" items={data.customBreakdown} emptyText="No custom topics matched." />
+						<BarList title="Source IPs" items={data.topIps} emptyText="No flagged requests." />
+						<BarList title="Source countries" items={data.topCountries} emptyText="No flagged requests." />
+					</div>
+
+					<EventsTable events={data.events} truncated={data.truncated} />
+
+					<section className={CARD}>
+						<h2 className={`mb-3 ${SECTION_TITLE}`}>Zone rollup</h2>
+						<div className="overflow-x-auto">
+							<table className="w-full border-collapse text-sm">
+								<thead>
+									<tr className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+										<th className="px-2 py-2 text-left">Zone</th>
+										<th className="px-2 py-2 text-right">LLM requests</th>
+										<th className="px-2 py-2 text-right">Injection</th>
+										<th className="px-2 py-2 text-right">PII</th>
+										<th className="px-2 py-2 text-right">Unsafe</th>
+										<th className="px-2 py-2 text-right">Custom</th>
+										<th className="px-2 py-2 text-left">Status</th>
+									</tr>
+								</thead>
+								<tbody>
+									{data.zoneRollup.map((z) => (
+										<tr key={z.zoneId} className="border-b border-zinc-100 dark:border-zinc-800/60">
+											<td className="px-2 py-1.5">{z.zoneName}</td>
+											<td className="px-2 py-1.5 text-right tabular-nums">{z.llmRequests.toLocaleString()}</td>
+											<td className="px-2 py-1.5 text-right tabular-nums">{z.injection.toLocaleString()}</td>
+											<td className="px-2 py-1.5 text-right tabular-nums">{z.pii.toLocaleString()}</td>
+											<td className="px-2 py-1.5 text-right tabular-nums">{z.unsafe.toLocaleString()}</td>
+											<td className="px-2 py-1.5 text-right tabular-nums">{z.custom.toLocaleString()}</td>
+											<td className="px-2 py-1.5 text-xs">
+												{z.error ? <span className="text-red-600 dark:text-red-400">{z.error}</span> : <span className="text-zinc-500">ok</span>}
+											</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+					</section>
+				</>
+			)}
+		</PageShell>
 	);
 }

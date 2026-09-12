@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY_SM, CARD } from "../../lib/ui";
+import { EmptyState } from "../../components/EmptyState";
+import { StatCard, StatGrid } from "../../components/StatCard";
+import { PageShell } from "../../components/PageShell";
+import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY_SM, CARD, SECTION_TITLE } from "../../lib/ui";
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
@@ -34,16 +37,6 @@ function niceMax(value: number): number {
 	return Math.ceil(value / magnitude) * magnitude;
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-	return (
-		<div className={CARD}>
-			<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
-			<div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-			{sub && <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{sub}</div>}
-		</div>
-	);
-}
-
 /** Stacked success/failure columns with a hover readout, matching the app's other charts. */
 function LoginChart({ series, granularity }: { series: AccessUsagePoint[]; granularity: AccessGranularity }) {
 	const max = niceMax(Math.max(1, ...series.map((p) => p.success + p.failure)));
@@ -61,7 +54,7 @@ function LoginChart({ series, granularity }: { series: AccessUsagePoint[]; granu
 	});
 
 	if (!series.length) {
-		return <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">No logins in this window.</p>;
+		return <EmptyState title="No logins in this window" />;
 	}
 
 	const point = hover === null ? null : series[hover.index];
@@ -122,7 +115,7 @@ function BreakdownCard({ title, rows, emptyText }: { title: string; rows: Access
 	const max = Math.max(1, ...rows.map((r) => r.total));
 	return (
 		<section className={CARD}>
-			<h2 className="mb-3 text-sm font-semibold">{title}</h2>
+			<h2 className={`mb-3 ${SECTION_TITLE}`}>{title}</h2>
 			{rows.length === 0 ? (
 				<p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">{emptyText}</p>
 			) : (
@@ -178,8 +171,8 @@ export function AccessUsagePage({
 	const totals = result?.totals ?? { success: 0, failure: 0, total: 0 };
 
 	return (
-		<div className="h-full overflow-auto p-4 md:p-6">
-			<div className="mb-4 flex flex-wrap items-center gap-3">
+		<PageShell>
+			<div className="flex flex-wrap items-center gap-3">
 				<span className="text-xs text-zinc-500 dark:text-zinc-400">
 					{granularity === "daily" ? "Daily buckets" : "Hourly buckets"}
 				</span>
@@ -202,27 +195,27 @@ export function AccessUsagePage({
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
+				<div role="alert" className={ALERT_ERROR}>
 					{error}
 				</div>
 			)}
 
 			{result?.truncated && (
-				<div role="status" className={`mb-4 ${ALERT_WARN}`}>
+				<div role="status" className={ALERT_WARN}>
 					Results were capped. Shorten the range for full coverage.
 				</div>
 			)}
 
-			<div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-				<StatCard label="Logins" value={formatLogins(totals.total)} sub="sampled by Cloudflare" />
-				<StatCard label="Successful" value={formatLogins(totals.success)} sub={`${successRate(totals)} success rate`} />
-				<StatCard label="Failed" value={formatLogins(totals.failure)} sub={totals.failure === 0 ? "none in this window" : undefined} />
-				<StatCard label="Apps reached" value={String(result?.byApp.length ?? 0)} sub="with at least one login" />
-			</div>
+			<StatGrid cols={4}>
+				<StatCard label="Logins" value={formatLogins(totals.total)} hint="sampled by Cloudflare" />
+				<StatCard label="Successful" value={formatLogins(totals.success)} hint={`${successRate(totals)} success rate`} />
+				<StatCard label="Failed" value={formatLogins(totals.failure)} hint={totals.failure === 0 ? "none in this window" : undefined} />
+				<StatCard label="Apps reached" value={String(result?.byApp.length ?? 0)} hint="with at least one login" />
+			</StatGrid>
 
-			<section className={`${CARD} mb-4`}>
+			<section className={`${CARD}`}>
 				<div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
-					<h2 className="text-sm font-semibold">Logins over time</h2>
+					<h2 className={SECTION_TITLE}>Logins over time</h2>
 					<div className="flex gap-3 text-xs text-zinc-500 dark:text-zinc-400">
 						<span className="inline-flex items-center gap-1.5">
 							<span className="h-2 w-2 rounded-sm" style={{ background: SUCCESS_COLOR }} /> Successful
@@ -245,6 +238,6 @@ export function AccessUsagePage({
 				Counts come from Cloudflare's adaptively sampled login dataset, so they are scaled estimates rather than exact
 				totals. Per-user identities are deliberately not queried.
 			</p>
-		</div>
+		</PageShell>
 	);
 }

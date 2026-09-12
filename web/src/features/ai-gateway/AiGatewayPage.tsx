@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { ALERT_ERROR, BTN_SECONDARY_SM, CARD } from "../../lib/ui";
+import { EmptyNote } from "../../components/EmptyState";
+import { StatCard, StatGrid } from "../../components/StatCard";
+import { PageShell } from "../../components/PageShell";
+import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, SECTION_TITLE } from "../../lib/ui";
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
@@ -49,7 +52,7 @@ function RequestsChart({ series, granularity }: { series: Point[]; granularity: 
 	});
 
 	if (!series.length) {
-		return <p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">No AI Gateway requests in this window.</p>;
+		return <EmptyNote title="No AI Gateway requests in this window" />;
 	}
 	const point = hover === null ? null : series[hover.index];
 
@@ -84,21 +87,11 @@ function RequestsChart({ series, granularity }: { series: Point[]; granularity: 
 	);
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-	return (
-		<div className={CARD}>
-			<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
-			<div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-			{sub && <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{sub}</div>}
-		</div>
-	);
-}
-
 function BreakdownCard({ title, rows, emptyText }: { title: string; rows: BreakdownRow[]; emptyText: string }) {
 	const max = Math.max(1, ...rows.map((r) => r.requests));
 	return (
 		<section className={CARD}>
-			<h2 className="mb-3 text-sm font-semibold">{title}</h2>
+			<h2 className={`mb-3 ${SECTION_TITLE}`}>{title}</h2>
 			{rows.length === 0 ? (
 				<p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">{emptyText}</p>
 			) : (
@@ -158,8 +151,8 @@ export function AiGatewayPage({
 	const datasets = result?.datasets;
 
 	return (
-		<div className="h-full overflow-auto p-4 md:p-6">
-			<div className="mb-4 flex flex-wrap items-center gap-3">
+		<PageShell>
+			<div className="flex flex-wrap items-center gap-3">
 				<span className="text-xs text-zinc-500 dark:text-zinc-400">
 					{granularity === "daily" ? "Daily buckets" : "Hourly buckets"}
 				</span>
@@ -177,14 +170,14 @@ export function AiGatewayPage({
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
+				<div role="alert" className={ALERT_ERROR}>
 					{error}
 				</div>
 			)}
 
-			<div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+			<StatGrid cols={4}>
 				<StatCard label="Requests" value={compact(totals.requests)} />
-				<StatCard label="Tokens" value={compact(totals.tokensIn + totals.tokensOut)} sub={`${compact(totals.tokensIn)} in / ${compact(totals.tokensOut)} out`} />
+				<StatCard label="Tokens" value={compact(totals.tokensIn + totals.tokensOut)} hint={`${compact(totals.tokensIn)} in / ${compact(totals.tokensOut)} out`} />
 				<div>
 					<StatCard label="Error rate" value={formatRate(totals.errorRate)} />
 					{datasets && <UnavailableNote status={datasets.errors} label="Errors" />}
@@ -193,15 +186,15 @@ export function AiGatewayPage({
 					<StatCard label="Cache hit rate" value={formatRate(totals.cacheHitRate)} />
 					{datasets && <UnavailableNote status={datasets.cache} label="Cache" />}
 				</div>
-			</div>
+			</StatGrid>
 
-			<div className="mb-4">
-				<StatCard label="Spend" value={formatCost(totals.cost)} sub="entered rates not required — Cloudflare-reported cost" />
+			<div>
+				<StatCard label="Spend" value={formatCost(totals.cost)} hint="entered rates not required — Cloudflare-reported cost" />
 				{datasets && <UnavailableNote status={datasets.spend} label="Spend" />}
 			</div>
 
-			<section className={`${CARD} mb-4`}>
-				<h2 className="mb-3 text-sm font-semibold">Requests over time</h2>
+			<section className={`${CARD}`}>
+				<h2 className={`mb-3 ${SECTION_TITLE}`}>Requests over time</h2>
 				<RequestsChart series={result?.series ?? []} granularity={result?.granularity ?? granularity} />
 			</section>
 
@@ -215,6 +208,6 @@ export function AiGatewayPage({
 				Cloudflare schema — see the note at the top of src/lib/ai-gateway.ts. A dataset that fails to
 				load says so above rather than showing as quiet.
 			</p>
-		</div>
+		</PageShell>
 	);
 }

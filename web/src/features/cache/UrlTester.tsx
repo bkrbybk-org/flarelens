@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CARD } from "../../lib/ui";
+import { CARD, SECTION_TITLE } from "../../lib/ui";
 import { compileTriState } from "../../lib/expr";
 import type { CacheRule } from "./types";
 
@@ -71,7 +71,7 @@ export function UrlTester({ rules, hosts, onResults }: UrlTesterProps) {
 
 	return (
 		<section className={CARD}>
-			<h2 className="mb-2 text-sm font-semibold">URL tester</h2>
+			<h2 className={`mb-3 ${SECTION_TITLE}`}>URL tester</h2>
 			<p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
 				Enter a path or full URL to see which rules match — the last matching active rule wins. Evaluated locally, nothing is sent to Cloudflare.
 			</p>

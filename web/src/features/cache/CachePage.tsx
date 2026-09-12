@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { ALERT_ERROR, ALERT_WARN, CARD } from "../../lib/ui";
+import { EmptyState } from "../../components/EmptyState";
+import { StatCard, StatGrid } from "../../components/StatCard";
+import { PageShell } from "../../components/PageShell";
+import { ALERT_ERROR, ALERT_WARN, CARD, SECTION_TITLE } from "../../lib/ui";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { AlertIcon, AppsIcon, GlobeIcon, KeyIcon, RefreshIcon } from "../../components/Icons";
@@ -90,13 +93,11 @@ export function CachePage({ session, zoneId, timeRange, onAuthError }: CachePage
 	if (!zoneId) {
 		return (
 			<div className="flex h-full items-center justify-center p-6">
-				<div className="rounded-2xl border border-zinc-200 bg-white px-8 py-10 text-center dark:border-zinc-800 dark:bg-zinc-900">
-					<GlobeIcon size={28} className="mx-auto mb-3 text-zinc-500 dark:text-zinc-400" />
-					<h2 className="text-base font-semibold">Select a zone</h2>
-					<p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-						Cache rules are zone-scoped — pick a zone from the selector in the top bar.
-					</p>
-				</div>
+				<EmptyState
+					icon={GlobeIcon}
+					title="Select a zone"
+					hint="Cache rules are zone-scoped — pick a zone from the selector in the top bar."
+				/>
 			</div>
 		);
 	}
@@ -111,176 +112,162 @@ export function CachePage({ session, zoneId, timeRange, onAuthError }: CachePage
 		: [];
 
 	return (
-		<div className="h-full overflow-y-auto">
-			<div className="space-y-4 p-4 md:p-6">
-				{cache.progress.running && <ProgressBar percent={cache.progress.percent} />}
+		<PageShell>
+			{cache.progress.running && <ProgressBar percent={cache.progress.percent} />}
 
-				{cache.error && (
-					<div role="alert" className={ALERT_ERROR}>
-						{cache.error}
-					</div>
-				)}
-
-				{/* Controls */}
-				<div className="flex flex-wrap items-center gap-2">
-					{/* Cloudflare's cache analytics only answers for 24h, 7d or 30d, so the shared
-					    window snaps to one of those and the page says which. */}
-					<span className="rounded-lg border border-zinc-200 px-2.5 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-						{RANGE_OPTIONS.find(([value]) => value === rangeHours)?.[1] ?? `Last ${rangeHours}h`}
-					</span>
-					<button
-						type="button"
-						onClick={() => load(session.token, zoneId, rangeHours)}
-						disabled={cache.loading}
-						className="flex items-center gap-2 rounded-lg bg-cf px-3 py-2 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
-					>
-						<RefreshIcon size={14} className={cache.loading ? "animate-spin" : undefined} />
-						Refresh
-					</button>
-					{data && (
-						<span className="text-xs text-zinc-500 dark:text-zinc-400">
-							Zone: <span className="font-medium">{data.zoneName}</span>
-						</span>
-					)}
+			{cache.error && (
+				<div role="alert" className={ALERT_ERROR}>
+					{cache.error}
 				</div>
+			)}
 
+			{/* Controls */}
+			<div className="flex flex-wrap items-center gap-2">
+				{/* Cloudflare's cache analytics only answers for 24h, 7d or 30d, so the shared
+				    window snaps to one of those and the page says which. */}
+				<span className="rounded-lg border border-zinc-200 px-2.5 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+					{RANGE_OPTIONS.find(([value]) => value === rangeHours)?.[1] ?? `Last ${rangeHours}h`}
+				</span>
+				<button
+					type="button"
+					onClick={() => load(session.token, zoneId, rangeHours)}
+					disabled={cache.loading}
+					className="flex items-center gap-2 rounded-lg bg-cf px-3 py-2 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
+				>
+					<RefreshIcon size={14} className={cache.loading ? "animate-spin" : undefined} />
+					Refresh
+				</button>
 				{data && (
-					<>
-						{data.analyticsSource !== "path-graphql" && (
-							<div className={`flex items-center gap-2 ${ALERT_WARN}`}>
-								<AlertIcon size={16} className="shrink-0" />
-								<span>
-									{data.analyticsSource === "mock"
-										? `Showing simulated data — real analytics unavailable: ${data.analyticsReason}.`
-										: `No traffic data: ${data.analyticsReason}.`}
-								</span>
-							</div>
-						)}
-
-						{/* Stats + health */}
-						<div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-							{statCards.map(({ label, value, icon: Icon, cls }) => (
-								<div key={label} className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
-									<span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${cls}`}>
-										<Icon size={18} />
-									</span>
-									<div className="min-w-0 leading-tight">
-										<div className="text-xl font-semibold tabular-nums">{value}</div>
-										<div className="truncate text-xs text-zinc-500 dark:text-zinc-400">{label}</div>
-									</div>
-								</div>
-							))}
-							{data.health && (
-								<div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
-									<span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg font-bold ${GRADE_COLORS[data.health.grade] || "bg-zinc-500/10 text-zinc-500"}`}>
-										{data.health.grade}
-									</span>
-									<div className="min-w-0 leading-tight">
-										<div className="text-xl font-semibold tabular-nums">{data.health.ratio.toFixed(1)}%</div>
-										<div className="truncate text-xs text-zinc-500 dark:text-zinc-400">Cache health</div>
-									</div>
-								</div>
-							)}
-						</div>
-
-						{data.zoneTotals && (
-							<p className="text-xs text-zinc-500 dark:text-zinc-400">
-								Sampled analytics cover {data.zoneTotals.coveragePct.toFixed(1)}% of {data.zoneTotals.requests.toLocaleString()} zone requests in this window.
-							</p>
-						)}
-
-						{data.versioning.enabled && (
-							<div className={CARD}>
-								<h2 className="mb-2 text-sm font-semibold">Version Management</h2>
-								<div className="flex flex-wrap gap-2 text-xs">
-									{data.versioning.environments.map((env) => (
-										<span key={env.name} className="rounded-md bg-zinc-200/70 px-2 py-1 font-medium text-zinc-700 dark:bg-zinc-700/50 dark:text-zinc-300">
-											{env.name}{env.version !== null ? ` → v${env.version}` : ""}
-										</span>
-									))}
-								</div>
-								{data.versioning.versionZones.length > 0 && (
-									<p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-										{data.versioning.versionZones.length} sibling version zone{data.versioning.versionZones.length === 1 ? "" : "s"} share this zone name — switch zones in the top bar to inspect a specific version.
-									</p>
-								)}
-							</div>
-						)}
-
-						{data.timeseries && data.timeseries.length > 0 && (
-							<TrendChart buckets={data.timeseries} rangeHours={data.rangeHours} />
-						)}
-
-						{data.insights.length > 0 && (
-							<div className={CARD}>
-								<h2 className="mb-2 text-sm font-semibold">Insights</h2>
-								<ul className="space-y-1.5">
-									{data.insights.map((insight, i) => (
-										<li key={i} className="flex items-start gap-2 text-sm">
-											<span className={insight.severity === "warn" ? "mt-0.5 shrink-0 text-amber-500" : "mt-0.5 shrink-0 text-sky-500"}>
-												<AlertIcon size={14} />
-											</span>
-											<span className="text-zinc-700 dark:text-zinc-300">{insight.message}</span>
-										</li>
-									))}
-								</ul>
-							</div>
-						)}
-
-						{data.rules.length > 0 && (
-							<UrlTester
-								rules={data.rules}
-								hosts={data.hosts}
-								onResults={(results) => setTestRun(results ? { key: scopeKey, results } : null)}
-							/>
-						)}
-
-						<div className="space-y-3">
-							{data.rules.length === 0 ? (
-								<p className="rounded-xl border border-zinc-200 bg-white px-4 py-12 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-									This zone has no cache rules configured.
-								</p>
-							) : (
-								data.rules.map((rule, i) => (
-									<RuleCard
-										key={rule.id || i}
-										rule={rule}
-										index={i}
-										highlight={
-											!testResults
-												? null
-												: testResults.winnerId === rule.id
-													? "winner"
-													: testResults.outcomes[rule.id] === "matched"
-														? "matched"
-														: testResults.outcomes[rule.id] === "unknown"
-															? "unknown"
-															: null
-										}
-									/>
-								))
-							)}
-						</div>
-
-						{data.unattributed && (
-							<div className="rounded-xl border border-dashed border-zinc-300 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
-								<div className="mb-2 flex items-center gap-2">
-									<span className="font-medium">Unattributed traffic</span>
-									<span className="text-xs text-zinc-500 dark:text-zinc-400">
-										{data.unattributed.mixed
-											? "no path-evaluable rule matched (includes traffic from unattributable rules)"
-											: "matched no cache rule — zone default behavior applies"}
-									</span>
-								</div>
-								<div className="space-y-1.5">
-									<RatioBar analytics={data.unattributed.analytics} />
-									<CountsLine analytics={data.unattributed.analytics} />
-								</div>
-							</div>
-						)}
-					</>
+					<span className="text-xs text-zinc-500 dark:text-zinc-400">
+						Zone: <span className="font-medium">{data.zoneName}</span>
+					</span>
 				)}
 			</div>
-		</div>
+
+			{data && (
+				<>
+					{data.analyticsSource !== "path-graphql" && (
+						<div className={`flex items-center gap-2 ${ALERT_WARN}`}>
+							<AlertIcon size={16} className="shrink-0" />
+							<span>
+								{data.analyticsSource === "mock"
+									? `Showing simulated data — real analytics unavailable: ${data.analyticsReason}.`
+									: `No traffic data: ${data.analyticsReason}.`}
+							</span>
+						</div>
+					)}
+
+					{/* Stats + health */}
+					<StatGrid cols={5}>
+						{statCards.map(({ label, value, icon, cls }) => (
+							<StatCard key={label} label={label} value={value} icon={icon} iconClass={cls} />
+						))}
+						{data.health && (
+							<StatCard
+								label="Cache health"
+								value={`${data.health.ratio.toFixed(1)}%`}
+								// The grade is a letter, not a glyph, so it takes the icon slot directly.
+								icon={() => <span className="text-sm font-bold">{data.health?.grade}</span>}
+								iconClass={GRADE_COLORS[data.health.grade] || "bg-zinc-500/10 text-zinc-500 dark:text-zinc-400"}
+							/>
+						)}
+					</StatGrid>
+
+					{data.zoneTotals && (
+						<p className="text-xs text-zinc-500 dark:text-zinc-400">
+							Sampled analytics cover {data.zoneTotals.coveragePct.toFixed(1)}% of {data.zoneTotals.requests.toLocaleString()} zone requests in this window.
+						</p>
+					)}
+
+					{data.versioning.enabled && (
+						<div className={CARD}>
+							<h2 className={`mb-3 ${SECTION_TITLE}`}>Version Management</h2>
+							<div className="flex flex-wrap gap-2 text-xs">
+								{data.versioning.environments.map((env) => (
+									<span key={env.name} className="rounded-md bg-zinc-200/70 px-2 py-1 font-medium text-zinc-700 dark:bg-zinc-700/50 dark:text-zinc-300">
+										{env.name}{env.version !== null ? ` → v${env.version}` : ""}
+									</span>
+								))}
+							</div>
+							{data.versioning.versionZones.length > 0 && (
+								<p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+									{data.versioning.versionZones.length} sibling version zone{data.versioning.versionZones.length === 1 ? "" : "s"} share this zone name — switch zones in the top bar to inspect a specific version.
+								</p>
+							)}
+						</div>
+					)}
+
+					{data.timeseries && data.timeseries.length > 0 && (
+						<TrendChart buckets={data.timeseries} rangeHours={data.rangeHours} />
+					)}
+
+					{data.insights.length > 0 && (
+						<div className={CARD}>
+							<h2 className={`mb-3 ${SECTION_TITLE}`}>Insights</h2>
+							<ul className="space-y-1.5">
+								{data.insights.map((insight, i) => (
+									<li key={i} className="flex items-start gap-2 text-sm">
+										<span className={insight.severity === "warn" ? "mt-0.5 shrink-0 text-amber-500" : "mt-0.5 shrink-0 text-sky-500"}>
+											<AlertIcon size={14} />
+										</span>
+										<span className="text-zinc-700 dark:text-zinc-300">{insight.message}</span>
+									</li>
+								))}
+							</ul>
+						</div>
+					)}
+
+					{data.rules.length > 0 && (
+						<UrlTester
+							rules={data.rules}
+							hosts={data.hosts}
+							onResults={(results) => setTestRun(results ? { key: scopeKey, results } : null)}
+						/>
+					)}
+
+					<div className="space-y-3">
+						{data.rules.length === 0 ? (
+							<EmptyState title="No cache rules" hint="This zone has none configured." />
+						) : (
+							data.rules.map((rule, i) => (
+								<RuleCard
+									key={rule.id || i}
+									rule={rule}
+									index={i}
+									highlight={
+										!testResults
+											? null
+											: testResults.winnerId === rule.id
+												? "winner"
+												: testResults.outcomes[rule.id] === "matched"
+													? "matched"
+													: testResults.outcomes[rule.id] === "unknown"
+														? "unknown"
+														: null
+									}
+								/>
+							))
+						)}
+					</div>
+
+					{data.unattributed && (
+						<div className="rounded-xl border border-dashed border-zinc-300 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
+							<div className="mb-2 flex items-center gap-2">
+								<span className="font-medium">Unattributed traffic</span>
+								<span className="text-xs text-zinc-500 dark:text-zinc-400">
+									{data.unattributed.mixed
+										? "no path-evaluable rule matched (includes traffic from unattributable rules)"
+										: "matched no cache rule — zone default behavior applies"}
+								</span>
+							</div>
+							<div className="space-y-1.5">
+								<RatioBar analytics={data.unattributed.analytics} />
+								<CountsLine analytics={data.unattributed.analytics} />
+							</div>
+						</div>
+					)}
+				</>
+			)}
+		</PageShell>
 	);
 }

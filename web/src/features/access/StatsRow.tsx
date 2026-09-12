@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { CfApp } from "../../types";
 import { AlertIcon, AppsIcon, KeyIcon, UsersIcon } from "../../components/Icons";
+import { StatCard, StatGrid } from "../../components/StatCard";
 
 interface StatsRowProps {
 	apps: CfApp[];
@@ -65,19 +66,10 @@ export function StatsRow({ apps, idpCount }: StatsRowProps) {
 	];
 
 	return (
-		<div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-			{cards.map(({ label, value, icon: Icon, detail, iconClass }) => (
-				<div key={label} className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
-					<span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
-						<Icon size={18} />
-					</span>
-					<div className="min-w-0 leading-tight">
-						<div className="text-xl font-semibold tabular-nums">{value}</div>
-						<div className="truncate text-xs text-zinc-500 dark:text-zinc-400">{label}</div>
-						{detail}
-					</div>
-				</div>
+		<StatGrid cols={4}>
+			{cards.map(({ label, value, icon, detail, iconClass }) => (
+				<StatCard key={label} label={label} value={value} icon={icon} iconClass={iconClass} detail={detail} />
 			))}
-		</div>
+		</StatGrid>
 	);
 }

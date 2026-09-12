@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, BTN_SECONDARY_SM, CARD, SEARCH_INPUT } from "../../lib/ui";
+import { EmptyNote } from "../../components/EmptyState";
+import { StatCard, StatGrid } from "../../components/StatCard";
+import { PageShell } from "../../components/PageShell";
+import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, BTN_SECONDARY_SM, CARD, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon, SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
@@ -129,7 +132,7 @@ const TLS_FINDING_TONE: Record<TlsFindingSeverity, string> = {
 function TlsPostureSection({ zones }: { zones: PqcZoneSummary[] }) {
 	return (
 		<section className={`${CARD} mb-4`}>
-			<h2 className="mb-1 text-sm font-semibold">TLS posture</h2>
+			<h2 className={`mb-3 ${SECTION_TITLE}`}>TLS posture</h2>
 			<p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
 				Configuration hygiene, not key agreement — none of these move a verdict above. They are real gaps on their
 				own terms: a weak TLS floor, an unvalidated origin certificate, or HTTP left reachable.
@@ -174,7 +177,7 @@ function AdoptionPanel({ adoption }: { adoption: AdoptionResult }) {
 	if (!adoption.available) {
 		return (
 			<section className={`${CARD} mb-4`}>
-				<h2 className="mb-2 text-sm font-semibold">Measured adoption — not available on this account</h2>
+				<h2 className={`mb-3 ${SECTION_TITLE}`}>Measured adoption — not available on this account</h2>
 				<p className="text-sm text-zinc-600 dark:text-zinc-300">{adoption.reason}</p>
 				{adoption.candidatesSeen.length > 0 && (
 					<p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
@@ -193,7 +196,7 @@ function AdoptionPanel({ adoption }: { adoption: AdoptionResult }) {
 	return (
 		<section className={`${CARD} mb-4`}>
 			<div className="mb-3 flex flex-wrap items-baseline gap-2">
-				<h2 className="text-sm font-semibold">Measured adoption</h2>
+				<h2 className={SECTION_TITLE}>Measured adoption</h2>
 				<span className="text-xs text-zinc-500 dark:text-zinc-400">
 					last 24h · <span className="font-mono">{adoption.dimension}</span>
 				</span>
@@ -248,16 +251,6 @@ function AdoptionPanel({ adoption }: { adoption: AdoptionResult }) {
 				</div>
 			)}
 		</section>
-	);
-}
-
-function Kpi({ label, value, hint, tone }: { label: string; value: number; hint: string; tone?: string }) {
-	return (
-		<div className={CARD}>
-			<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
-			<div className={`mt-1 text-2xl font-semibold tabular-nums ${tone ?? ""}`}>{value.toLocaleString()}</div>
-			<div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{hint}</div>
-		</div>
 	);
 }
 
@@ -320,8 +313,8 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 	}
 
 	return (
-		<div className="h-full overflow-auto p-4 md:p-6">
-			<div className="mb-4 flex flex-wrap items-center gap-2">
+		<PageShell>
+			<div className="flex flex-wrap items-center gap-2">
 				<div className="relative min-w-0 flex-1 basis-72">
 					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 					<input
@@ -374,34 +367,34 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
+				<div role="alert" className={ALERT_ERROR}>
 					{error}
 				</div>
 			)}
 
 			{result?.errors.map((e) => (
-				<div key={e.source} role="status" className={`mb-4 ${ALERT_WARN}`}>
+				<div key={e.source} role="status" className={ALERT_WARN}>
 					{e.source}: {e.message}
 				</div>
 			))}
 
-			<div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-6">
-				<Kpi label="Hostnames" value={totals.hostnames} hint="A, AAAA and CNAME records" />
-				<Kpi label="Not ready" value={totals.notReady} hint="DNS-only, TLS 1.3 off, or plaintext origin" tone={totals.notReady ? "text-red-600 dark:text-red-400" : undefined} />
-				<Kpi label="Unknown" value={totals.unknown} hint="a setting could not be read" tone={totals.unknown ? "text-amber-700 dark:text-amber-400" : undefined} />
-				<Kpi label="Eligible" value={totals.eligible} hint="origin leg may negotiate PQC" />
-				<Kpi label="Ready" value={totals.ready} hint="both legs post-quantum" tone={totals.ready ? "text-emerald-600 dark:text-emerald-400" : undefined} />
-				<Kpi
+			<StatGrid cols={6}>
+				<StatCard label="Hostnames" value={totals.hostnames} hint="A, AAAA and CNAME records" />
+				<StatCard label="Not ready" value={totals.notReady} hint="DNS-only, TLS 1.3 off, or plaintext origin" tone={totals.notReady ? "text-red-600 dark:text-red-400" : undefined} />
+				<StatCard label="Unknown" value={totals.unknown} hint="a setting could not be read" tone={totals.unknown ? "text-amber-700 dark:text-amber-400" : undefined} />
+				<StatCard label="Eligible" value={totals.eligible} hint="origin leg may negotiate PQC" />
+				<StatCard label="Ready" value={totals.ready} hint="both legs post-quantum" tone={totals.ready ? "text-emerald-600 dark:text-emerald-400" : undefined} />
+				<StatCard
 					label="TLS findings"
 					value={totals.tlsFindings}
 					hint="hygiene, not key agreement — never moves a verdict"
 					tone={totals.tlsFindings ? "text-amber-700 dark:text-amber-400" : undefined}
 				/>
-			</div>
+			</StatGrid>
 
 			{/* The distinction the whole page turns on. Without it "Eligible" reads as a pass and
 			    the report overstates coverage. */}
-			<div className={`${CARD} mb-4 text-sm text-zinc-600 dark:text-zinc-300`}>
+			<div className={`${CARD} text-sm text-zinc-600 dark:text-zinc-300`}>
 				<p>
 					<strong>Ready</strong> means both legs are post-quantum: the visitor connection is offered X25519MLKEM768,
 					and the origin is reached over a Cloudflare Tunnel or is Cloudflare itself.{" "}
@@ -416,8 +409,8 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 
 			{result?.adoption && <AdoptionPanel adoption={result.adoption} />}
 
-			<section className={`${CARD} mb-4`}>
-				<h2 className="mb-3 text-sm font-semibold">Zones</h2>
+			<section className={`${CARD}`}>
+				<h2 className={`mb-3 ${SECTION_TITLE}`}>Zones</h2>
 				{/* Cipher suites are a separate axis from key agreement, and conflating them would
 				    misread the page: a zone can offer X25519MLKEM768 and still allow a suite with
 				    no forward secrecy, which is the same harvest-now exposure by another route. */}
@@ -470,11 +463,9 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 			<TlsPostureSection zones={result?.zones ?? []} />
 
 			<section className={CARD}>
-				<h2 className="mb-3 text-sm font-semibold">Hostnames</h2>
+				<h2 className={`mb-3 ${SECTION_TITLE}`}>Hostnames</h2>
 				{rows.length === 0 ? (
-					<p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">
-						{loading ? "Loading…" : "Nothing to show for this filter."}
-					</p>
+					<EmptyNote title="No matching hostnames" loading={loading} />
 				) : (
 					<ul className="space-y-2">
 						{rows.map((row) => (
@@ -503,6 +494,6 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 					</ul>
 				)}
 			</section>
-		</div>
+		</PageShell>
 	);
 }

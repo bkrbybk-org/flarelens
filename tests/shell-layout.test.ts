@@ -44,22 +44,40 @@ describe("app shell height chain", () => {
 
 	it("gives every section a scroll container of its own", () => {
 		// Each page is the thing that scrolls; if one stopped doing this, its content would be
-		// clipped by <main> with no way to reach the rest.
+		// clipped by <main> with no way to reach the rest. The container used to be copied into
+		// every page, in two spellings; it lives in PageShell now, so this asserts two things:
+		// that the shell still carries it, and that no section has wandered off and rolled its own.
+		const shell = readFileSync(join(import.meta.dirname, "..", "web/src/components/PageShell.tsx"), "utf8");
+		expect(shell).toMatch(/className="h-full overflow-auto"/);
+
 		const pages = [
 			"features/access-usage/AccessUsagePage.tsx",
+			"features/ai-gateway/AiGatewayPage.tsx",
 			"features/ai-security/AiSecurityPage.tsx",
 			"features/cache/CachePage.tsx",
 			"features/cost/CostPage.tsx",
 			"features/findings/FindingsPage.tsx",
 			"features/gateway/GatewayPage.tsx",
 			"features/pqc/PqcPage.tsx",
+			"features/request/RequestTracePage.tsx",
+			"features/tunnels/TunnelMapPage.tsx",
 			"features/waf/WafPage.tsx",
 			"features/workers/WorkersPage.tsx",
 			"features/workers-ai/WorkersAiPage.tsx",
+			"features/access/GroupsPage.tsx",
 		];
 		for (const page of pages) {
 			const source = readFileSync(join(import.meta.dirname, "..", "web/src", page), "utf8");
-			expect(source, page).toMatch(/className="h-full overflow-(y-)?auto/);
+			expect(source, page).toContain("<PageShell");
+			expect(source, page).not.toMatch(/className="h-full overflow-(y-)?auto/);
 		}
+	});
+
+	it("leaves the one section that is a full-height table alone", () => {
+		// Applications is the exception on purpose: the table owns the scrolling so its header can
+		// stay put, and wrapping it in PageShell would give the page a second scroller. Pinned so
+		// the exception stays deliberate rather than becoming drift again.
+		const dashboard = readFileSync(join(import.meta.dirname, "..", "web/src/features/access/Dashboard.tsx"), "utf8");
+		expect(dashboard).toMatch(/className="flex h-full flex-col gap-4 p-4 md:p-6"/);
 	});
 });

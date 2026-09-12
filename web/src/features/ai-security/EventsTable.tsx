@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useState } from "react";
-import { ALERT_WARN, BTN_SECONDARY, CARD } from "../../lib/ui";
+import { EmptyNote } from "../../components/EmptyState";
+import { ALERT_WARN, BTN_SECONDARY, CARD, SECTION_TITLE } from "../../lib/ui";
 import {
 	flexRender,
 	getCoreRowModel,
@@ -191,7 +192,7 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 	return (
 		<section className={CARD}>
 			<div className="mb-3 flex flex-wrap items-center gap-2">
-				<h2 className="text-sm font-semibold">Flagged requests</h2>
+				<h2 className={SECTION_TITLE}>Flagged requests</h2>
 				<div className="relative ml-auto">
 					<SearchIcon size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 					<input
@@ -259,7 +260,7 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 			)}
 
 			{!events.length ? (
-				<p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">No flagged requests in this window.</p>
+				<EmptyNote title="No flagged requests in this window" />
 			) : (
 				<div className="overflow-x-auto">
 					<table className="w-full min-w-[1240px] border-collapse text-sm">

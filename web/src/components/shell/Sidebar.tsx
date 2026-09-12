@@ -1,4 +1,5 @@
 import type { Route } from "../../hooks/useRoute";
+import { SECTION_TITLE } from "../../lib/ui";
 import type { CfAccount } from "../../types";
 import {
 	AlertIcon,
@@ -120,7 +121,7 @@ function SidebarContent({
 				</span>
 				{!collapsed && (
 					<div className="leading-tight">
-						<div className="text-sm font-semibold">Flarelens</div>
+						<div className={SECTION_TITLE}>Flarelens</div>
 						<div className="text-xs text-zinc-500 dark:text-zinc-400">for Cloudflare</div>
 					</div>
 				)}

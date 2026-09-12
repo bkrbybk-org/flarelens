@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, CARD_HEADER } from "../../lib/ui";
+import { PageShell } from "../../components/PageShell";
+import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, CARD_HEADER, SECTION_TITLE } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
 import type { Prefs } from "../../hooks/usePrefs";
@@ -93,8 +94,8 @@ export function CostPage({
 	);
 
 	return (
-		<div className="h-full overflow-auto p-4 md:p-6">
-			<div className="mb-4 flex flex-wrap items-center gap-3">
+		<PageShell>
+			<div className="flex flex-wrap items-center gap-3">
 				<span className="text-xs text-zinc-500 dark:text-zinc-400">Billable units for the selected window</span>
 				<button
 					type="button"
@@ -110,12 +111,12 @@ export function CostPage({
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
+				<div role="alert" className={ALERT_ERROR}>
 					{error}
 				</div>
 			)}
 
-			<section className={`${CARD} mb-4 p-0`}>
+			<section className={`${CARD} p-0`}>
 				<h2 className={CARD_HEADER}>Usage</h2>
 				<table className="w-full text-sm">
 					<thead className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
@@ -158,7 +159,7 @@ export function CostPage({
 			</section>
 
 			<section className={CARD}>
-				<h2 className="mb-1 text-sm font-semibold">Your rates</h2>
+				<h2 className={`mb-3 ${SECTION_TITLE}`}>Your rates</h2>
 				<p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
 					Stored in this browser only. No prices ship with the app — Cloudflare's change and differ per contract,
 					so an estimate here is only ever as good as the numbers you put in. Currency is whatever you enter.
@@ -174,6 +175,6 @@ export function CostPage({
 				Quantities come from the same sampled Cloudflare datasets as the Workers and Workers AI sections, so they are
 				scaled estimates, not billing records. Always reconcile against your Cloudflare invoice.
 			</p>
-		</div>
+		</PageShell>
 	);
 }

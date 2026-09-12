@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { PageShell } from "../../components/PageShell";
+import { StatCard, StatGrid } from "../../components/StatCard";
 import { ALERT_ERROR, ALERT_WARN, SEARCH_INPUT } from "../../lib/ui";
 import { useHashSyncedState } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
@@ -88,108 +90,98 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 	];
 
 	return (
-		<div className="h-full overflow-y-auto">
-			<div className="space-y-4 p-4 md:p-6">
-				{waf.progress.running && <ProgressBar percent={waf.progress.percent} />}
+		<PageShell>
+			{waf.progress.running && <ProgressBar percent={waf.progress.percent} />}
 
-				{waf.error && (
-					<div role="alert" className={ALERT_ERROR}>
-						{waf.error}
-					</div>
-				)}
-
-				{waf.diagnostics?.truncated && (
-					<div className={`flex items-center gap-2 ${ALERT_WARN}`}>
-						<AlertIcon size={16} />
-						Event window truncated at ~{EVENT_LIMIT.toLocaleString()} rows — narrow the lookback for complete data.
-					</div>
-				)}
-
-				{/* Controls */}
-				<div className="flex flex-wrap items-center gap-2">
-					{/* Lookback follows the shared window in the top bar. */}
-					<span className="rounded-lg border border-zinc-200 px-2.5 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-						{LOOKBACK_OPTIONS.find(([value]) => value === minutes)?.[1] ?? `Last ${minutes} min`}
-					</span>
-					<select value={autoRefresh} onChange={(e) => setAutoRefresh(Number(e.target.value))} aria-label="Auto refresh" className={selectCls}>
-						{AUTO_REFRESH_OPTIONS.map(([value, label]) => <option key={value} value={value}>Auto: {label}</option>)}
-					</select>
-					<button
-						type="button"
-						onClick={() => load(session.token, session.accountId, zoneId, minutes).then(() => setLastRefreshed(new Date().toISOString()))}
-						disabled={waf.loading}
-						className="flex items-center gap-2 rounded-lg bg-cf px-3 py-2 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
-					>
-						<RefreshIcon size={14} className={waf.loading ? "animate-spin" : undefined} />
-						Refresh
-					</button>
-					{lastRefreshed && (
-						<span className="text-xs text-zinc-500 dark:text-zinc-400">Updated {relativeTime(lastRefreshed)}</span>
-					)}
+			{waf.error && (
+				<div role="alert" className={ALERT_ERROR}>
+					{waf.error}
 				</div>
+			)}
 
-				{/* KPI cards */}
-				<div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-					{kpiCards.map(({ label, value, icon: Icon, cls }) => (
-						<div key={label} className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
-							<span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${cls}`}>
-								<Icon size={18} />
-							</span>
-							<div className="min-w-0 leading-tight">
-								<div className="text-xl font-semibold tabular-nums">{value.toLocaleString()}</div>
-								<div className="truncate text-xs text-zinc-500 dark:text-zinc-400">{label}</div>
-							</div>
-						</div>
-					))}
+			{waf.diagnostics?.truncated && (
+				<div className={`flex items-center gap-2 ${ALERT_WARN}`}>
+					<AlertIcon size={16} />
+					Event window truncated at ~{EVENT_LIMIT.toLocaleString()} rows — narrow the lookback for complete data.
 				</div>
+			)}
 
-				{/* Tabs */}
-				<div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800" role="tablist">
-					{([["overview", "Overview"], ["rules", "Rules Review"]] as [Tab, string][]).map(([id, label]) => (
-						<button
-							key={id}
-							type="button"
-							role="tab"
-							aria-selected={tab === id}
-							onClick={() => setTab(id)}
-							className={
-								tab === id
-									? "border-b-2 border-cf px-4 py-2 text-sm font-medium text-cf"
-									: "border-b-2 border-transparent px-4 py-2 text-sm text-zinc-500 transition hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-							}
-						>
-							{label}
-						</button>
-					))}
-				</div>
-
-				{tab === "overview" ? (
-					<>
-						<EventGraph events={waf.events} window={waf.window} />
-						<div className="relative">
-							<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
-							<input
-								type="search"
-								value={globalSearch}
-								onChange={(e) => setGlobalSearch(e.target.value)}
-								placeholder="Search rulesets, rules, hosts…"
-								className={SEARCH_INPUT}
-							/>
-						</div>
-						<RulesetTable rows={rulesetRows} globalSearch={globalSearch} window={waf.window} onSelectRule={setDrawerRule} />
-					</>
-				) : (
-					<RulesReview events={waf.events} ruleMeta={waf.ruleMeta} window={waf.window} onSelectRule={setDrawerRule} />
+			{/* Controls */}
+			<div className="flex flex-wrap items-center gap-2">
+				{/* Lookback follows the shared window in the top bar. */}
+				<span className="rounded-lg border border-zinc-200 px-2.5 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+					{LOOKBACK_OPTIONS.find(([value]) => value === minutes)?.[1] ?? `Last ${minutes} min`}
+				</span>
+				<select value={autoRefresh} onChange={(e) => setAutoRefresh(Number(e.target.value))} aria-label="Auto refresh" className={selectCls}>
+					{AUTO_REFRESH_OPTIONS.map(([value, label]) => <option key={value} value={value}>Auto: {label}</option>)}
+				</select>
+				<button
+					type="button"
+					onClick={() => load(session.token, session.accountId, zoneId, minutes).then(() => setLastRefreshed(new Date().toISOString()))}
+					disabled={waf.loading}
+					className="flex items-center gap-2 rounded-lg bg-cf px-3 py-2 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
+				>
+					<RefreshIcon size={14} className={waf.loading ? "animate-spin" : undefined} />
+					Refresh
+				</button>
+				{lastRefreshed && (
+					<span className="text-xs text-zinc-500 dark:text-zinc-400">Updated {relativeTime(lastRefreshed)}</span>
 				)}
-
-				<RuleDrawer
-					rule={drawerRule}
-					events={waf.events}
-					ruleMeta={waf.ruleMeta}
-					window={waf.window}
-					onClose={() => setDrawerRule(null)}
-				/>
 			</div>
-		</div>
+
+			{/* KPI cards */}
+			<StatGrid cols={5}>
+				{kpiCards.map(({ label, value, icon, cls }) => (
+					<StatCard key={label} label={label} value={value} icon={icon} iconClass={cls} />
+				))}
+			</StatGrid>
+
+			{/* Tabs */}
+			<div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800" role="tablist">
+				{([["overview", "Overview"], ["rules", "Rules Review"]] as [Tab, string][]).map(([id, label]) => (
+					<button
+						key={id}
+						type="button"
+						role="tab"
+						aria-selected={tab === id}
+						onClick={() => setTab(id)}
+						className={
+							tab === id
+								? "border-b-2 border-cf px-4 py-2 text-sm font-medium text-cf"
+								: "border-b-2 border-transparent px-4 py-2 text-sm text-zinc-500 transition hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+						}
+					>
+						{label}
+					</button>
+				))}
+			</div>
+
+			{tab === "overview" ? (
+				<>
+					<EventGraph events={waf.events} window={waf.window} />
+					<div className="relative">
+						<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
+						<input
+							type="search"
+							value={globalSearch}
+							onChange={(e) => setGlobalSearch(e.target.value)}
+							placeholder="Search rulesets, rules, hosts…"
+							className={SEARCH_INPUT}
+						/>
+					</div>
+					<RulesetTable rows={rulesetRows} globalSearch={globalSearch} window={waf.window} onSelectRule={setDrawerRule} />
+				</>
+			) : (
+				<RulesReview events={waf.events} ruleMeta={waf.ruleMeta} window={waf.window} onSelectRule={setDrawerRule} />
+			)}
+
+			<RuleDrawer
+				rule={drawerRule}
+				events={waf.events}
+				ruleMeta={waf.ruleMeta}
+				window={waf.window}
+				onClose={() => setDrawerRule(null)}
+			/>
+		</PageShell>
 	);
 }

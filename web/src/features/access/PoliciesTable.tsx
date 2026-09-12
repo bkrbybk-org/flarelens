@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { EmptyRow } from "../../components/EmptyState";
 import { BTN_SECONDARY, SEARCH_INPUT } from "../../lib/ui";
 import {
 	flexRender,
@@ -461,11 +462,7 @@ export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility
 							{loading ? (
 								<SkeletonRows cols={Math.max(visibleCount, 1)} />
 							) : rows.length === 0 ? (
-								<tr>
-									<td colSpan={Math.max(visibleCount, 1)} className="px-4 py-16 text-center text-zinc-500 dark:text-zinc-400">
-										No matching policies.
-									</td>
-								</tr>
+								<EmptyRow colSpan={Math.max(visibleCount, 1)} title="No matching policies" />
 							) : (
 								rows.map((row) => {
 									const { policy } = row.original;

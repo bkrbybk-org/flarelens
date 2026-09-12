@@ -169,7 +169,7 @@ describe("PqcPage", () => {
 
 		await user.type(screen.getByLabelText("Search hostnames"), "nothing-matches-this");
 
-		expect(screen.getByText("Nothing to show for this filter.")).toBeInTheDocument();
+		expect(screen.getByText("No matching hostnames")).toBeInTheDocument();
 		expect(screen.queryByText("www.example.com")).not.toBeInTheDocument();
 	});
 });

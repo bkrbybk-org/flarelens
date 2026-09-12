@@ -1,5 +1,6 @@
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
-import { CARD } from "../../lib/ui";
+import { EmptyNote } from "../../components/EmptyState";
+import { CARD, SECTION_TITLE } from "../../lib/ui";
 import type { CountItem, DetectionPoint, TimePoint } from "../../lib/ai-sec/types";
 
 /**
@@ -91,8 +92,8 @@ export function TrendChart({ title, series, previous, summary }: TrendProps) {
 	if (series.length < 2) {
 		return (
 			<section className={CARD}>
-				<h2 className="mb-3 text-sm font-semibold">{title}</h2>
-				<p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">Not enough data to chart this window.</p>
+				<h2 className={`mb-3 ${SECTION_TITLE}`}>{title}</h2>
+				<EmptyNote title="Not enough data to chart this window" />
 			</section>
 		);
 	}
@@ -113,7 +114,7 @@ export function TrendChart({ title, series, previous, summary }: TrendProps) {
 	return (
 		<section className={CARD}>
 			<div className="mb-3 flex items-baseline justify-between gap-3">
-				<h2 className="text-sm font-semibold">{title}</h2>
+				<h2 className={SECTION_TITLE}>{title}</h2>
 				{previous?.length ? (
 					<span className="text-xs text-zinc-500 dark:text-zinc-400">Dashed: previous period</span>
 				) : null}
@@ -191,7 +192,7 @@ export function DetectionsChart({ series, summary }: { series: DetectionPoint[];
 	return (
 		<section className={CARD}>
 			<div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
-				<h2 className="text-sm font-semibold">Detections over time</h2>
+				<h2 className={SECTION_TITLE}>Detections over time</h2>
 				<div className="flex flex-wrap gap-3">
 					{DETECTIONS.map((d) => (
 						<span key={d.key} className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
@@ -202,7 +203,7 @@ export function DetectionsChart({ series, summary }: { series: DetectionPoint[];
 				</div>
 			</div>
 			{totals.every((t) => t === 0) ? (
-				<p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">No detections in this window.</p>
+				<EmptyNote title="No detections in this window" />
 			) : (
 				<div className="relative">
 				<svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} className="w-full" role="img" aria-label={summary} {...hoverProps}>
@@ -270,7 +271,7 @@ export function BarList({ title, items, emptyText }: { title: string; items: Cou
 	const max = Math.max(1, ...items.map((i) => i.count));
 	return (
 		<section className={CARD}>
-			<h2 className="mb-3 text-sm font-semibold">{title}</h2>
+			<h2 className={`mb-3 ${SECTION_TITLE}`}>{title}</h2>
 			{!items.length || items.every((i) => i.count === 0) ? (
 				<p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">{emptyText}</p>
 			) : (

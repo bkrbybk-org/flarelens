@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
+import { EmptyRow } from "../../components/EmptyState";
 import { BTN_SECONDARY } from "../../lib/ui";
 import {
 	flexRender,
@@ -250,11 +251,7 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 						</thead>
 						<tbody>
 							{pageRows.length === 0 ? (
-								<tr>
-									<td colSpan={8} className="px-4 py-12 text-center text-zinc-500 dark:text-zinc-400">
-										No firewall activity matches.
-									</td>
-								</tr>
+								<EmptyRow colSpan={8} title="No matching firewall activity" />
 							) : (
 								pageRows.map((row) => {
 									const rowKey = row.original.ruleId + "::" + row.original.level + "::" + row.original.ruleName;

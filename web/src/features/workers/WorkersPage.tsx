@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY_SM, CARD } from "../../lib/ui";
+import { EmptyRow } from "../../components/EmptyState";
+import { StatCard, StatGrid } from "../../components/StatCard";
+import { PageShell } from "../../components/PageShell";
+import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY_SM, CARD, SECTION_TITLE } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
@@ -58,16 +61,6 @@ function Segmented<T extends string>({
 					{option.label}
 				</button>
 			))}
-		</div>
-	);
-}
-
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-	return (
-		<div className={CARD}>
-			<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
-			<div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-			{sub && <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{sub}</div>}
 		</div>
 	);
 }
@@ -149,8 +142,8 @@ export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProp
 	}
 
 	return (
-		<div className="h-full overflow-auto p-4 md:p-6">
-			<div className="mb-4 flex flex-wrap items-center gap-3">
+		<PageShell>
+			<div className="flex flex-wrap items-center gap-3">
 				<Segmented
 					label="Granularity"
 					value={granularity}
@@ -192,30 +185,30 @@ export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProp
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
+				<div role="alert" className={ALERT_ERROR}>
 					{error}
 				</div>
 			)}
 
 			{result?.truncated && (
-				<div role="status" className={`mb-4 ${ALERT_WARN}`}>
+				<div role="status" className={ALERT_WARN}>
 					Results were capped at 10,000 rows. Shorten the range, or switch to daily granularity for full coverage.
 				</div>
 			)}
 
-			<div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+			<StatGrid cols={4}>
 				<StatCard
 					label="Requests"
 					value={formatCount(totals.requests)}
-					sub={buckets.length ? `across ${buckets.length} buckets` : undefined}
+					hint={buckets.length ? `across ${buckets.length} buckets` : undefined}
 				/>
-				<StatCard label="Errors" value={formatCount(totals.errors)} sub={`${errorRate(totals).toFixed(2)}% error rate`} />
+				<StatCard label="Errors" value={formatCount(totals.errors)} hint={`${errorRate(totals).toFixed(2)}% error rate`} />
 				<StatCard label="Subrequests" value={formatCount(totals.subrequests)} />
-				<StatCard label="CPU P50" value={formatCpu(totals.cpuTimeP50)} sub="mean of bucket medians" />
-			</div>
+				<StatCard label="CPU P50" value={formatCpu(totals.cpuTimeP50)} hint="mean of bucket medians" />
+			</StatGrid>
 
-			<section className={`mb-4 ${CARD}`}>
-				<h2 className="mb-3 text-sm font-semibold">{WORKER_METRICS[metric]} over time</h2>
+			<section className={CARD}>
+				<h2 className={`mb-3 ${SECTION_TITLE}`}>{WORKER_METRICS[metric]} over time</h2>
 				<MetricsChart
 					buckets={buckets}
 					series={series}
@@ -262,11 +255,7 @@ export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProp
 					</thead>
 					<tbody>
 						{perWorker.length === 0 && (
-							<tr>
-								<td colSpan={6} className="px-4 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
-									{loading ? "Loading…" : "No data for this time range"}
-								</td>
-							</tr>
+							<EmptyRow colSpan={6} title="No Workers activity in this window" loading={loading} />
 						)}
 						{perWorker.map(({ worker, totals: row }) => {
 							const rate = errorRate(row);
@@ -289,6 +278,6 @@ export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProp
 					</tbody>
 				</table>
 			</section>
-		</div>
+		</PageShell>
 	);
 }

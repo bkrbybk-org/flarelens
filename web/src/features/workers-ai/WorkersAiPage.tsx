@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, CARD_HEADER } from "../../lib/ui";
+import { EmptyRow, EmptyState } from "../../components/EmptyState";
+import { StatCard, StatGrid } from "../../components/StatCard";
+import { PageShell } from "../../components/PageShell";
+import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, CARD_HEADER, SECTION_TITLE } from "../../lib/ui";
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
@@ -33,16 +36,6 @@ function niceMax(value: number): number {
 	return Math.ceil(value / magnitude) * magnitude;
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-	return (
-		<div className={CARD}>
-			<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
-			<div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-			{sub && <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{sub}</div>}
-		</div>
-	);
-}
-
 function InferenceChart({
 	series,
 	granularity,
@@ -67,7 +60,7 @@ function InferenceChart({
 	});
 
 	if (!series.length) {
-		return <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">No inference in this window.</p>;
+		return <EmptyState title="No inference in this window" />;
 	}
 
 	const point = hover === null ? null : series[hover.index];
@@ -145,8 +138,8 @@ export function WorkersAiPage({
 	const avgLatency = totals.requests ? totals.inferenceTimeMs / totals.requests : null;
 
 	return (
-		<div className="h-full overflow-auto p-4 md:p-6">
-			<div className="mb-4 flex flex-wrap items-center gap-3">
+		<PageShell>
+			<div className="flex flex-wrap items-center gap-3">
 				<div className="flex items-center gap-1" role="group" aria-label="Metric">
 					{(Object.keys(AI_METRICS) as AiMetric[]).map((key) => (
 						<button
@@ -178,25 +171,25 @@ export function WorkersAiPage({
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
+				<div role="alert" className={ALERT_ERROR}>
 					{error}
 				</div>
 			)}
 
-			<div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+			<StatGrid cols={5}>
 				<StatCard label="Requests" value={formatCompact(totals.requests)} />
-				<StatCard label="Neurons" value={formatCompact(totals.neurons)} sub="Cloudflare's billing unit" />
-				<StatCard label="Tokens" value={formatCompact(totals.inputTokens + totals.outputTokens)} sub={`${formatCompact(totals.inputTokens)} in / ${formatCompact(totals.outputTokens)} out`} />
-				<StatCard label="Avg latency" value={formatLatency(avgLatency)} sub="per inference" />
-				<StatCard label="Errors" value={formatCompact(totals.errors)} sub={totals.errors === 0 ? "none in this window" : undefined} />
-			</div>
+				<StatCard label="Neurons" value={formatCompact(totals.neurons)} hint="Cloudflare's billing unit" />
+				<StatCard label="Tokens" value={formatCompact(totals.inputTokens + totals.outputTokens)} hint={`${formatCompact(totals.inputTokens)} in / ${formatCompact(totals.outputTokens)} out`} />
+				<StatCard label="Avg latency" value={formatLatency(avgLatency)} hint="per inference" />
+				<StatCard label="Errors" value={formatCompact(totals.errors)} hint={totals.errors === 0 ? "none in this window" : undefined} />
+			</StatGrid>
 
-			<section className={`${CARD} mb-4`}>
-				<h2 className="mb-3 text-sm font-semibold">{AI_METRICS[metric]} over time</h2>
+			<section className={`${CARD}`}>
+				<h2 className={`mb-3 ${SECTION_TITLE}`}>{AI_METRICS[metric]} over time</h2>
 				<InferenceChart series={result?.series ?? []} granularity={result?.granularity ?? granularity} metric={metric} />
 			</section>
 
-			<section className={`${CARD} mb-4 p-0`}>
+			<section className={`${CARD} p-0`}>
 				<h2 className={CARD_HEADER}>Models</h2>
 				<table className="w-full text-sm">
 					<thead className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
@@ -211,11 +204,7 @@ export function WorkersAiPage({
 					</thead>
 					<tbody>
 						{(result?.byModel.length ?? 0) === 0 && (
-							<tr>
-								<td colSpan={6} className="px-4 py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
-									{loading ? "Loading…" : "No models invoked in this window"}
-								</td>
-							</tr>
+							<EmptyRow colSpan={6} title="No models invoked in this window" loading={loading} />
 						)}
 						{result?.byModel.map((row) => (
 							<tr key={row.modelId} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
@@ -239,7 +228,7 @@ export function WorkersAiPage({
 
 			<div className="grid gap-4 lg:grid-cols-2">
 				<section className={CARD}>
-					<h2 className="mb-3 text-sm font-semibold">Request sources</h2>
+					<h2 className={`mb-3 ${SECTION_TITLE}`}>Request sources</h2>
 					{(result?.bySource.length ?? 0) === 0 ? (
 						<p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">No source data.</p>
 					) : (
@@ -257,7 +246,7 @@ export function WorkersAiPage({
 					)}
 				</section>
 				<section className={CARD}>
-					<h2 className="mb-3 text-sm font-semibold">Errors by code</h2>
+					<h2 className={`mb-3 ${SECTION_TITLE}`}>Errors by code</h2>
 					{(result?.errorsByCode.length ?? 0) === 0 ? (
 						<p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">No failed inference in this window.</p>
 					) : (
@@ -272,6 +261,6 @@ export function WorkersAiPage({
 					)}
 				</section>
 			</div>
-		</div>
+		</PageShell>
 	);
 }

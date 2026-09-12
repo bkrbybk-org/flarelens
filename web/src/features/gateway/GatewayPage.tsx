@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { ALERT_ERROR, BTN_SECONDARY_SM, CARD } from "../../lib/ui";
+import { EmptyNote } from "../../components/EmptyState";
+import { StatCard, StatGrid } from "../../components/StatCard";
+import { PageShell } from "../../components/PageShell";
+import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, SECTION_TITLE } from "../../lib/ui";
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
@@ -49,7 +52,7 @@ function VerdictChart({ series, granularity, label }: { series: Point[]; granula
 	});
 
 	if (!series.length) {
-		return <p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">No {label} traffic in this window.</p>;
+		return <EmptyNote title={`No ${label} traffic in this window`} />;
 	}
 	const point = hover === null ? null : series[hover.index];
 
@@ -99,21 +102,11 @@ function VerdictChart({ series, granularity, label }: { series: Point[]; granula
 	);
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-	return (
-		<div className={CARD}>
-			<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
-			<div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-			{sub && <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{sub}</div>}
-		</div>
-	);
-}
-
 function BreakdownCard({ title, rows, emptyText }: { title: string; rows: BreakdownRow[]; emptyText: string }) {
 	const max = Math.max(1, ...rows.map((r) => r.total));
 	return (
 		<section className={CARD}>
-			<h2 className="mb-3 text-sm font-semibold">{title}</h2>
+			<h2 className={`mb-3 ${SECTION_TITLE}`}>{title}</h2>
 			{rows.length === 0 ? (
 				<p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">{emptyText}</p>
 			) : (
@@ -166,8 +159,8 @@ export function GatewayPage({
 	const empty = EMPTY_TOTALS;
 
 	return (
-		<div className="h-full overflow-auto p-4 md:p-6">
-			<div className="mb-4 flex flex-wrap items-center gap-3">
+		<PageShell>
+			<div className="flex flex-wrap items-center gap-3">
 				<span className="text-xs text-zinc-500 dark:text-zinc-400">
 					{granularity === "daily" ? "Daily buckets" : "Hourly buckets"}
 				</span>
@@ -185,21 +178,21 @@ export function GatewayPage({
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
+				<div role="alert" className={ALERT_ERROR}>
 					{error}
 				</div>
 			)}
 
-			<div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+			<StatGrid cols={4}>
 				<StatCard label="DNS queries" value={compact((dns?.totals ?? empty).total)} />
-				<StatCard label="DNS blocked" value={compact((dns?.totals ?? empty).blocked)} sub={`${blockRate(dns?.totals ?? empty)} of queries`} />
+				<StatCard label="DNS blocked" value={compact((dns?.totals ?? empty).blocked)} hint={`${blockRate(dns?.totals ?? empty)} of queries`} />
 				<StatCard label="HTTP requests" value={compact((http?.totals ?? empty).total)} />
-				<StatCard label="HTTP blocked" value={compact((http?.totals ?? empty).blocked)} sub={`${blockRate(http?.totals ?? empty)} of requests`} />
-			</div>
+				<StatCard label="HTTP blocked" value={compact((http?.totals ?? empty).blocked)} hint={`${blockRate(http?.totals ?? empty)} of requests`} />
+			</StatGrid>
 
-			<section className={`${CARD} mb-4`}>
+			<section className={`${CARD}`}>
 				<div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
-					<h2 className="text-sm font-semibold">DNS queries over time</h2>
+					<h2 className={SECTION_TITLE}>DNS queries over time</h2>
 					<div className="flex gap-3 text-xs text-zinc-500 dark:text-zinc-400">
 						<span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: ALLOWED_COLOR }} /> Allowed</span>
 						<span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: BLOCKED_COLOR }} /> Blocked</span>
@@ -208,8 +201,8 @@ export function GatewayPage({
 				<VerdictChart series={dns?.series ?? []} granularity={result?.granularity ?? granularity} label="DNS" />
 			</section>
 
-			<section className={`${CARD} mb-4`}>
-				<h2 className="mb-3 text-sm font-semibold">Gateway HTTP requests over time</h2>
+			<section className={`${CARD}`}>
+				<h2 className={`mb-3 ${SECTION_TITLE}`}>Gateway HTTP requests over time</h2>
 				<VerdictChart series={http?.series ?? []} granularity={result?.granularity ?? granularity} label="HTTP" />
 			</section>
 
@@ -224,6 +217,6 @@ export function GatewayPage({
 				Aggregate only. Both Gateway datasets can break traffic down by user, device and source IP; none of those
 				dimensions are queried.
 			</p>
-		</div>
+		</PageShell>
 	);
 }

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { ALERT_ERROR, ALERT_WARN, CARD } from "../../lib/ui";
+import { PageShell } from "../../components/PageShell";
+import { ALERT_ERROR, ALERT_WARN, CARD, SECTION_TITLE } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { SearchIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
@@ -51,8 +52,8 @@ export function RequestTracePage({
 	const shown = new Set<string>();
 
 	return (
-		<div className="h-full overflow-auto p-4 md:p-6">
-			<form onSubmit={submit} className={`${CARD} mb-4`}>
+		<PageShell>
+			<form onSubmit={submit} className={`${CARD}`}>
 				<div className="flex flex-wrap items-end gap-3">
 					<div className="min-w-0 flex-1 basis-72">
 						<label htmlFor="ray-id" className="mb-1.5 block text-sm font-medium">Ray ID</label>
@@ -110,13 +111,13 @@ export function RequestTracePage({
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
+				<div role="alert" className={ALERT_ERROR}>
 					{error}
 				</div>
 			)}
 
 			{result?.errors.map((e) => (
-				<div key={e.zone} role="status" className={`mb-4 ${ALERT_WARN}`}>
+				<div key={e.zone} role="status" className={ALERT_WARN}>
 					{e.zone}: {e.message}
 				</div>
 			))}
@@ -141,7 +142,7 @@ export function RequestTracePage({
 				<>
 					<div className={`${CARD} mb-4`}>
 						<div className="flex flex-wrap items-baseline justify-between gap-2">
-							<h2 className="text-sm font-semibold">
+							<h2 className={SECTION_TITLE}>
 								Ray <code className="font-mono">{result.rayId}</code>
 							</h2>
 							<span className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -160,7 +161,7 @@ export function RequestTracePage({
 							if (!rows.length) return null;
 							return (
 								<section key={group.title} className={CARD}>
-									<h3 className="mb-2 text-sm font-semibold">{group.title}</h3>
+									<h3 className={`mb-3 ${SECTION_TITLE}`}>{group.title}</h3>
 									<dl className="grid grid-cols-[minmax(0,10rem)_1fr] gap-x-3 gap-y-1 text-sm">
 										{rows.map(([key, label]) => (
 											<div key={key} className="contents">
@@ -187,7 +188,7 @@ export function RequestTracePage({
 						if (!leftovers.length) return null;
 						return (
 							<section className={`${CARD} mb-4`}>
-								<h3 className="mb-2 text-sm font-semibold">Other fields ({leftovers.length})</h3>
+								<h3 className={`mb-3 ${SECTION_TITLE}`}>Other fields ({leftovers.length})</h3>
 								<p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
 									Everything else this zone's schema returned for the request. Swept from the schema rather than
 									listed in code, so a field Cloudflare adds later shows up here without a change.
@@ -208,7 +209,7 @@ export function RequestTracePage({
 
 					{result.firewallEvents.some((event) => metadataValue(event, METADATA_ENCRYPTED_BODY)) && (
 						<section className={`${CARD} mb-4`}>
-							<h3 className="mb-2 text-sm font-semibold">Request body</h3>
+							<h3 className={`mb-3 ${SECTION_TITLE}`}>Request body</h3>
 							<p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
 								A rule with payload logging captured this request's body. Cloudflare stores it encrypted to the
 								zone's public key; decryption happens in this browser and the key is never sent anywhere.
@@ -233,7 +234,7 @@ export function RequestTracePage({
 					)}
 
 					<section className={CARD}>
-						<h3 className="mb-2 text-sm font-semibold">
+						<h3 className={`mb-3 ${SECTION_TITLE}`}>
 							Firewall events {result.firewallEvents.length > 0 && `(${result.firewallEvents.length})`}
 						</h3>
 						{result.firewallEvents.length === 0 ? (
@@ -278,6 +279,6 @@ export function RequestTracePage({
 					)}
 				</>
 			)}
-		</div>
+		</PageShell>
 	);
 }

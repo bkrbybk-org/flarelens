@@ -1,7 +1,7 @@
 // Ported from cf-waf-rules-analyzer src/components/EventGraph.jsx
 
 import { useState } from "react";
-import { CARD } from "../../lib/ui";
+import { CARD, SECTION_TITLE } from "../../lib/ui";
 import {
 	CHART_ACTIONS,
 	GRAPH_DIMENSIONS,
@@ -48,7 +48,7 @@ export function EventGraph({ events, window: win }: EventGraphProps) {
 		return (
 			<section className={CARD}>
 				<div className="mb-3 flex items-center justify-between">
-					<h2 className="text-sm font-semibold">Events over time</h2>
+					<h2 className={SECTION_TITLE}>Events over time</h2>
 					<span className="text-xs text-zinc-500">No telemetry loaded</span>
 				</div>
 				<div className="flex h-48 items-center justify-center rounded-md border border-dashed border-zinc-300 text-sm text-zinc-500 dark:border-zinc-700">
@@ -67,7 +67,7 @@ export function EventGraph({ events, window: win }: EventGraphProps) {
 		<section className={CARD}>
 			<div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
 				<div>
-					<h2 className="text-sm font-semibold">Events over time</h2>
+					<h2 className={SECTION_TITLE}>Events over time</h2>
 					<p className="mt-1 text-xs text-zinc-500">Peak bucket: {formatPeakBucket(peak)}</p>
 				</div>
 				<div className="flex flex-wrap gap-2 text-xs">

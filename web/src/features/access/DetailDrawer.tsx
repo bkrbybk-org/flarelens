@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { SECTION_TITLE } from "../../lib/ui";
 import type { CfApp, CfPolicy } from "../../types";
 import { formatLocalDateTime, resolvePolicy, type RuleContext } from "../../lib/rules";
 import { CheckIcon, CopyIcon, XIcon } from "../../components/Icons";
@@ -102,7 +103,7 @@ export function DetailDrawer({ app, onClose, ctx, reusableMap }: DetailDrawerPro
 
 					<section>
 						<div className="mb-3 flex items-center justify-between">
-							<h3 className="text-sm font-semibold">Policies ({app.policies.length})</h3>
+							<h3 className={SECTION_TITLE}>Policies ({app.policies.length})</h3>
 							<CopyJsonButton value={app} />
 						</div>
 
