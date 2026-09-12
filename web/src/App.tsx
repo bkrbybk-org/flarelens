@@ -39,7 +39,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	groups: "Access Groups",
 	waf: "WAF Analytics",
 	cache: "Cache Rules",
-	"ai-security": "AI Security for Apps",
+	"ai-security": "AI Security",
 	workers: "Workers Analytics",
 	"access-usage": "Access Usage",
 	"workers-ai": "Workers AI",
