@@ -233,6 +233,49 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 	return results;
 }
 
+/**
+ * Policies for every application, without a request per application.
+ *
+ * `GET /accounts/{id}/access/apps` already embeds each application's full policy objects —
+ * rules, decision, precedence, `reusable` — and they are byte-identical to what
+ * `/access/apps/{app}/policies` returns; that was checked against every application on a real
+ * account before this replaced the fan-out. Twenty-nine extra round trips at five at a time cost
+ * about six seconds, which was most of this route's latency.
+ *
+ * The fan-out survives as a fallback for applications whose `policies` field is absent. Today
+ * that is the `private_ip` type, whose per-application endpoint also returns nothing — but the
+ * field being missing and the application genuinely having no policies are different facts, and
+ * only one request can tell them apart. Asking for the few rather than assuming about them keeps
+ * `policies_error` meaning what it says.
+ */
+async function policiesByApp(
+	apps: CfApp[],
+	accountId: string,
+	token: string,
+): Promise<Map<string, { policies: CfPolicy[]; error: boolean }>> {
+	const byApp = new Map<string, { policies: CfPolicy[]; error: boolean }>();
+	const needsFetch: CfApp[] = [];
+
+	for (const appItem of apps) {
+		const embedded = (appItem as { policies?: unknown }).policies;
+		if (Array.isArray(embedded)) {
+			byApp.set(appItem.id, { policies: embedded as CfPolicy[], error: false });
+		} else {
+			needsFetch.push(appItem);
+		}
+	}
+
+	const fetched = await mapWithConcurrency(needsFetch, 5, async (appItem) => {
+		const res = await fetchCloudflareAll<CfPolicy>(`/accounts/${accountId}/access/apps/${appItem.id}/policies`, token);
+		return { appId: appItem.id, policies: res.status === 200 ? res.result : [], error: res.status !== 200 };
+	});
+	for (const entry of fetched) {
+		byApp.set(entry.appId, { policies: entry.policies, error: entry.error });
+	}
+
+	return byApp;
+}
+
 const app = new Hono<{ Bindings: Env }>();
 
 // Security headers on every response; API responses are token-derived, never cacheable.
@@ -364,15 +407,8 @@ app.get("/api/data", async (c) => {
 	const reusablePolicies = reusableRes.status === 200 ? reusableRes.result : [];
 	const reusablePoliciesError = reusableRes.status !== 200;
 
-	// 2. Fetch policies for all applications with bounded concurrency
-	const policyResults = await mapWithConcurrency(apps, 5, async (appItem) => {
-		const res = await fetchCloudflareAll<CfPolicy>(`/accounts/${accountId}/access/apps/${appItem.id}/policies`, token);
-		if (res.status === 200) {
-			return { appId: appItem.id, policies: res.result, error: false };
-		}
-		return { appId: appItem.id, policies: [] as CfPolicy[], error: true };
-	});
-	const policyMap = new Map(policyResults.map((p) => [p.appId, p]));
+	// 2. Policies per application — read from the apps payload, fetched only where it is absent.
+	const policyMap = await policiesByApp(apps, accountId, token);
 
 	// 2b. Resolve the Zero Trust lists that policies reference.
 	//
@@ -959,15 +995,19 @@ app.get("/api/access/tunnels", async (c) => {
 	// Per-app policies, same bounded fan-out as /api/data. Reusable policies are resolved from
 	// the account list so a policy attached by reference still shows its name and decision.
 	const reusable = new Map((policiesRes.status === 200 ? policiesRes.result : []).map((p) => [p.id, p]));
-	const withPolicies = await mapWithConcurrency(appsRes.result, 5, async (appItem) => {
-		const res = await fetchCloudflareAll<CfPolicy>(`/accounts/${accountId}/access/apps/${appItem.id}/policies`, token);
-		const policies = (res.status === 200 ? res.result : []).map((p) => {
-			const hasRules = Array.isArray(p.include) || Array.isArray(p.exclude) || Array.isArray(p.require);
-			const source = !hasRules && reusable.has(p.id) ? { ...reusable.get(p.id), ...p } : p;
-			return { name: source.name, decision: source.decision };
-		});
-		return { ...appItem, policies, policies_error: res.status !== 200 };
-	});
+	// Started before the policy resolution is awaited: the tunnel map needs the applications only
+	// to join hostnames at the very end, so the two run side by side.
+	const withPolicies = policiesByApp(appsRes.result, accountId, token).then((policyMap) =>
+		appsRes.result.map((appItem) => {
+			const entry = policyMap.get(appItem.id);
+			const policies = (entry?.policies ?? []).map((p) => {
+				const hasRules = Array.isArray(p.include) || Array.isArray(p.exclude) || Array.isArray(p.require);
+				const source = !hasRules && reusable.has(p.id) ? { ...reusable.get(p.id), ...p } : p;
+				return { name: source.name, decision: source.decision };
+			});
+			return { ...appItem, policies, policies_error: entry?.error ?? false };
+		}),
+	);
 
 	try {
 		const result = await fetchTunnelMap(accountId, token, withPolicies);
@@ -1036,20 +1076,31 @@ app.get("/api/pqc/report", async (c) => {
 		.map((z) => ({ id: z.id, name: z.name || z.id }));
 
 	try {
-		const report = await fetchPqcReport(accountId, token, zones);
-
-		// Measured adoption is a capability question, not a given: the key-exchange dimension may
-		// not exist in this account's schema at all. Probe, then either measure or say why not —
-		// never report 0% for a question the schema cannot answer. See lib/pqc-adoption.ts.
-		const probe = await probeAdoptionDimension(token);
-		let adoption = probe.dimension
-			? await fetchAdoption(token, zones, adoptionWindow(), probe.dimension)
-			: emptyAdoption(probe.error ?? unavailableReason(probe.candidates), probe.candidates);
-		if (probe.dimension && adoption.errors.length === zones.length && zones.length > 0) {
-			// Every zone failed: the dimension introspects but cannot actually be queried, which
-			// is a different failure from it being absent and is worth saying so.
-			adoption = emptyAdoption(`The ${probe.dimension} dimension exists but no zone could be queried: ${adoption.errors[0].message}`, probe.candidates);
-		}
+		// Adoption is measured from the analytics schema and the report is built from REST
+		// settings and DNS; neither needs the other, so they run together. Serially the probe
+		// alone added a round trip to a response that already takes several.
+		const [report, adoption] = await Promise.all([
+			fetchPqcReport(accountId, token, zones),
+			// Measured adoption is a capability question, not a given: the key-exchange dimension
+			// may not exist in this account's schema at all. Probe, then either measure or say why
+			// not — never report 0% for a question the schema cannot answer. See lib/pqc-adoption.ts.
+			(async () => {
+				const probe = await probeAdoptionDimension(token);
+				if (!probe.dimension) {
+					return emptyAdoption(probe.error ?? unavailableReason(probe.candidates), probe.candidates);
+				}
+				const measured = await fetchAdoption(token, zones, adoptionWindow(), probe.dimension);
+				if (measured.errors.length === zones.length && zones.length > 0) {
+					// Every zone failed: the dimension introspects but cannot actually be queried,
+					// which is a different failure from it being absent and is worth saying so.
+					return emptyAdoption(
+						`The ${probe.dimension} dimension exists but no zone could be queried: ${measured.errors[0].message}`,
+						probe.candidates,
+					);
+				}
+				return measured;
+			})(),
+		]);
 
 		return c.json({ success: true, result: { ...report, adoption } });
 	} catch (err) {

@@ -222,7 +222,19 @@ function originLabel(kind: OriginKind): string {
 	}
 }
 
-export async function fetchTunnelMap(accountId: string, token: string, apps: AccessApp[]): Promise<TunnelMapResult> {
+/**
+ * `apps` arrives as a promise on purpose.
+ *
+ * None of the tunnel-side fetches depend on the Access applications — the applications are only
+ * needed at the end, to join each ingress hostname to the app that gates it. Taking the resolved
+ * array would make the caller wait for the applications before this function could start, which
+ * is a round trip of wall clock spent on an ordering accident.
+ */
+export async function fetchTunnelMap(
+	accountId: string,
+	token: string,
+	appsPromise: AccessApp[] | Promise<AccessApp[]>,
+): Promise<TunnelMapResult> {
 	const errors: { source: string; message: string }[] = [];
 
 	const tunnelsRes = await restList<CfTunnel>(`/accounts/${accountId}/cfd_tunnel?is_deleted=false`, token);
@@ -236,29 +248,35 @@ export async function fetchTunnelMap(accountId: string, token: string, apps: Acc
 
 	const tunnels = tunnelsRes.result.filter((t) => !t.deleted_at);
 
-	const configs = await mapWithConcurrency(tunnels, 5, async (tunnel) => {
-		const response = await fetch(`${REST_BASE}/accounts/${accountId}/cfd_tunnel/${tunnel.id}/configurations`, {
-			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-		});
-		let body: { success?: boolean; result?: { config?: { ingress?: CfIngressRule[] } }; errors?: { message?: string }[] };
-		try {
-			body = await response.json();
-		} catch {
-			return { tunnel, ingress: [] as CfIngressRule[], error: "Non-JSON configuration response" };
-		}
-		if (!response.ok || !body.success) {
-			return { tunnel, ingress: [] as CfIngressRule[], error: body.errors?.[0]?.message || `HTTP ${response.status}` };
-		}
-		return { tunnel, ingress: body.result?.config?.ingress || [], error: undefined as string | undefined };
-	});
+	// The tunnel configurations, the private routes and the Worker domains depend on nothing but
+	// the tunnel list, so they go out together. Run one after another they cost three round trips
+	// of wall clock for no reason — the later two were waiting only because they were written
+	// after the loop.
+	const [configs, routesRes, domainsRes] = await Promise.all([
+		mapWithConcurrency(tunnels, 5, async (tunnel) => {
+			const response = await fetch(`${REST_BASE}/accounts/${accountId}/cfd_tunnel/${tunnel.id}/configurations`, {
+				headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+			});
+			let body: { success?: boolean; result?: { config?: { ingress?: CfIngressRule[] } }; errors?: { message?: string }[] };
+			try {
+				body = await response.json();
+			} catch {
+				return { tunnel, ingress: [] as CfIngressRule[], error: "Non-JSON configuration response" };
+			}
+			if (!response.ok || !body.success) {
+				return { tunnel, ingress: [] as CfIngressRule[], error: body.errors?.[0]?.message || `HTTP ${response.status}` };
+			}
+			return { tunnel, ingress: body.result?.config?.ingress || [], error: undefined as string | undefined };
+		}),
+		restList<CfRoute>(`/accounts/${accountId}/teamnet/routes`, token),
+		// Worker custom domains, so an app served by a Worker on its own hostname is identified
+		// as such rather than reported as missing a tunnel. Best-effort: this needs Workers
+		// Scripts: Read, and without it those rows stay unclassified instead of the map failing.
+		restList<CfWorkerDomain>(`/accounts/${accountId}/workers/domains`, token),
+	]);
 
-	const routesRes = await restList<CfRoute>(`/accounts/${accountId}/teamnet/routes`, token);
 	if (routesRes.error) errors.push({ source: "private routes", message: routesRes.error });
 
-	// Worker custom domains, so an app served by a Worker on its own hostname is identified as
-	// such rather than reported as missing a tunnel. Best-effort: this needs Workers Scripts:
-	// Read, and without it those rows simply stay unclassified instead of the map failing.
-	const domainsRes = await restList<CfWorkerDomain>(`/accounts/${accountId}/workers/domains`, token);
 	const workerDomains = new Map<string, string>();
 	for (const domain of domainsRes.result) {
 		if (domain.hostname) workerDomains.set(normaliseHost(domain.hostname), domain.service || "Worker");
@@ -271,6 +289,8 @@ export async function fetchTunnelMap(accountId: string, token: string, apps: Acc
 		colos: [...new Set((tunnel.connections || []).map((c) => c.colo_name).filter((c): c is string => !!c))],
 		configError: error,
 	}));
+
+	const apps = await appsPromise;
 
 	// Index apps by hostname so each ingress rule can find its gate in one pass.
 	const appsByHost = new Map<string, AccessApp>();
