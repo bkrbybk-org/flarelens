@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { FOCUS_RING } from "../../lib/ui";
 
 export interface ColumnFilterValue {
 	selected: string[];
@@ -66,7 +67,7 @@ export function ColumnFilterPopover({ title, anchor, values, current, onChange, 
 						onChange({ selected: current.selected, query: e.target.value });
 					}}
 					placeholder={`Type to filter ${title.toLowerCase()}…`}
-					className="w-full rounded-lg border border-zinc-200 bg-transparent px-2.5 py-1.5 text-sm outline-none focus:border-cf dark:border-zinc-700"
+					className={`w-full rounded-lg border border-zinc-200 bg-transparent px-2.5 py-1.5 text-sm outline-none focus:border-cf dark:border-zinc-700 ${FOCUS_RING}`}
 				/>
 			</div>
 			<div className="flex items-center justify-between border-b border-zinc-200 px-3 py-1.5 text-xs dark:border-zinc-800">

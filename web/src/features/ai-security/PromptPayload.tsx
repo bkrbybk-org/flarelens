@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FOCUS_RING } from "../../lib/ui";
 import { MatchedDataError, decryptMatchedData } from "./matchedData";
 
 /**
@@ -107,7 +108,7 @@ export function DecryptKeyPanel({
 					placeholder="Payload-logging private key (base64)"
 					autoComplete="off"
 					spellCheck={false}
-					className="min-w-[20rem] flex-1 rounded-md border border-zinc-300 bg-transparent px-2.5 py-1.5 font-mono text-xs outline-none transition focus:border-cf disabled:opacity-50 dark:border-zinc-700"
+					className={`min-w-[20rem] flex-1 rounded-md border border-zinc-300 bg-transparent px-2.5 py-1.5 font-mono text-xs outline-none transition focus:border-cf disabled:opacity-50 dark:border-zinc-700 ${FOCUS_RING}`}
 				/>
 				<button
 					type="submit"

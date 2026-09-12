@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { StatCard, StatGrid } from "../../web/src/components/StatCard";
-import { EmptyNote, EmptyRow, EmptyState } from "../../web/src/components/EmptyState";
+import { EmptyRow, EmptyState } from "../../web/src/components/EmptyState";
 
 /**
  * The shared pieces that ended two design generations. These have no interesting behaviour, so

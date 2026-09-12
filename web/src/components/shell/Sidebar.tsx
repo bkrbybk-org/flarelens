@@ -1,5 +1,5 @@
 import type { Route } from "../../hooks/useRoute";
-import { SECTION_TITLE } from "../../lib/ui";
+import { FOCUS_RING, SECTION_TITLE } from "../../lib/ui";
 import type { CfAccount } from "../../types";
 import {
 	AlertIcon,
@@ -178,7 +178,7 @@ function SidebarContent({
 							if (next && next.id !== accountId) onSwitchAccount(next);
 						}}
 						aria-label="Switch account"
-						className="mb-2 w-full truncate rounded-md border border-zinc-200 bg-transparent px-1.5 py-1 text-xs outline-none focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+						className={`mb-2 w-full truncate rounded-md border border-zinc-200 bg-transparent px-1.5 py-1 text-xs outline-none focus:border-cf dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`}
 					>
 						{accounts.map((a) => (
 							<option key={a.id} value={a.id}>{a.name || a.id}</option>

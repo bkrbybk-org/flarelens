@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from "react";
 import { EmptyNote } from "../../components/EmptyState";
-import { ALERT_WARN, BTN_SECONDARY, CARD, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_WARN, BTN_SECONDARY, CARD, FOCUS_RING, SECTION_TITLE } from "../../lib/ui";
 import {
 	flexRender,
 	getCoreRowModel,
@@ -200,7 +200,7 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 						onChange={(e) => setSearch(e.target.value)}
 						placeholder="Search IP, target, ray ID, category…"
 						aria-label="Search flagged requests"
-						className="w-64 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-2.5 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+						className={`w-64 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-2.5 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`}
 					/>
 				</div>
 				<button

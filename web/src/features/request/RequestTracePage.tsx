@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, ALERT_WARN, CARD, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, ALERT_WARN, CARD, INPUT, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { SearchIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
@@ -65,7 +65,7 @@ export function RequestTracePage({
 								onChange={(e) => setRayInput(e.target.value)}
 								placeholder="a3633412999ba62b"
 								spellCheck={false}
-								className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 font-mono text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+								className={`${SEARCH_INPUT} font-mono`}
 							/>
 						</div>
 					</div>
@@ -75,7 +75,7 @@ export function RequestTracePage({
 							id="ray-zone"
 							value={zoneId}
 							onChange={(e) => setZoneId(e.target.value)}
-							className="rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+							className={INPUT}
 						>
 							<option value="">All zones</option>
 							{zones.map((zone) => (
@@ -89,7 +89,7 @@ export function RequestTracePage({
 							id="ray-window"
 							value={minutes}
 							onChange={(e) => setMinutes(Number(e.target.value))}
-							className="rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-sm outline-none focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+							className={INPUT}
 						>
 							{LOOKBACKS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
 						</select>

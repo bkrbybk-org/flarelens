@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyRow, EmptyState } from "../../components/EmptyState";
-import { BTN_SECONDARY, FOCUS_RING, SEARCH_INPUT } from "../../lib/ui";
+import { BTN_SECONDARY, FOCUS_RING, FOCUS_ROW, SEARCH_INPUT } from "../../lib/ui";
 import {
 	flexRender,
 	getCoreRowModel,
@@ -567,7 +567,7 @@ export function AppsTable({
 											}
 										}}
 										tabIndex={0}
-										className="cursor-pointer border-b border-zinc-100 transition last:border-0 hover:bg-zinc-50 focus:bg-zinc-50 focus:outline-none dark:border-zinc-800/60 dark:hover:bg-zinc-800/40 dark:focus:bg-zinc-800/40"
+										className={`cursor-pointer border-b border-zinc-100 transition last:border-0 hover:bg-zinc-50 dark:border-zinc-800/60 dark:hover:bg-zinc-800/40 ${FOCUS_ROW}`}
 									>
 										{row.getVisibleCells().map((cell) => (
 											<td key={cell.id} className={`${cellPad} align-top`}>

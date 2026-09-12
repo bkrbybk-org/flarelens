@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { PageShell } from "../../components/PageShell";
+import { TabPanel, Tabs } from "../../components/Tabs";
 import { EmptyState } from "../../components/EmptyState";
 import { ALERT_ERROR, CARD, SEARCH_INPUT } from "../../lib/ui";
 import { SearchIcon, UsersIcon } from "../../components/Icons";
@@ -105,100 +106,96 @@ export function GroupsPage({
 			{/* Two views of the same account-level configuration: the rule groups themselves, and
 			    the reusable policies that reference them. Both are attached to applications by
 			    reference, and neither is visible on the Applications page. */}
-			<div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800" role="tablist">
-				{([["policies", `Reusable policies (${reusablePolicies.length})`], ["groups", `Rule groups (${groups.length})`]] as [Tab, string][]).map(
-					([id, label]) => (
-						<button
-							key={id}
-							type="button"
-							role="tab"
-							aria-selected={tab === id}
-							onClick={() => setTab(id)}
-							className={
-								tab === id
-									? "border-b-2 border-cf px-4 py-2 text-sm font-medium text-cf"
-									: "border-b-2 border-transparent px-4 py-2 text-sm text-zinc-500 transition hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-							}
-						>
-							{label}
-						</button>
-					),
-				)}
-			</div>
+			<Tabs
+				label="Account-level Access configuration"
+				idPrefix="groups"
+				active={tab}
+				onChange={setTab}
+				tabs={[
+					{ id: "policies", label: `Reusable policies (${reusablePolicies.length})` },
+					{ id: "groups", label: `Rule groups (${groups.length})` },
+				]}
+			/>
 
 			{tab === "policies" ? (
-				reusablePolicies.length === 0 && !loading ? (
-					<EmptyState
-						icon={UsersIcon}
-						title="No reusable policies"
-						hint={
-							reusablePoliciesError
-								? "Account-level policies could not be fetched — the API token is missing the Access: Organizations, Identity Providers, and Groups (Read) permission."
-								: "This account defines no reusable policies; every application carries its own."
-						}
-					/>
-				) : (
-					<PoliciesTable
-						policies={reusablePolicies}
-						usedBy={policyUsedBy}
-						loading={loading}
-						ctx={ctx}
-						columnVisibility={policyColumnVisibility}
-						columnOrder={policyColumnOrder}
-						onPrefsChange={onPrefsChange}
-					/>
-				)
-			) : !loading && filtered.length === 0 ? (
-				<EmptyState
-					icon={UsersIcon}
-					title={groups.length === 0 ? "No Access Groups" : "No groups match"}
-					hint={
-						groups.length === 0
-							? groupsError
-								? "The API token is missing the Access: Organizations, Identity Providers, and Groups (Read) permission — groups could not be fetched."
-								: "This account has no Access Groups configured."
-							: "Try a different search."
-					}
-				/>
+				<TabPanel id="policies" idPrefix="groups">
+					{reusablePolicies.length === 0 && !loading ? (
+						<EmptyState
+							icon={UsersIcon}
+							title="No reusable policies"
+							hint={
+								reusablePoliciesError
+									? "Account-level policies could not be fetched — the API token is missing the Access: Organizations, Identity Providers, and Groups (Read) permission."
+									: "This account defines no reusable policies; every application carries its own."
+							}
+						/>
+					) : (
+						<PoliciesTable
+							policies={reusablePolicies}
+							usedBy={policyUsedBy}
+							loading={loading}
+							ctx={ctx}
+							columnVisibility={policyColumnVisibility}
+							columnOrder={policyColumnOrder}
+							onPrefsChange={onPrefsChange}
+						/>
+					)}
+				</TabPanel>
 			) : (
-				<div className="space-y-3">
-					{filtered.map((group) => {
-						const referencedBy = usedBy.get(group.id) || [];
-						return (
-							<div key={group.id} className={CARD}>
-								<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-									<h3 className="min-w-0 truncate font-medium">{group.name || group.id}</h3>
-									<span className="text-xs text-zinc-500 dark:text-zinc-400">
-										{group.updated_at != null && <>Updated {formatLocalDateTime(group.updated_at)}</>}
-									</span>
-								</div>
+				<TabPanel id="groups" idPrefix="groups">
+					{!loading && filtered.length === 0 ? (
+						<EmptyState
+							icon={UsersIcon}
+							title={groups.length === 0 ? "No Access Groups" : "No groups match"}
+							hint={
+								groups.length === 0
+									? groupsError
+										? "The API token is missing the Access: Organizations, Identity Providers, and Groups (Read) permission — groups could not be fetched."
+										: "This account has no Access Groups configured."
+									: "Try a different search."
+							}
+						/>
+					) : (
+						<div className="space-y-3">
+							{filtered.map((group) => {
+								const referencedBy = usedBy.get(group.id) || [];
+								return (
+									<div key={group.id} className={CARD}>
+										<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+											<h3 className="min-w-0 truncate font-medium">{group.name || group.id}</h3>
+											<span className="text-xs text-zinc-500 dark:text-zinc-400">
+												{group.updated_at != null && <>Updated {formatLocalDateTime(group.updated_at)}</>}
+											</span>
+										</div>
 
-								<RuleList
-									policy={{ id: group.id, include: group.include, exclude: group.exclude, require: group.require }}
-									ctx={ctx}
-								/>
+										<RuleList
+											policy={{ id: group.id, include: group.include, exclude: group.exclude, require: group.require }}
+											ctx={ctx}
+										/>
 
-								<div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
-									<span className="text-zinc-500 dark:text-zinc-400">
-										{referencedBy.length
-											? `Used by ${referencedBy.length} application${referencedBy.length === 1 ? "" : "s"}:`
-											: "Not referenced by any application policy."}
-									</span>
-									{referencedBy.map((name) => <Tag key={name} label={name} />)}
-								</div>
+										<div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
+											<span className="text-zinc-500 dark:text-zinc-400">
+												{referencedBy.length
+													? `Used by ${referencedBy.length} application${referencedBy.length === 1 ? "" : "s"}:`
+													: "Not referenced by any application policy."}
+											</span>
+											{referencedBy.map((name) => <Tag key={name} label={name} />)}
+										</div>
 
-								<details className="mt-3">
-									<summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wide text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
-										Raw JSON
-									</summary>
-									<pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-950">
-										{JSON.stringify(group, null, 2)}
-									</pre>
-								</details>
-							</div>
-						);
-					})}
-				</div>
+										<details className="mt-3">
+											<summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wide text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
+												Raw JSON
+											</summary>
+											<pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-950">
+												{JSON.stringify(group, null, 2)}
+											</pre>
+										</details>
+									</div>
+								);
+							})}
+						</div>
+					)}
+				</TabPanel>
 			)}
 		</PageShell>
 	);

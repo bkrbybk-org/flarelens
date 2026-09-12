@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { EmptyState } from "../../components/EmptyState";
-import { BADGE, BADGE_NEUTRAL, BTN_SECONDARY, SEARCH_INPUT } from "../../lib/ui";
+import { BADGE, BADGE_NEUTRAL, BTN_SECONDARY, INPUT, SEARCH_INPUT } from "../../lib/ui";
 import { actionDrift, aggregateRules, topEntries } from "../../lib/waf/aggregate";
 import { relativeTime, titleCase } from "../../lib/waf/format";
 import type { FirewallEvent, RuleMetaMap, RuleReviewRow } from "../../lib/waf/types";
@@ -59,7 +59,7 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 	const pageRows = filtered.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE);
 
 	const selectCls =
-		"rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900";
+		INPUT;
 
 	const chips = [
 		{ label: "Rules known", value: summary.known, cls: "" },

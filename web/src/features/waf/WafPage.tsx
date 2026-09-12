@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { PageShell } from "../../components/PageShell";
+import { TabPanel, Tabs } from "../../components/Tabs";
 import { StatCard, StatGrid } from "../../components/StatCard";
-import { ALERT_ERROR, ALERT_WARN, SEARCH_INPUT } from "../../lib/ui";
+import { ALERT_ERROR, ALERT_WARN, INPUT, SEARCH_INPUT } from "../../lib/ui";
 import { useHashSyncedState } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
@@ -79,7 +80,7 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 	}), [waf.events, rulesetRows]);
 
 	const selectCls =
-		"rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900";
+		INPUT;
 
 	const kpiCards = [
 		{ label: "Total events", value: kpis.total, icon: AppsIcon, cls: "bg-cf/15 text-cf" },
@@ -137,42 +138,38 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 			</StatGrid>
 
 			{/* Tabs */}
-			<div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800" role="tablist">
-				{([["overview", "Overview"], ["rules", "Rules Review"]] as [Tab, string][]).map(([id, label]) => (
-					<button
-						key={id}
-						type="button"
-						role="tab"
-						aria-selected={tab === id}
-						onClick={() => setTab(id)}
-						className={
-							tab === id
-								? "border-b-2 border-cf px-4 py-2 text-sm font-medium text-cf"
-								: "border-b-2 border-transparent px-4 py-2 text-sm text-zinc-500 transition hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-						}
-					>
-						{label}
-					</button>
-				))}
-			</div>
+			<Tabs
+				label="WAF views"
+				idPrefix="waf"
+				active={tab}
+				onChange={setTab}
+				tabs={[
+					{ id: "overview", label: "Overview" },
+					{ id: "rules", label: "Rules Review" },
+				]}
+			/>
 
 			{tab === "overview" ? (
-				<>
-					<EventGraph events={waf.events} window={waf.window} />
-					<div className="relative">
-						<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
-						<input
-							type="search"
-							value={globalSearch}
-							onChange={(e) => setGlobalSearch(e.target.value)}
-							placeholder="Search rulesets, rules, hosts…"
-							className={SEARCH_INPUT}
-						/>
+				<TabPanel id="overview" idPrefix="waf">
+					<div className="space-y-4">
+						<EventGraph events={waf.events} window={waf.window} />
+						<div className="relative">
+							<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
+							<input
+								type="search"
+								value={globalSearch}
+								onChange={(e) => setGlobalSearch(e.target.value)}
+								placeholder="Search rulesets, rules, hosts…"
+								className={SEARCH_INPUT}
+							/>
+						</div>
+						<RulesetTable rows={rulesetRows} globalSearch={globalSearch} window={waf.window} onSelectRule={setDrawerRule} />
 					</div>
-					<RulesetTable rows={rulesetRows} globalSearch={globalSearch} window={waf.window} onSelectRule={setDrawerRule} />
-				</>
+				</TabPanel>
 			) : (
-				<RulesReview events={waf.events} ruleMeta={waf.ruleMeta} window={waf.window} onSelectRule={setDrawerRule} />
+				<TabPanel id="rules" idPrefix="waf">
+					<RulesReview events={waf.events} ruleMeta={waf.ruleMeta} window={waf.window} onSelectRule={setDrawerRule} />
+				</TabPanel>
 			)}
 
 			<RuleDrawer

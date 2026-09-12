@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyRow } from "../../components/EmptyState";
-import { BTN_SECONDARY, SEARCH_INPUT } from "../../lib/ui";
+import { BTN_SECONDARY, FOCUS_ROW, SEARCH_INPUT } from "../../lib/ui";
 import {
 	flexRender,
 	getCoreRowModel,
@@ -480,7 +480,7 @@ export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility
 												}}
 												tabIndex={0}
 												aria-expanded={isOpen}
-												className="cursor-pointer border-b border-zinc-100 transition last:border-0 hover:bg-zinc-50 focus:bg-zinc-50 focus:outline-none dark:border-zinc-800/60 dark:hover:bg-zinc-800/40 dark:focus:bg-zinc-800/40"
+												className={`cursor-pointer border-b border-zinc-100 transition last:border-0 hover:bg-zinc-50 dark:border-zinc-800/60 dark:hover:bg-zinc-800/40 ${FOCUS_ROW}`}
 											>
 												{row.getVisibleCells().map((cell) => (
 													<td key={cell.id} className="px-4 py-3 align-top">

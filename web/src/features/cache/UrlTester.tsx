@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CARD, SECTION_TITLE } from "../../lib/ui";
+import { CARD, INPUT, SECTION_TITLE } from "../../lib/ui";
 import { compileTriState } from "../../lib/expr";
 import type { CacheRule } from "./types";
 
@@ -81,7 +81,7 @@ export function UrlTester({ rules, hosts, onResults }: UrlTesterProps) {
 						value={host}
 						onChange={(e) => setHost(e.target.value)}
 						aria-label="Host for bare paths"
-						className="rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+						className={INPUT}
 					>
 						{hosts.map((h) => <option key={h} value={h}>{h}</option>)}
 					</select>

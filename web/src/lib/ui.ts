@@ -76,3 +76,14 @@ export const BADGE = "rounded-full px-2 py-0.5 text-xs font-semibold";
 
 /** The neutral tone, for a pill that reports a state rather than a severity. */
 export const BADGE_NEUTRAL = `${BADGE} bg-zinc-500/15 text-zinc-600 dark:text-zinc-400`;
+
+/**
+ * Keyboard focus on a clickable table row.
+ *
+ * A row used to mark focus by shading itself zinc-50, which against a white table is about
+ * 1.03:1 — technically a change, practically invisible. A ring cannot be used here: rings are
+ * box-shadows, and a `<tr>` under `border-collapse` does not paint them. An outline does, and
+ * a negative offset keeps it inside the row rather than straddling the row above.
+ */
+export const FOCUS_ROW =
+	"focus-visible:outline-2 focus-visible:outline-cf focus-visible:-outline-offset-2 focus-visible:bg-zinc-50 dark:focus-visible:bg-zinc-800/40";

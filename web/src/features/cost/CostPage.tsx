@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, CARD_HEADER, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, CARD_HEADER, FOCUS_RING, SECTION_TITLE } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
 import type { Prefs } from "../../hooks/usePrefs";
@@ -87,7 +87,7 @@ export function CostPage({
 				value={rates[key] || ""}
 				placeholder="0"
 				onChange={(e) => updatePrefs({ costRates: { ...rates, [key]: Number(e.target.value) || 0 } })}
-				className="w-32 rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-sm tabular-nums outline-none focus:border-cf dark:border-zinc-700"
+				className={`w-32 rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-sm tabular-nums outline-none focus:border-cf dark:border-zinc-700 ${FOCUS_RING}`}
 			/>
 			<span className="text-[11px] text-zinc-500 dark:text-zinc-400">{hint}</span>
 		</label>

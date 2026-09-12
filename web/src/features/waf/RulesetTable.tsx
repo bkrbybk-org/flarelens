@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from "react";
 import { EmptyRow } from "../../components/EmptyState";
-import { BTN_SECONDARY } from "../../lib/ui";
+import { BTN_SECONDARY, FOCUS_ROW } from "../../lib/ui";
 import {
 	flexRender,
 	getCoreRowModel,
@@ -260,7 +260,15 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 										<Fragment key={row.id}>
 											<tr
 												onClick={() => toggleExpand(rowKey)}
-												className="cursor-pointer border-b border-zinc-100 transition hover:bg-zinc-50 dark:border-zinc-800/60 dark:hover:bg-zinc-800/40"
+												onKeyDown={(e) => {
+													if (e.key === "Enter" || e.key === " ") {
+														e.preventDefault();
+														toggleExpand(rowKey);
+													}
+												}}
+												tabIndex={0}
+												aria-expanded={isOpen}
+												className={`cursor-pointer border-b border-zinc-100 transition hover:bg-zinc-50 dark:border-zinc-800/60 dark:hover:bg-zinc-800/40 ${FOCUS_ROW}`}
 											>
 												<td className="px-2 py-3 text-center text-zinc-500 dark:text-zinc-400">
 													{isOpen ? <ChevronUpIcon size={14} /> : <ChevronDownIcon size={14} />}
