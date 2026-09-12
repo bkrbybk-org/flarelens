@@ -1,10 +1,21 @@
 # Flarelens — Progress
 
-Status snapshot, last reviewed **2026-09-05** (second pass, against a full read of the tree) against a full read of the codebase. See [README.md](README.md) for how to run the app; this file tracks where the work stands.
+Status snapshot, last reviewed **2026-09-12** against a full read of the tree and a live probe of
+the deployed API. See [README.md](README.md) for how to run the app; this file tracks where the
+work stands.
 
-**TL;DR** — Fifteen sections, 545 tests green, `tsc -b` clean, 0 lint errors. **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI no longer asks for a token. Every section except AI Gateway has been exercised against real account data through an Access service token — AI Gateway was built without API access in this environment, so its GraphQL field names are unverified guesses; see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts).
-Running version `c065d631`, deployed 2026-09-07 16:31 UTC.
+**TL;DR** — Fifteen sections, 596 tests green, `tsc -b` clean, 0 lint errors (4 known warnings).
+**Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
+mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
+no longer asks for a token. Every section has now been exercised against real account data
+through an Access service token, AI Gateway included — its field names are resolved from the
+schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
+Running version `db28da07`, deployed 2026-09-09 16:11 UTC.
 
+Source lives at `bkrbybk-org/flarelens` (public). `wrangler.jsonc` carries placeholder account,
+zone and Access ids; the real deployment config is the gitignored `wrangler.local.jsonc`, used by
+`npm run deploy:live`. GitHub Actions runs `npm run check` and `npm run lint` on every push and
+pull request; there is no deploy job, deliberately — see the note under Recently resolved.
 ---
 
 ## Sections
@@ -101,6 +112,7 @@ documents, so no caller text reaches a query.
 | [src/lib/gateway-usage.ts](src/lib/gateway-usage.ts) | Gateway DNS + HTTP telemetry; conservative block classification, multi-value category handling |
 | [src/lib/access-tunnels.ts](src/lib/access-tunnels.ts) | Tunnel Map: joins Access apps, tunnel ingress and private routes, and classifies each destination's origin kind |
 | [src/lib/pqc.ts](src/lib/pqc.ts) | Post-quantum readiness: zone TLS settings + DNS inventory + tunnel and Worker origins, classified into two legs and one verdict, plus `gradeCipher`/`summariseCiphers` for the zone's TLS 1.0–1.2 suite list. `buildPqcReport` is pure and carries the classification rules |
+| [src/lib/pqc-adoption.ts](src/lib/pqc-adoption.ts) | Measured post-quantum adoption: introspects `httpRequestsAdaptiveGroups` for a key-exchange dimension, matched by shape rather than one spelling, then reports per-hostname adoption or states why it cannot. A cipher or protocol dimension deliberately does not match |
 | [src/lib/request-trace.ts](src/lib/request-trace.ts) | Ray ID forensics: schema-swept field selection, adaptive retry around per-zone entitlements and Cloudflare's field ceiling |
 | [src/lib/workers-analytics.ts](src/lib/workers-analytics.ts) | Workers invocation metrics; script list degrades when the scope is absent |
 | [src/lib/workers-ai.ts](src/lib/workers-ai.ts) | Workers AI inference metrics; folds rows split by `errorCode` |
@@ -147,7 +159,7 @@ Disconnect clears the store.
 | Key | Store | Notes |
 |---|---|---|
 | `cf_api_token`, `cf_account_id`, `cf_account_name` | sessionStorage | Cleared on tab close; never persisted to disk |
-| `cf_zt_prefs` | localStorage | `PREFS_VERSION = 2`; a version bump discards saved column order/visibility so new defaults apply |
+| `cf_zt_prefs` | localStorage | `PREFS_VERSION = 3`; a version bump discards saved column order/visibility so new defaults apply. The policies table keeps its own `policyColumnVisibility` / `policyColumnOrder` keys: it shares column ids (`name`, `updated_at`, `id`) with the applications table, so one saved order would scramble the other |
 | `cf_zt_last_load_ms`, `cf_waf_last_load_ms`, `cf_cache_last_load_ms` | sessionStorage | Rolling load-duration estimates for the progress bar |
 
 ### Tests
@@ -170,6 +182,7 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | `tests/components/PqcPage.test.tsx` | Rendered `PqcPage` (fetch mocked at `api/client`'s `fetchPqcReport`): verdict filter chips narrow/restore rows, search matches hostname and zone, a zone-level error renders instead of being swallowed, empty state on no match |
 | `tests/components/ConnectPage.test.tsx` | Rendered `ConnectPage`: empty-token submit shows "API Token is required" and calls no fetch; every required/optional permission entry renders |
 | `tests/components/AppsTable.test.tsx` | Rendered `AppsTable`: the global search box narrows visible rows and clearing it restores them |
+| `tests/components/GroupsPage.test.tsx` | Rendered `GroupsPage`: tab order and deep-linking, the policies table's default sort and search, the created column hidden but selectable, a referenced list's name/size/entries, and an unreadable list stating why |
 | `tests/ai-gateway.test.ts` | AI Gateway route: series/totals fold, rate arithmetic (never divides by zero), per-dataset degradation when a guessed field name is wrong, validation, auth, `no-store`, 502 on load-bearing failure, and the same "no per-user dimension" privacy assertion as the other aggregate-only sections |
 
 ---
@@ -268,7 +281,22 @@ into that project only, so the node project's Workers-shaped globals stay untouc
   selector with drag-to-reorder, saved under its own prefs keys because it shares column ids
   (name, updated_at, id) with the applications table; `created_at` is hidden by default.
 
+- **Login counts on the Applications page** (2026-09-09) — a `Logins (7d)` column answering
+  "is anyone actually using this app" where the applications are listed, not only in the separate
+  Access Usage section. Loaded by its own hook so a token without `Analytics: Read` still gets the
+  table, with the column stating why it is empty. Unknown and zero stay distinct throughout: null
+  renders as a dash and exports as `unavailable`, zero renders amber. The telemetry now also
+  carries the raw app uuid alongside the resolved name, because the join has to match on the
+  uuid — names repeat, get renamed, and are missing for an application deleted since its logins
+  were recorded. On this account 8 of 24 applications saw a login in the window, and 220 logins
+  belong to four applications that no longer exist.
+
 **Incidents**
+- 2026-09-09: **the Logins column shipped blank.** The loading effect guarded on
+  `session.token` being truthy, but in server mode the browser holds no credential and that field
+  is deliberately the empty string — so on the only deployment that matters the fetch never
+  happened: no request, no error, no banner, just a column of dashes. Guard on the session
+  instead. `tests/no-adhoc-auth.test.ts` now pins it, and fails if the old condition returns.
 - 2026-09-07: **server mode broke for every gated route.** The Access application was recreated, which changed its AUD, so JWT verification failed audience check and the SPA fell back to asking for a token. Found while testing an unrelated route — the control route failed the same way, which ruled out the new code. Fixed by reading the live AUD from the login redirect and updating `CF_ACCESS_AUD`. See the constraints section in [README.md](README.md).
 
 **Layout**
@@ -286,12 +314,23 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | # | Issue | Impact | Fix |
 |---|---|---|---|
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules |
-| P2 | **Bound token lacks `Zone: DNS: Read` and `Zone Settings: Read`** — verified against the deployed endpoint 2026-09-08: `/api/pqc/report` returns all four zones with every field null | PQC Readiness has no rows at all. Each zone states its own failure, so the page does not read as a clean account, but it answers nothing until the scopes are added | Add both in the Cloudflare dashboard. If a new token is minted rather than the existing one edited, `wrangler secret put CF_API_TOKEN` too |
+| P3 | **PQC Readiness counts DNS validation records as hostnames** — the one `not-ready` row on this account is `_6390ec137f3d86b975ad6f6431d343a6.nttlab.org`, an underscore-prefixed ACME/validation record | A false positive: a validation record is not a service anyone reaches, so flagging it as unprotected is noise that trains the reader to ignore the column | Exclude underscore-prefixed labels from the inventory, or classify them as a non-service record type rather than dropping them silently |
 | P3 | 4 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
-| P4 | `useHashSyncedState` adopts URL params on mount only. Editing the hash to a *different route* while the app is open (e.g. `#/waf?zone=A` → `#/cache?zone=B`) does not adopt the new param, because `App` never unmounts — the write-back then overwrites it | Hand-edited cross-route deep links lose their param. Fresh loads and in-app navigation are unaffected | Key the adoption on `route` as well as mount |
-| P4 | Worker's `CfGroup` interface ([src/index.ts](src/index.ts)) declares only `id`/`name`, but the endpoint passes the full group object through to the client | None at runtime — TS interfaces don't strip fields — but it misleads anyone reading the Worker in isolation | Widen it to match [web/src/types.ts](web/src/types.ts) |
 
 ### Recently resolved
+
+- ~~Bound token lacked `Zone: DNS: Read` and `Zone Settings: Read`~~ — both granted; verified
+  against the deployed endpoint 2026-09-12. PQC Readiness now returns **35 hostnames with zero
+  errors**: 19 ready, 15 eligible, 1 not-ready, and 13 TLS hygiene findings across four zones.
+  Measured post-quantum adoption is live at **33.3%** (3,838 of 11,519 measured requests) over 93
+  hostnames, via the `clientTLSKeyExchangeGroup` dimension.
+
+- ~~`useHashSyncedState` adopted URL params on mount only~~ — keyed on `route` as well, so a
+  hand-edited cross-route deep link is adopted rather than overwritten. The hook gained a
+  required `route` argument, which is why three call sites changed.
+
+- ~~Worker's `CfGroup` understated what the endpoint returns~~ — widened to match the client's
+  declared shape.
 
 - ~~No git remote, and nothing enforcing the gate~~ — published at
   `bkrbybk-org/flarelens` with a GitHub Actions workflow running `npm run check` and

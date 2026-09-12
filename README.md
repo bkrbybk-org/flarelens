@@ -6,7 +6,7 @@ Ops dashboard for Cloudflare: a single pane of glass for reviewing an account's 
 
 | Route | Section | Scope | What it shows |
 |---|---|---|---|
-| `#/access` | Access Applications | account | Apps and their policies, with include/require/exclude rules rendered as readable sentences; filterable/sortable table, per-app detail drawer |
+| `#/access` | Access Applications | account | Apps and their policies, with include/require/exclude rules rendered as readable sentences; filterable/sortable table, per-app detail drawer, and a **Logins (7d)** column showing how many times each application was actually signed into. Unknown and zero are distinct: a dash means the telemetry could not be read and says why, an amber 0 means nobody signed in this week |
 | `#/groups` | Access Groups | account | Two tabs over the account-level configuration applications attach by reference. **Reusable policies** (default) is a sortable, filterable table — decision, rule counts, attached applications, created/updated — sorted by last update, with Excel-style column filters, a column selector with drag-to-reorder (Created hidden by default), search, CSV export and an expandable row showing the policy's rules; a policy attached to nothing is flagged, since it enforces nothing. A rule referencing a Zero Trust list resolves to the list's name and size, with its entries expandable inline. **Rule groups** lists Access Groups with their rules, cross-referenced to the applications whose policies use them. Deep-linkable as `#/groups?tab=groups` |
 | `#/access-usage` | Access Usage | account | Access login telemetry from `accessLoginRequestsAdaptiveGroups`: volume with a success/failure split, and top applications, identity providers and countries. Cloudflare caps this dataset at a 1-week window |
 | `#/request` | Request Trace | account or zone | Everything Cloudflare records about one HTTP request, found by Ray ID: WAF attack scores, bot score and decision, JA3/JA4 fingerprints, TLS, device type, method, path, query, referer, content scanning, edge and origin timings, every firewall rule that matched, and — where a payload-logging rule captured it — the request body, decrypted in the browser. Fields beyond the curated groups are swept from the schema, so detail Cloudflare adds later appears without a code change. Field selection follows a live schema probe, and absence is reported as inconclusive because `httpRequestsAdaptive` is adaptively sampled |
@@ -99,7 +99,7 @@ See [PROGRESS.md](PROGRESS.md) for the full route table, hook inventory, storage
 | Account WAF: Read · Zone WAF: Read | Ruleset metadata in WAF Analytics |
 | Cache Rules: Read | Cache Rules section |
 | Zone Analytics: Read | Traffic and hit-ratio data in Cache Rules, and the request/detection telemetry behind AI Security |
-| Analytics: Read | Prompt injection, PII and topic detections in AI Security; Access Usage, Gateway Usage, Workers Analytics, Workers AI, AI Gateway and Cost & Usage all read account-scoped GraphQL datasets behind this |
+| Analytics: Read | Prompt injection, PII and topic detections in AI Security; Access Usage, Gateway Usage, Workers Analytics, Workers AI, AI Gateway and Cost & Usage all read account-scoped GraphQL datasets behind this, as does the Applications page's Logins (7d) column — which degrades to a dash and a stated reason without it |
 | Cloudflare Tunnel: Read | Tunnel names, status and ingress rules in the Tunnel Map, and the private network routes. **Cloudflare returns an empty list rather than a 403 when this is missing**, so without it the page cannot tell an account with no tunnels from a token that cannot see them — it says so rather than showing a blank map |
 | Zero Trust: Read | Resolves a policy rule referencing a Zero Trust list (`Email in list …`) to that list's name, size and entries. Without it the rule still renders, carrying the bare list id |
 | Zone: DNS: Read | The hostname inventory behind PQC Readiness. Without it each zone is still listed, carrying its own error and no hostnames, rather than the page reporting a clean but empty account |
@@ -287,6 +287,36 @@ recorded today stays readable to whoever later obtains the certificate's private
 computer or not. An empty list means Cloudflare's defaults and is reported as such, not graded:
 customising needs Advanced Certificate Manager, the defaults are not visible through the API, and
 marking a zone down for a list it cannot see or edit would be noise.
+
+**How far back each section can look, and why.** Measured against this account on 2026-09-12,
+not assumed — the ceilings are Cloudflare's and vary by plan:
+
+| Section | App's cap | Ceiling |
+|---|---|---|
+| Access Usage, and the Applications `Logins (7d)` column | 7 days | **The dataset's own cap.** `accessLoginRequestsAdaptiveGroups` refuses a wider range; nothing in configuration raises it |
+| WAF Analytics | 30 days | `firewallEventsAdaptive` retention: 24h on Free/Pro, 3 days on Business, 30 days on Enterprise |
+| Gateway, Workers, Workers AI, AI Gateway | 30 days | app-imposed; the datasets allow more on higher plans |
+| Cache Rules | 24h / 7d / 30d | app-imposed |
+| PQC measured adoption | 24 hours | app-imposed; `httpRequestsAdaptive` retention runs to 90 days on Enterprise |
+
+So a question like "has anyone signed into this application this quarter" is **not answerable
+through this API at all** — seven days is the wall, and the only way past it is Log Explorer with
+`access_requests` stored, which is a stored-logs decision rather than a code change.
+
+**A wider WAF window returns fewer events, not more.** Measured on the same account, minutes
+apart:
+
+```
+ 7-day window → 18,440 events across  8 distinct days
+30-day window →  5,388 events across 31 distinct days
+```
+
+The 30-day result should be a superset of the 7-day one and is not. It is not sampling —
+`sampleInterval` is absent on every row — and the app's pagination completed in both cases,
+well under its 5 × 10k cap, so Cloudflare is serving a sparser set for the wider window. The
+mechanism is unknown and is deliberately not guessed at here. The consequence is firm regardless:
+**WAF event counts are not comparable across window sizes**, and a 30-day WAF view is a sparse
+sample rather than a complete history. Do not read month-over-month trends from it.
 
 **Gateway reports an outcome as free text, not a boolean.** Gateway HTTP rows carry the policy
 `action` (`allow`, `block`, `quarantine`, `isolate`, `off`, …) and DNS rows carry a camelCase
