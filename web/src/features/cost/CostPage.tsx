@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, CARD_HEADER, FOCUS_RING, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, CARD, CARD_HEADER, FOCUS_RING, SECTION_TITLE } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
-import { RefreshIcon } from "../../components/Icons";
 import type { Prefs } from "../../hooks/usePrefs";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
@@ -50,6 +50,7 @@ export function CostPage({
 }) {
 	const [reloadKey, setReloadKey] = useState(0);
 	const { workers, ai, loading, error, progress, load } = useCostData(onAuthError);
+	useSectionRefresh(useCallback(() => setReloadKey((k) => k + 1), []), loading);
 
 	const granularity = timeRange.minutes > 7 * 24 * 60 ? "daily" : "hourly";
 	const { from, to } = timeRange.bounds();
@@ -97,15 +98,6 @@ export function CostPage({
 		<PageShell>
 			<div className="flex flex-wrap items-center gap-3">
 				<span className="text-xs text-zinc-500 dark:text-zinc-400">Billable units for the selected window</span>
-				<button
-					type="button"
-					onClick={() => setReloadKey((k) => k + 1)}
-					disabled={loading}
-					className={`ml-auto ${BTN_SECONDARY_SM}`}
-				>
-					<RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
-					Refresh
-				</button>
 			</div>
 
 			{progress.running && <ProgressBar percent={progress.percent} />}

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { PageShell } from "../../components/PageShell";
 import { TabPanel, Tabs } from "../../components/Tabs";
 import { StatCard, StatGrid } from "../../components/StatCard";
@@ -10,7 +11,7 @@ import { aggregateRulesets, countEventsByActions } from "../../lib/waf/aggregate
 import { AUTO_REFRESH_OPTIONS, EVENT_LIMIT, LOOKBACK_OPTIONS } from "../../lib/waf/constants";
 import { relativeTime } from "../../lib/waf/format";
 import { publishWafSnapshot } from "../../lib/sectionSnapshot";
-import { AlertIcon, AppsIcon, KeyIcon, RefreshIcon, SearchIcon, ShieldIcon, UsersIcon } from "../../components/Icons";
+import { AlertIcon, AppsIcon, KeyIcon, SearchIcon, ShieldIcon, UsersIcon } from "../../components/Icons";
 import { ProgressBar } from "../../components/ProgressBar";
 import { EventGraph } from "./EventGraph";
 import { RuleDrawer, type DrawerRule } from "./RuleDrawer";
@@ -90,6 +91,12 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 		{ label: "Rulesets firing", value: kpis.rulesets, icon: UsersIcon, cls: "bg-violet-500/15 text-violet-600 dark:text-violet-400" },
 	];
 
+	const refresh = useCallback(
+		() => void load(session.token, session.accountId, zoneId, minutes).then(() => setLastRefreshed(new Date().toISOString())),
+		[load, session.token, session.accountId, zoneId, minutes],
+	);
+	useSectionRefresh(refresh, waf.loading);
+
 	return (
 		<PageShell>
 			{waf.progress.running && <ProgressBar percent={waf.progress.percent} />}
@@ -116,15 +123,6 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 				<select value={autoRefresh} onChange={(e) => setAutoRefresh(Number(e.target.value))} aria-label="Auto refresh" className={selectCls}>
 					{AUTO_REFRESH_OPTIONS.map(([value, label]) => <option key={value} value={value}>Auto: {label}</option>)}
 				</select>
-				<button
-					type="button"
-					onClick={() => load(session.token, session.accountId, zoneId, minutes).then(() => setLastRefreshed(new Date().toISOString()))}
-					disabled={waf.loading}
-					className="flex items-center gap-2 rounded-lg bg-cf px-3 py-2 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
-				>
-					<RefreshIcon size={14} className={waf.loading ? "animate-spin" : undefined} />
-					Refresh
-				</button>
 				{lastRefreshed && (
 					<span className="text-xs text-zinc-500 dark:text-zinc-400">Updated {relativeTime(lastRefreshed)}</span>
 				)}

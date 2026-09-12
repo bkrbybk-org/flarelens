@@ -1,4 +1,5 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyState } from "../../components/EmptyState";
 import { StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
@@ -6,7 +7,7 @@ import { ALERT_ERROR, ALERT_WARN, CARD, SECTION_TITLE } from "../../lib/ui";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { ProgressBar } from "../../components/ProgressBar";
-import { AlertIcon, RefreshIcon } from "../../components/Icons";
+import { AlertIcon } from "../../components/Icons";
 import type { Kpi, SchemaReadout } from "../../lib/ai-sec/types";
 import { BarList, DetectionsChart, Sparkline, TrendChart } from "./charts";
 import { EventsTable } from "./EventsTable";
@@ -162,6 +163,9 @@ export function AiSecurityPage({ session, zoneId, timeRange, onAuthError }: Prop
 		return `Detections over ${data.window.label}: prompt injection ${sum("injection")}, PII ${sum("pii")}, unsafe topic ${sum("unsafe")}, custom topic ${sum("custom")}.`;
 	}, [data]);
 
+	const refresh = useCallback(() => void load(session.token, session.accountId, zoneId, range), [load, session.token, session.accountId, zoneId, range]);
+	useSectionRefresh(refresh, ai.loading);
+
 	return (
 		<PageShell>
 			{ai.progress.running && <ProgressBar percent={ai.progress.percent} />}
@@ -178,15 +182,6 @@ export function AiSecurityPage({ session, zoneId, timeRange, onAuthError }: Prop
 				<span className="rounded-lg border border-zinc-200 px-2.5 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
 					{RANGE_OPTIONS.find(([value]) => value === range)?.[1] ?? range}
 				</span>
-				<button
-					type="button"
-					onClick={() => load(session.token, session.accountId, zoneId, range)}
-					disabled={ai.loading}
-					className="flex items-center gap-2 rounded-lg bg-cf px-3 py-2 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
-				>
-					<RefreshIcon size={14} className={ai.loading ? "animate-spin" : undefined} />
-					Refresh
-				</button>
 				{data && (
 					<span className="text-xs text-zinc-500 dark:text-zinc-400">
 						{data.totalEvents.toLocaleString()} flagged request(s) · {data.window.label}

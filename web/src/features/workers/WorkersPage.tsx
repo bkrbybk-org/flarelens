@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyRow } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY_SM, CARD, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, ALERT_WARN, CARD, SECTION_TITLE } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
-import { RefreshIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { MetricsChart, type ChartType, type Series } from "./MetricsChart";
@@ -73,6 +73,7 @@ export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProp
 	const [reloadKey, setReloadKey] = useState(0);
 
 	const { result, scripts, loading, error, progress, load } = useWorkersData(onAuthError);
+	useSectionRefresh(useCallback(() => setReloadKey((k) => k + 1), []), loading);
 
 	// The shared window picks the default bucket size; an explicit choice overrides it until
 	// the window changes again.
@@ -171,15 +172,6 @@ export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProp
 						{ value: "bar", label: "Bar" },
 					]}
 				/>
-				<button
-					type="button"
-					onClick={() => setReloadKey((k) => k + 1)}
-					disabled={loading}
-					className={`ml-auto ${BTN_SECONDARY_SM}`}
-				>
-					<RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
-					Refresh
-				</button>
 			</div>
 
 			{progress.running && <ProgressBar percent={progress.percent} />}

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyNote } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, BTN_SECONDARY_SM, CARD, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, CARD, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
-import { RefreshIcon, SearchIcon } from "../../components/Icons";
+import { SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { Session } from "../../hooks/useSession";
 import { usePqcReport } from "./usePqcReport";
@@ -267,6 +268,7 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 	const [filter, setFilter] = useState<Verdict | "all">("all");
 	const [reloadKey, setReloadKey] = useState(0);
 	const { result, loading, error, progress, load } = usePqcReport(onAuthError);
+	useSectionRefresh(useCallback(() => setReloadKey((k) => k + 1), []), loading);
 
 	useEffect(() => {
 		load(session.token, session.accountId);
@@ -352,15 +354,6 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 					className={BTN_SECONDARY}
 				>
 					Export CSV
-				</button>
-				<button
-					type="button"
-					onClick={() => setReloadKey((k) => k + 1)}
-					disabled={loading}
-					className={BTN_SECONDARY_SM}
-				>
-					<RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
-					Refresh
 				</button>
 			</div>
 

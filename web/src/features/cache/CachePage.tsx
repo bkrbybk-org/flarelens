@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyState } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
@@ -65,6 +66,14 @@ export function CachePage({ session, zoneId, timeRange, onAuthError }: CachePage
 
 	const data = cache.data;
 
+	// Registered before the no-zone early return, so the hook order is stable; it no-ops
+	// until a zone is picked, because the fetch is zone-scoped and has nothing to ask for.
+	const refresh = useCallback(
+		() => { if (zoneId) void load(session.token, zoneId, rangeHours); },
+		[load, session.token, zoneId, rangeHours],
+	);
+	useSectionRefresh(refresh, cache.loading);
+
 	// Publish the latest load for the Findings page, which reads a snapshot
 	// rather than duplicating this fetch (see lib/sectionSnapshot.ts).
 	useEffect(() => {
@@ -128,15 +137,6 @@ export function CachePage({ session, zoneId, timeRange, onAuthError }: CachePage
 				<span className="rounded-lg border border-zinc-200 px-2.5 py-2 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
 					{RANGE_OPTIONS.find(([value]) => value === rangeHours)?.[1] ?? `Last ${rangeHours}h`}
 				</span>
-				<button
-					type="button"
-					onClick={() => load(session.token, zoneId, rangeHours)}
-					disabled={cache.loading}
-					className="flex items-center gap-2 rounded-lg bg-cf px-3 py-2 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
-				>
-					<RefreshIcon size={14} className={cache.loading ? "animate-spin" : undefined} />
-					Refresh
-				</button>
 				{data && (
 					<span className="text-xs text-zinc-500 dark:text-zinc-400">
 						Zone: <span className="font-medium">{data.zoneName}</span>

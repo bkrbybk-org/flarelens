@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyNote } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, CARD, SECTION_TITLE } from "../../lib/ui";
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 import { ProgressBar } from "../../components/ProgressBar";
-import { RefreshIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { useAiGatewayUsage } from "./useAiGatewayUsage";
@@ -138,6 +138,7 @@ export function AiGatewayPage({
 }) {
 	const [reloadKey, setReloadKey] = useState(0);
 	const { result, loading, error, progress, load } = useAiGatewayUsage(onAuthError);
+	useSectionRefresh(useCallback(() => setReloadKey((k) => k + 1), []), loading);
 
 	const granularity: AiGatewayGranularity = timeRange.minutes > 7 * 24 * 60 ? "daily" : "hourly";
 	const { from, to } = timeRange.bounds();
@@ -156,15 +157,6 @@ export function AiGatewayPage({
 				<span className="text-xs text-zinc-500 dark:text-zinc-400">
 					{granularity === "daily" ? "Daily buckets" : "Hourly buckets"}
 				</span>
-				<button
-					type="button"
-					onClick={() => setReloadKey((k) => k + 1)}
-					disabled={loading}
-					className={`ml-auto ${BTN_SECONDARY_SM}`}
-				>
-					<RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
-					Refresh
-				</button>
 			</div>
 
 			{progress.running && <ProgressBar percent={progress.percent} />}

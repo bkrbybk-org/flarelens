@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { SectionRefreshContext, type SectionRefresh } from "./hooks/useSectionRefresh";
 import { fetchAccounts, fetchConfig } from "./api/client";
 import type { CfAccount } from "./types";
 import { ConnectPage } from "./components/connect/ConnectPage";
@@ -30,6 +31,9 @@ import { useZones } from "./hooks/useZones";
 import type { RuleContext } from "./lib/rules";
 import { clearSectionSnapshots } from "./lib/sectionSnapshot";
 
+/** Sections backed by the shared /api/data payload rather than their own loader. */
+const DATA_ROUTES = new Set<Route>(["access", "groups", "findings"]);
+
 const PAGE_TITLES: Record<Route, string> = {
 	access: "Access Applications",
 	groups: "Access Groups",
@@ -54,6 +58,14 @@ export default function App() {
 	const [route, navigate] = useRoute();
 	const timeRange = useTimeRange(prefs, updatePrefs, route);
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+	// The mounted section registers what reloading means for it, so the top bar's Sync can
+	// drive any section without App knowing how each one fetches. Exactly one section is
+	// mounted at a time, so this is a single slot rather than a list.
+	const [sectionRefresh, setSectionRefresh] = useState<SectionRefresh | null>(null);
+	const registerRefresh = useCallback((next: SectionRefresh | null) => {
+		setSectionRefresh((prev) => (next === null && prev === null ? prev : next));
+	}, []);
 
 	// Disconnecting must not leave one customer's telemetry in memory for
 	// whoever connects next on this browser.
@@ -218,6 +230,7 @@ export default function App() {
 	}
 
 	return (
+		<SectionRefreshContext value={registerRefresh}>
 		<div className="flex h-dvh overflow-hidden">
 			<Sidebar
 				accountId={session.accountId}
@@ -249,9 +262,15 @@ export default function App() {
 					title={PAGE_TITLES[route]}
 					theme={prefs.theme}
 					onToggleTheme={() => updatePrefs({ theme: prefs.theme === "dark" ? "light" : "dark" })}
-					onSync={() => load(session.token, session.accountId)}
-					syncing={data.loading}
-					showSync={route === "access" || route === "groups" || route === "findings"}
+					// Applications, Groups and Findings all read the same /api/data payload, so they
+					// share App's loader; every other section registers its own.
+					onSync={
+						DATA_ROUTES.has(route)
+							? () => load(session.token, session.accountId)
+							: sectionRefresh?.reload
+					}
+					syncing={DATA_ROUTES.has(route) ? data.loading : (sectionRefresh?.loading ?? false)}
+					showSync={DATA_ROUTES.has(route) || sectionRefresh !== null}
 					zonePicker={
 						route === "waf"
 							? {
@@ -367,5 +386,6 @@ export default function App() {
 				</main>
 			</div>
 		</div>
+		</SectionRefreshContext>
 	);
 }

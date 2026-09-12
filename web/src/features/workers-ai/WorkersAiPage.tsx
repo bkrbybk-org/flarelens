@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyRow, EmptyState } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, CARD_HEADER, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, CARD, CARD_HEADER, SECTION_TITLE } from "../../lib/ui";
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 import { ProgressBar } from "../../components/ProgressBar";
-import { RefreshIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { useWorkersAi } from "./useWorkersAi";
@@ -123,6 +123,7 @@ export function WorkersAiPage({
 	const [metric, setMetric] = useState<AiMetric>("requests");
 	const [reloadKey, setReloadKey] = useState(0);
 	const { result, loading, error, progress, load } = useWorkersAi(onAuthError);
+	useSectionRefresh(useCallback(() => setReloadKey((k) => k + 1), []), loading);
 
 	const granularity: AiGranularity = timeRange.minutes > 7 * 24 * 60 ? "daily" : "hourly";
 	const { from, to } = timeRange.bounds();
@@ -157,15 +158,6 @@ export function WorkersAiPage({
 						</button>
 					))}
 				</div>
-				<button
-					type="button"
-					onClick={() => setReloadKey((k) => k + 1)}
-					disabled={loading}
-					className={`ml-auto ${BTN_SECONDARY_SM}`}
-				>
-					<RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
-					Refresh
-				</button>
 			</div>
 
 			{progress.running && <ProgressBar percent={progress.percent} />}

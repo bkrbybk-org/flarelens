@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyState } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY_SM, CARD, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, ALERT_WARN, CARD, SECTION_TITLE } from "../../lib/ui";
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 import { ProgressBar } from "../../components/ProgressBar";
-import { RefreshIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
 import { useAccessUsage } from "./useAccessUsage";
 import type { TimeRange } from "../../hooks/useTimeRange";
@@ -156,6 +156,7 @@ export function AccessUsagePage({
 }) {
 	const [reloadKey, setReloadKey] = useState(0);
 	const { result, loading, error, progress, load } = useAccessUsage(onAuthError);
+	useSectionRefresh(useCallback(() => setReloadKey((k) => k + 1), []), loading);
 
 	const { minutes, clamped } = timeRange.clamp(MAX_MINUTES);
 	// A day or more of data is unreadable hour by hour at this width.
@@ -181,15 +182,6 @@ export function AccessUsagePage({
 						Cloudflare caps Access login data at 7 days — showing the last week.
 					</span>
 				)}
-				<button
-					type="button"
-					onClick={() => setReloadKey((k) => k + 1)}
-					disabled={loading}
-					className={`ml-auto ${BTN_SECONDARY_SM}`}
-				>
-					<RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
-					Refresh
-				</button>
 			</div>
 
 			{progress.running && <ProgressBar percent={progress.percent} />}

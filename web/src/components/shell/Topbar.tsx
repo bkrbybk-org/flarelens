@@ -22,7 +22,8 @@ interface TopbarProps {
 	title: string;
 	theme: "dark" | "light";
 	onToggleTheme: () => void;
-	onSync: () => void;
+	/** Absent while no section has registered a reload — the button is hidden then anyway. */
+	onSync?: () => void;
 	syncing: boolean;
 	showSync?: boolean;
 	zonePicker?: ZonePickerProps;
