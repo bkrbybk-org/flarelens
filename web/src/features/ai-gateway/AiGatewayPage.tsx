@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ALERT_ERROR, BTN_SECONDARY_SM, CARD } from "../../lib/ui";
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
@@ -17,7 +18,6 @@ import {
 	type AiGatewaySeriesPoint as Point,
 } from "./types";
 
-const CARD = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 const ACCENT = "#f6821f";
 
 const W = 960;
@@ -89,7 +89,7 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 		<div className={CARD}>
 			<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
 			<div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-			{sub && <div className="mt-0.5 text-xs text-zinc-400">{sub}</div>}
+			{sub && <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{sub}</div>}
 		</div>
 	);
 }
@@ -167,7 +167,7 @@ export function AiGatewayPage({
 					type="button"
 					onClick={() => setReloadKey((k) => k + 1)}
 					disabled={loading}
-					className="ml-auto flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium transition hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:hover:bg-zinc-800"
+					className={`ml-auto ${BTN_SECONDARY_SM}`}
 				>
 					<RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
 					Refresh
@@ -177,7 +177,7 @@ export function AiGatewayPage({
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className="mb-4 rounded-lg border border-red-300/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
 					{error}
 				</div>
 			)}
@@ -210,7 +210,7 @@ export function AiGatewayPage({
 				<BreakdownCard title="Models / providers" rows={result?.byModel ?? []} emptyText="No model traffic in this window." />
 			</div>
 
-			<p className="mt-4 text-xs text-zinc-400">
+			<p className="mt-4 text-xs text-zinc-500 dark:text-zinc-400">
 				Aggregate only, account-scoped. Field names for these datasets are unverified against a live
 				Cloudflare schema — see the note at the top of src/lib/ai-gateway.ts. A dataset that fails to
 				load says so above rather than showing as quiet.

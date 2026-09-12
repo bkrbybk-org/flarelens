@@ -1,10 +1,11 @@
 import { useEffect, useMemo } from "react";
+import { ALERT_ERROR, ALERT_WARN, CARD } from "../../lib/ui";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { ProgressBar } from "../../components/ProgressBar";
 import { AlertIcon, RefreshIcon } from "../../components/Icons";
 import type { Kpi, SchemaReadout } from "../../lib/ai-sec/types";
-import { BarList, CARD_CLS, DetectionsChart, Sparkline, TrendChart } from "./charts";
+import { BarList, DetectionsChart, Sparkline, TrendChart } from "./charts";
 import { EventsTable } from "./EventsTable";
 import { useAiSecurityData } from "./useAiSecurityData";
 
@@ -39,7 +40,7 @@ const TONE_SPARK: Record<string, string> = {
 function SchemaReadoutPanel({ schema }: { schema: SchemaReadout }) {
 	const missing = schema.rows.filter((row) => !row.resolved);
 	return (
-		<details className={`${CARD_CLS} text-sm`}>
+		<details className={`${CARD} text-sm`}>
 			<summary className="cursor-pointer select-none font-medium">
 				Detection field coverage
 				<span className="ml-2 font-normal text-zinc-500 dark:text-zinc-400">
@@ -75,7 +76,7 @@ function KpiCard({ kpi, spark }: { kpi: Kpi; spark?: number[] }) {
 	// Percentage change from zero is undefined, not "+Infinity%".
 	const delta = typeof kpi.prev === "number" && kpi.prev > 0 ? ((kpi.value - kpi.prev) / kpi.prev) * 100 : null;
 	return (
-		<div className={CARD_CLS}>
+		<div className={CARD}>
 			<div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{kpi.label}</div>
 			<div className={`mt-1 text-3xl font-semibold tabular-nums ${TONE_TEXT[kpi.tone] ?? ""}`}>
 				{kpi.value.toLocaleString()}
@@ -164,7 +165,7 @@ export function AiSecurityPage({ session, zoneId, timeRange, onAuthError }: Prop
 				{ai.progress.running && <ProgressBar percent={ai.progress.percent} />}
 
 				{ai.error && (
-					<div role="alert" className="rounded-xl border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+					<div role="alert" className={ALERT_ERROR}>
 						{ai.error}
 					</div>
 				)}
@@ -194,7 +195,7 @@ export function AiSecurityPage({ session, zoneId, timeRange, onAuthError }: Prop
 				{/* A zone that failed is reported rather than silently dropped: the aggregate would
 				    otherwise be quietly short by that zone's traffic. */}
 				{data?.zonesWithErrors.length ? (
-					<div className="flex items-start gap-2 rounded-xl border border-amber-300/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+					<div className={`flex items-start gap-2 ${ALERT_WARN}`}>
 						<AlertIcon size={16} />
 						<span>
 							{data.zonesWithErrors.length} zone(s) failed to load and are missing from these totals:{" "}
@@ -249,7 +250,7 @@ export function AiSecurityPage({ session, zoneId, timeRange, onAuthError }: Prop
 
 						<EventsTable events={data.events} truncated={data.truncated} />
 
-						<section className={CARD_CLS}>
+						<section className={CARD}>
 							<h2 className="mb-3 text-sm font-semibold">Zone rollup</h2>
 							<div className="overflow-x-auto">
 								<table className="w-full border-collapse text-sm">

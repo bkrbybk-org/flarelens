@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY_SM, CARD } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
@@ -63,10 +64,10 @@ function Segmented<T extends string>({
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
 	return (
-		<div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+		<div className={CARD}>
 			<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
 			<div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
-			{sub && <div className="mt-0.5 text-xs text-zinc-400">{sub}</div>}
+			{sub && <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{sub}</div>}
 		</div>
 	);
 }
@@ -181,7 +182,7 @@ export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProp
 					type="button"
 					onClick={() => setReloadKey((k) => k + 1)}
 					disabled={loading}
-					className="ml-auto flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium transition hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:hover:bg-zinc-800"
+					className={`ml-auto ${BTN_SECONDARY_SM}`}
 				>
 					<RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
 					Refresh
@@ -191,13 +192,13 @@ export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProp
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className="mb-4 rounded-lg border border-red-300/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
 					{error}
 				</div>
 			)}
 
 			{result?.truncated && (
-				<div role="status" className="mb-4 rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+				<div role="status" className={`mb-4 ${ALERT_WARN}`}>
 					Results were capped at 10,000 rows. Shorten the range, or switch to daily granularity for full coverage.
 				</div>
 			)}
@@ -213,7 +214,7 @@ export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProp
 				<StatCard label="CPU P50" value={formatCpu(totals.cpuTimeP50)} sub="mean of bucket medians" />
 			</div>
 
-			<section className="mb-4 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+			<section className={`mb-4 ${CARD}`}>
 				<h2 className="mb-3 text-sm font-semibold">{WORKER_METRICS[metric]} over time</h2>
 				<MetricsChart
 					buckets={buckets}

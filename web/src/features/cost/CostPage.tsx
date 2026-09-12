@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ALERT_ERROR, BTN_SECONDARY_SM, CARD, CARD_HEADER } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon } from "../../components/Icons";
 import type { Prefs } from "../../hooks/usePrefs";
@@ -7,7 +8,6 @@ import type { TimeRange } from "../../hooks/useTimeRange";
 import { totalsOf } from "../workers/types";
 import { useCostData } from "./useCostData";
 
-const CARD = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
 /**
  * Billable-unit rollup across Workers and Workers AI for the shared window.
@@ -88,7 +88,7 @@ export function CostPage({
 				onChange={(e) => updatePrefs({ costRates: { ...rates, [key]: Number(e.target.value) || 0 } })}
 				className="w-32 rounded-md border border-zinc-300 bg-transparent px-2 py-1 text-sm tabular-nums outline-none focus:border-cf dark:border-zinc-700"
 			/>
-			<span className="text-[11px] text-zinc-400">{hint}</span>
+			<span className="text-[11px] text-zinc-500 dark:text-zinc-400">{hint}</span>
 		</label>
 	);
 
@@ -100,7 +100,7 @@ export function CostPage({
 					type="button"
 					onClick={() => setReloadKey((k) => k + 1)}
 					disabled={loading}
-					className="ml-auto flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium transition hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:hover:bg-zinc-800"
+					className={`ml-auto ${BTN_SECONDARY_SM}`}
 				>
 					<RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
 					Refresh
@@ -110,13 +110,13 @@ export function CostPage({
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className="mb-4 rounded-lg border border-red-300/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
 					{error}
 				</div>
 			)}
 
 			<section className={`${CARD} mb-4 p-0`}>
-				<h2 className="border-b border-zinc-200 px-4 py-3 text-sm font-semibold dark:border-zinc-800">Usage</h2>
+				<h2 className={CARD_HEADER}>Usage</h2>
 				<table className="w-full text-sm">
 					<thead className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
 						<tr>
@@ -135,7 +135,9 @@ export function CostPage({
 									<td className="px-4 py-2.5">{row.label}</td>
 									<td className="px-4 py-2.5 text-right tabular-nums">{formatUnits(row.units)}</td>
 									<td className="px-4 py-2.5 text-right tabular-nums text-zinc-500 dark:text-zinc-400">
-										{row.rateKey ? (rates[row.rateKey] || "—") : "n/a"}
+										{/* Two different absences, kept distinct: "no rate set" is the operator's to fix,
+										    "no rate applies" is not. Both would read as one if they shared a glyph. */}
+										{row.rateKey ? (rates[row.rateKey] || "—") : "no rate applies"}
 									</td>
 									<td className="px-4 py-2.5 text-right tabular-nums">{cost === null ? "—" : cost.toFixed(2)}</td>
 									<td className="px-4 py-2.5 text-xs text-zinc-500 dark:text-zinc-400">{row.source}</td>
@@ -168,7 +170,7 @@ export function CostPage({
 				</div>
 			</section>
 
-			<p className="mt-4 text-xs text-zinc-400">
+			<p className="mt-4 text-xs text-zinc-500 dark:text-zinc-400">
 				Quantities come from the same sampled Cloudflare datasets as the Workers and Workers AI sections, so they are
 				scaled estimates, not billing records. Always reconcile against your Cloudflare invoice.
 			</p>

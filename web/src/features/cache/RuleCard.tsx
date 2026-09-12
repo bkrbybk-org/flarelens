@@ -1,4 +1,5 @@
 import type { CacheRule, RuleAnalytics, TopUrl } from "./types";
+import { BADGE_NEUTRAL, CARD } from "../../lib/ui";
 
 function settingChips(rule: CacheRule): string[] {
 	const s = rule.settings;
@@ -69,9 +70,9 @@ export function RuleCard({ rule, index, highlight }: { rule: CacheRule; index: n
 					? "ring-1 ring-amber-500/60"
 					: "";
 	return (
-		<div className={`rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900 ${ring}`}>
+		<div className={`${CARD} ${ring}`}>
 			<div className="flex flex-wrap items-center gap-2">
-				<span className="text-xs font-semibold text-zinc-400">#{index + 1}</span>
+				<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">#{index + 1}</span>
 				<span className="min-w-0 flex-1 truncate font-medium">{rule.description || "(no description)"}</span>
 				{highlight === "winner" && (
 					<span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">Winner</span>
@@ -83,7 +84,7 @@ export function RuleCard({ rule, index, highlight }: { rule: CacheRule; index: n
 					className={
 						rule.enabled
 							? "rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400"
-							: "rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+							: BADGE_NEUTRAL
 					}
 				>
 					{rule.enabled ? "Active" : "Paused"}

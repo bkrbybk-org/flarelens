@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ALERT_ERROR, ALERT_WARN, CARD } from "../../lib/ui";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { AlertIcon, AppsIcon, GlobeIcon, KeyIcon, RefreshIcon } from "../../components/Icons";
@@ -90,7 +91,7 @@ export function CachePage({ session, zoneId, timeRange, onAuthError }: CachePage
 		return (
 			<div className="flex h-full items-center justify-center p-6">
 				<div className="rounded-2xl border border-zinc-200 bg-white px-8 py-10 text-center dark:border-zinc-800 dark:bg-zinc-900">
-					<GlobeIcon size={28} className="mx-auto mb-3 text-zinc-400" />
+					<GlobeIcon size={28} className="mx-auto mb-3 text-zinc-500 dark:text-zinc-400" />
 					<h2 className="text-base font-semibold">Select a zone</h2>
 					<p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
 						Cache rules are zone-scoped — pick a zone from the selector in the top bar.
@@ -115,7 +116,7 @@ export function CachePage({ session, zoneId, timeRange, onAuthError }: CachePage
 				{cache.progress.running && <ProgressBar percent={cache.progress.percent} />}
 
 				{cache.error && (
-					<div role="alert" className="rounded-xl border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+					<div role="alert" className={ALERT_ERROR}>
 						{cache.error}
 					</div>
 				)}
@@ -146,7 +147,7 @@ export function CachePage({ session, zoneId, timeRange, onAuthError }: CachePage
 				{data && (
 					<>
 						{data.analyticsSource !== "path-graphql" && (
-							<div className="flex items-center gap-2 rounded-xl border border-amber-300/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+							<div className={`flex items-center gap-2 ${ALERT_WARN}`}>
 								<AlertIcon size={16} className="shrink-0" />
 								<span>
 									{data.analyticsSource === "mock"
@@ -189,7 +190,7 @@ export function CachePage({ session, zoneId, timeRange, onAuthError }: CachePage
 						)}
 
 						{data.versioning.enabled && (
-							<div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+							<div className={CARD}>
 								<h2 className="mb-2 text-sm font-semibold">Version Management</h2>
 								<div className="flex flex-wrap gap-2 text-xs">
 									{data.versioning.environments.map((env) => (
@@ -211,7 +212,7 @@ export function CachePage({ session, zoneId, timeRange, onAuthError }: CachePage
 						)}
 
 						{data.insights.length > 0 && (
-							<div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+							<div className={CARD}>
 								<h2 className="mb-2 text-sm font-semibold">Insights</h2>
 								<ul className="space-y-1.5">
 									{data.insights.map((insight, i) => (

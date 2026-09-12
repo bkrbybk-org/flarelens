@@ -188,7 +188,7 @@ function SidebarContent({
 				{version ? (
 					collapsed ? (
 						<div
-							className="text-center font-mono text-[10px] text-zinc-400"
+							className="text-center font-mono text-[10px] text-zinc-500 dark:text-zinc-400"
 							title={`Version ${version.id}${version.timestamp ? ` · deployed ${formatDeployed(version.timestamp)}` : ""}`}
 						>
 							{version.id.slice(0, 4)}
@@ -199,12 +199,12 @@ function SidebarContent({
 								{version.tag || version.id.slice(0, 8)}
 							</div>
 							{version.timestamp && (
-								<div className="text-[11px] text-zinc-400">Deployed {formatDeployed(version.timestamp)}</div>
+								<div className="text-[11px] text-zinc-500 dark:text-zinc-400">Deployed {formatDeployed(version.timestamp)}</div>
 							)}
 						</div>
 					)
 				) : (
-					!collapsed && <div className="text-[11px] text-zinc-400">Version unavailable</div>
+					!collapsed && <div className="text-[11px] text-zinc-500 dark:text-zinc-400">Version unavailable</div>
 				)}
 			</div>
 
@@ -217,7 +217,7 @@ function SidebarContent({
 					aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
 					aria-expanded={!collapsed}
 					title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-					className={`flex w-full items-center rounded-md p-1.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300 ${
+					className={`flex w-full items-center rounded-md p-1.5 text-zinc-500 transition hover:bg-zinc-100 dark:text-zinc-400 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300 ${
 						collapsed ? "justify-center" : ""
 					}`}
 				>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ALERT_ERROR, ALERT_WARN } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import type { CfApp, CfPolicy } from "../../types";
 import type { RuleContext } from "../../lib/rules";
@@ -34,7 +35,7 @@ export function Dashboard({
 			{progressRunning && <ProgressBar percent={progressPercent} />}
 
 			{error && (
-				<div role="alert" className="rounded-xl border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+				<div role="alert" className={ALERT_ERROR}>
 					{error}
 				</div>
 			)}
@@ -42,7 +43,7 @@ export function Dashboard({
 			{/* Stated rather than left as an empty column: a reader who sees dashes needs to know
 			    whether nobody signed in or nobody could read the telemetry. */}
 			{loginsError && (
-				<div role="status" className="rounded-xl border border-amber-300/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+				<div role="status" className={ALERT_WARN}>
 					Logins (7d) unavailable — {loginsError}
 				</div>
 			)}

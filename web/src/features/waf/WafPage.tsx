@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ALERT_ERROR, ALERT_WARN, SEARCH_INPUT } from "../../lib/ui";
 import { useHashSyncedState } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
@@ -92,13 +93,13 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 				{waf.progress.running && <ProgressBar percent={waf.progress.percent} />}
 
 				{waf.error && (
-					<div role="alert" className="rounded-xl border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+					<div role="alert" className={ALERT_ERROR}>
 						{waf.error}
 					</div>
 				)}
 
 				{waf.diagnostics?.truncated && (
-					<div className="flex items-center gap-2 rounded-xl border border-amber-300/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+					<div className={`flex items-center gap-2 ${ALERT_WARN}`}>
 						<AlertIcon size={16} />
 						Event window truncated at ~{EVENT_LIMIT.toLocaleString()} rows — narrow the lookback for complete data.
 					</div>
@@ -166,13 +167,13 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 					<>
 						<EventGraph events={waf.events} window={waf.window} />
 						<div className="relative">
-							<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+							<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 							<input
 								type="search"
 								value={globalSearch}
 								onChange={(e) => setGlobalSearch(e.target.value)}
 								placeholder="Search rulesets, rules, hosts…"
-								className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cf focus:ring-2 focus:ring-cf/30 dark:border-zinc-700 dark:bg-zinc-900"
+								className={SEARCH_INPUT}
 							/>
 						</div>
 						<RulesetTable rows={rulesetRows} globalSearch={globalSearch} window={waf.window} onSelectRule={setDrawerRule} />

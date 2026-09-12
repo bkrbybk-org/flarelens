@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import { ALERT_WARN, BADGE_NEUTRAL } from "../../lib/ui";
 import { XIcon } from "../../components/Icons";
 import { actionDrift, ruleEventDetail, topEntries } from "../../lib/waf/aggregate";
 import { relativeTime, titleCase } from "../../lib/waf/format";
@@ -83,7 +84,7 @@ export function RuleDrawer({ rule, events, ruleMeta, window: win, onClose }: Rul
 						{meta && <RuleTypeBadge type={meta.type} />}
 						{meta && <RuleLevelBadge level={meta.level} />}
 						{meta?.enabled === false && (
-							<span className="rounded-full bg-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">Disabled</span>
+							<span className={BADGE_NEUTRAL}>Disabled</span>
 						)}
 						{configured && (
 							<span className="text-xs text-zinc-500 dark:text-zinc-400">Configured: {titleCase(configured)}</span>
@@ -97,7 +98,7 @@ export function RuleDrawer({ rule, events, ruleMeta, window: win, onClose }: Rul
 					)}
 
 					{drift && (
-						<div className="rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+						<div className={`${ALERT_WARN} !px-3 !py-2 text-xs font-medium`}>
 							Action drift: configured {titleCase(drift.configured)}, observed {titleCase(drift.observed)}
 						</div>
 					)}

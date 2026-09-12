@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { ALERT_ERROR } from "../../lib/ui";
 import { ApiError, fetchAccounts, fetchZeroTrustData } from "../../api/client";
 import type { CfAccount } from "../../types";
 import type { Session } from "../../hooks/useSession";
@@ -66,7 +67,7 @@ const OPTIONAL_PERMISSIONS = [
 
 function StatusBadge({ status }: { status: CheckStatus }) {
 	if (status === "checking") {
-		return <RefreshIcon size={14} className="shrink-0 animate-spin text-zinc-400" />;
+		return <RefreshIcon size={14} className="shrink-0 animate-spin text-zinc-500 dark:text-zinc-400" />;
 	}
 	if (status === "granted") {
 		return <CheckIcon size={14} className="shrink-0 text-emerald-500" />;
@@ -183,7 +184,7 @@ export function ConnectPage({ onConnect, serverAccounts = [], serverError = "", 
 								className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-left text-sm transition hover:border-cf hover:bg-cf/5 dark:border-zinc-700"
 							>
 								<div className="font-medium">{account.name}</div>
-								<div className="font-mono text-xs text-zinc-400">{account.id}</div>
+								<div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">{account.id}</div>
 							</button>
 						))}
 					</div>
@@ -205,7 +206,7 @@ export function ConnectPage({ onConnect, serverAccounts = [], serverError = "", 
 								type="button"
 								onClick={() => setShowToken((v) => !v)}
 								aria-label={showToken ? "Hide token" : "Show token"}
-								className="absolute inset-y-0 right-0 flex items-center px-3 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+								className="absolute inset-y-0 right-0 flex items-center px-3 text-zinc-500 dark:text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
 							>
 								{showToken ? <EyeOffIcon size={16} /> : <EyeIcon size={16} />}
 							</button>
@@ -231,7 +232,7 @@ export function ConnectPage({ onConnect, serverAccounts = [], serverError = "", 
 					) : (
 						<div>
 							<label htmlFor="account-id" className="mb-1.5 block text-sm font-medium">
-								Account ID <span className="font-normal text-zinc-400">(optional)</span>
+								Account ID <span className="font-normal text-zinc-500 dark:text-zinc-400">(optional)</span>
 							</label>
 							<input
 								id="account-id"
@@ -245,7 +246,7 @@ export function ConnectPage({ onConnect, serverAccounts = [], serverError = "", 
 					)}
 
 					{error && (
-						<div role="alert" className="rounded-lg border border-red-300/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+						<div role="alert" className={ALERT_ERROR}>
 							{error}
 						</div>
 					)}
@@ -261,7 +262,7 @@ export function ConnectPage({ onConnect, serverAccounts = [], serverError = "", 
 				)}
 
 				{serverError && (
-					<div role="alert" className="mt-4 rounded-lg border border-red-300/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+					<div role="alert" className={`mt-4 ${ALERT_ERROR}`}>
 						{serverError}
 					</div>
 				)}
@@ -279,7 +280,7 @@ export function ConnectPage({ onConnect, serverAccounts = [], serverError = "", 
 										<div className="font-medium">{check.label}</div>
 										<div className="text-xs text-zinc-500 dark:text-zinc-400">{check.description}</div>
 										{check.detail && check.status !== "skipped" && (
-											<div className={`mt-0.5 text-xs ${check.status === "missing" ? "text-red-600 dark:text-red-400" : "text-zinc-400"}`}>
+											<div className={`mt-0.5 text-xs ${check.status === "missing" ? "text-red-600 dark:text-red-400" : "text-zinc-500 dark:text-zinc-400"}`}>
 												{check.detail}
 											</div>
 										)}
@@ -304,7 +305,7 @@ export function ConnectPage({ onConnect, serverAccounts = [], serverError = "", 
 								</li>
 							))}
 						</ul>
-						<p className="mt-2 text-xs text-zinc-400">
+						<p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
 							Missing an optional scope just narrows that section — checked individually when you open it.
 						</p>
 					</div>

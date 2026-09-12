@@ -81,7 +81,7 @@ export function ActionBadges({ actions }: { actions: Record<string, number> }) {
 				.map(([action, count]) => {
 					const cls = actionColors[action] || "bg-zinc-700 text-white";
 					return (
-						<span key={action} className={`inline-flex items-center gap-1 rounded-full ${cls} px-2 py-1 text-xs font-semibold`}>
+						<span key={action} className={`inline-flex items-center gap-1 rounded-full ${cls} px-2 py-0.5 text-xs font-semibold`}>
 							<span>{titleCase(action)}</span>
 							<span>{count.toLocaleString()}</span>
 						</span>
@@ -96,7 +96,7 @@ export function RuleTypeBadge({ type }: { type: string }) {
 		type === "managed"
 			? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
 			: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
-	return <span className={`rounded-full ${cls} px-2 py-1 text-xs font-semibold`}>{titleCase(type)}</span>;
+	return <span className={`rounded-full ${cls} px-2 py-0.5 text-xs font-semibold`}>{titleCase(type)}</span>;
 }
 
 export function RuleLevelBadge({ level }: { level: string }) {
@@ -104,5 +104,5 @@ export function RuleLevelBadge({ level }: { level: string }) {
 		level === "account"
 			? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
 			: "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300";
-	return <span className={`rounded-full ${cls} px-2 py-1 text-xs font-semibold`}>{titleCase(level)}</span>;
+	return <span className={`rounded-full ${cls} px-2 py-0.5 text-xs font-semibold`}>{titleCase(level)}</span>;
 }

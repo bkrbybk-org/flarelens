@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { ALERT_ERROR } from "../../lib/ui";
 import { AlertIcon } from "../../components/Icons";
 import { ProgressBar } from "../../components/ProgressBar";
 import { downloadCsv, toCsv } from "../../lib/csv";
@@ -79,7 +80,7 @@ export function FindingsPage({ accountId, apps, groups, reusableMap, loading, er
 				{progressRunning && <ProgressBar percent={progressPercent} />}
 
 				{error && (
-					<div role="alert" className="rounded-xl border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+					<div role="alert" className={ALERT_ERROR}>
 						{error}
 					</div>
 				)}

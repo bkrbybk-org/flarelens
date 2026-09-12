@@ -1,4 +1,5 @@
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
+import { CARD } from "../../lib/ui";
 import type { CountItem, DetectionPoint, TimePoint } from "../../lib/ai-sec/types";
 
 /**
@@ -13,7 +14,6 @@ import type { CountItem, DetectionPoint, TimePoint } from "../../lib/ai-sec/type
  * dark both work without a second set of values.
  */
 
-export const CARD_CLS = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
 const SPARK_W = 100;
 const SPARK_H = 24;
@@ -90,7 +90,7 @@ export function TrendChart({ title, series, previous, summary }: TrendProps) {
 
 	if (series.length < 2) {
 		return (
-			<section className={CARD_CLS}>
+			<section className={CARD}>
 				<h2 className="mb-3 text-sm font-semibold">{title}</h2>
 				<p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">Not enough data to chart this window.</p>
 			</section>
@@ -111,7 +111,7 @@ export function TrendChart({ title, series, previous, summary }: TrendProps) {
 		];
 
 	return (
-		<section className={CARD_CLS}>
+		<section className={CARD}>
 			<div className="mb-3 flex items-baseline justify-between gap-3">
 				<h2 className="text-sm font-semibold">{title}</h2>
 				{previous?.length ? (
@@ -189,7 +189,7 @@ export function DetectionsChart({ series, summary }: { series: DetectionPoint[];
 	});
 
 	return (
-		<section className={CARD_CLS}>
+		<section className={CARD}>
 			<div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
 				<h2 className="text-sm font-semibold">Detections over time</h2>
 				<div className="flex flex-wrap gap-3">
@@ -269,7 +269,7 @@ const TONE_BAR: Record<string, string> = {
 export function BarList({ title, items, emptyText }: { title: string; items: CountItem[]; emptyText: string }) {
 	const max = Math.max(1, ...items.map((i) => i.count));
 	return (
-		<section className={CARD_CLS}>
+		<section className={CARD}>
 			<h2 className="mb-3 text-sm font-semibold">{title}</h2>
 			{!items.length || items.every((i) => i.count === 0) ? (
 				<p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">{emptyText}</p>

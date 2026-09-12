@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ALERT_ERROR, CARD, SEARCH_INPUT } from "../../lib/ui";
 import { SearchIcon, UsersIcon } from "../../components/Icons";
 import { ProgressBar } from "../../components/ProgressBar";
 import { useHashSyncedState } from "../../hooks/useHashParams";
@@ -79,7 +80,7 @@ export function GroupsPage({
 				{progressRunning && <ProgressBar percent={progressPercent} />}
 
 				{error && (
-					<div role="alert" className="rounded-xl border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+					<div role="alert" className={ALERT_ERROR}>
 						{error}
 					</div>
 				)}
@@ -88,14 +89,14 @@ export function GroupsPage({
 				    this box belongs to the card-based groups tab only. */}
 				{tab === "groups" && (
 					<div className="relative">
-						<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+						<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 						<input
 							type="search"
 							value={search}
 							onChange={(e) => setSearch(e.target.value)}
 							placeholder="Search groups, rules…"
 							disabled={loading}
-							className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cf focus:ring-2 focus:ring-cf/30 dark:border-zinc-700 dark:bg-zinc-900"
+							className={SEARCH_INPUT}
 						/>
 					</div>
 				)}
@@ -127,7 +128,7 @@ export function GroupsPage({
 				{tab === "policies" ? (
 					reusablePolicies.length === 0 && !loading ? (
 						<div className="rounded-2xl border border-zinc-200 bg-white px-8 py-12 text-center dark:border-zinc-800 dark:bg-zinc-900">
-							<UsersIcon size={28} className="mx-auto mb-3 text-zinc-400" />
+							<UsersIcon size={28} className="mx-auto mb-3 text-zinc-500 dark:text-zinc-400" />
 							<h2 className="text-base font-semibold">No reusable policies</h2>
 							<p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
 								{reusablePoliciesError
@@ -148,7 +149,7 @@ export function GroupsPage({
 					)
 				) : !loading && filtered.length === 0 ? (
 					<div className="rounded-2xl border border-zinc-200 bg-white px-8 py-12 text-center dark:border-zinc-800 dark:bg-zinc-900">
-						<UsersIcon size={28} className="mx-auto mb-3 text-zinc-400" />
+						<UsersIcon size={28} className="mx-auto mb-3 text-zinc-500 dark:text-zinc-400" />
 						<h2 className="text-base font-semibold">
 							{groups.length === 0 ? "No Access Groups" : "No groups match"}
 						</h2>
@@ -165,10 +166,10 @@ export function GroupsPage({
 						{filtered.map((group) => {
 							const referencedBy = usedBy.get(group.id) || [];
 							return (
-								<div key={group.id} className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+								<div key={group.id} className={CARD}>
 									<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
 										<h3 className="min-w-0 truncate font-medium">{group.name || group.id}</h3>
-										<span className="text-xs text-zinc-400">
+										<span className="text-xs text-zinc-500 dark:text-zinc-400">
 											{group.updated_at != null && <>Updated {formatLocalDateTime(group.updated_at)}</>}
 										</span>
 									</div>

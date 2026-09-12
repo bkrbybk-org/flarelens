@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { BTN_SECONDARY, SEARCH_INPUT } from "../../lib/ui";
 import {
 	flexRender,
 	getCoreRowModel,
@@ -131,7 +132,7 @@ function renderCell(key: ColumnKey, row: PolicyRow) {
 				</span>
 			);
 		case "id":
-			return <span className="font-mono text-xs text-zinc-400">{policy.id}</span>;
+			return <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400">{policy.id}</span>;
 	}
 }
 
@@ -296,14 +297,14 @@ export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility
 		<div className="flex flex-col gap-3">
 			<div className="flex flex-wrap items-center gap-2">
 				<div className="relative min-w-0 flex-1 basis-56">
-					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 					<input
 						type="search"
 						value={globalFilter}
 						onChange={(e) => setGlobalFilter(e.target.value)}
 						placeholder="Search policies, decisions, rules…"
 						disabled={loading}
-						className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cf focus:ring-2 focus:ring-cf/30 dark:border-zinc-700 dark:bg-zinc-900"
+						className={SEARCH_INPUT}
 					/>
 				</div>
 				<div ref={columnsMenuRef} className="relative">
@@ -337,7 +338,7 @@ export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility
 										aria-label={`Move ${HEADERS[key as ColumnKey]} up`}
 										disabled={i === 0}
 										onClick={() => moveColumn(key, -1)}
-										className="rounded p-0.5 text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
+										className="rounded p-0.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
 									>
 										<ChevronUpIcon size={14} />
 									</button>
@@ -346,7 +347,7 @@ export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility
 										aria-label={`Move ${HEADERS[key as ColumnKey]} down`}
 										disabled={i === effectiveOrder.length - 1}
 										onClick={() => moveColumn(key, 1)}
-										className="rounded p-0.5 text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
+										className="rounded p-0.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
 									>
 										<ChevronDownIcon size={14} />
 									</button>
@@ -533,7 +534,7 @@ export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility
 								type="button"
 								onClick={() => table.previousPage()}
 								disabled={!table.getCanPreviousPage()}
-								className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+								className={BTN_SECONDARY}
 							>
 								Prev
 							</button>
@@ -544,7 +545,7 @@ export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility
 								type="button"
 								onClick={() => table.nextPage()}
 								disabled={!table.getCanNextPage()}
-								className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+								className={BTN_SECONDARY}
 							>
 								Next
 							</button>

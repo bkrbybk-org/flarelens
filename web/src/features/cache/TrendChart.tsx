@@ -1,4 +1,5 @@
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
+import { CARD } from "../../lib/ui";
 import type { TrendBucket } from "./types";
 
 // Same served/origin/bypass grouping as the analysis (cache-analysis.ts)
@@ -50,7 +51,7 @@ export function TrendChart({ buckets, rangeHours }: { buckets: TrendBucket[]; ra
 	});
 
 	return (
-		<section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+		<section className={CARD}>
 			<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
 				<h2 className="text-sm font-semibold">Traffic trend</h2>
 				<div className="flex flex-wrap gap-3 text-xs text-zinc-500 dark:text-zinc-400">

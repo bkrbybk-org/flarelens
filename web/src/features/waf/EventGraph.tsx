@@ -1,6 +1,7 @@
 // Ported from cf-waf-rules-analyzer src/components/EventGraph.jsx
 
 import { useState } from "react";
+import { CARD } from "../../lib/ui";
 import {
 	CHART_ACTIONS,
 	GRAPH_DIMENSIONS,
@@ -17,7 +18,6 @@ interface EventGraphProps {
 	window: { since: number; until: number; minutes: number } | null;
 }
 
-const CARD_CLS = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
 export function EventGraph({ events, window: win }: EventGraphProps) {
 	const [chartActions, setChartActions] = useState<Record<string, boolean>>(
@@ -46,7 +46,7 @@ export function EventGraph({ events, window: win }: EventGraphProps) {
 
 	if (!withTime.length || !win) {
 		return (
-			<section className={CARD_CLS}>
+			<section className={CARD}>
 				<div className="mb-3 flex items-center justify-between">
 					<h2 className="text-sm font-semibold">Events over time</h2>
 					<span className="text-xs text-zinc-500">No telemetry loaded</span>
@@ -64,7 +64,7 @@ export function EventGraph({ events, window: win }: EventGraphProps) {
 	const activeActions = CHART_ACTIONS.filter((action) => chartActions[action.key]);
 
 	return (
-		<section className={CARD_CLS}>
+		<section className={CARD}>
 			<div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
 				<div>
 					<h2 className="text-sm font-semibold">Events over time</h2>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, BTN_SECONDARY_SM, CARD, SEARCH_INPUT } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon, SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
@@ -6,7 +7,6 @@ import type { Session } from "../../hooks/useSession";
 import { useTunnelMap } from "./useTunnelMap";
 import { appTypeLabel, chainText, originKindLabel, statusTone, type MappingRow, type OriginKind } from "./types";
 
-const CARD = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
 function DecisionChip({ decision }: { decision: string }) {
 	const tone =
@@ -58,7 +58,7 @@ function KindChip({ kind }: { kind: OriginKind }) {
 function Hop({ label, children }: { label: string; children: React.ReactNode }) {
 	return (
 		<div className="min-w-0">
-			<div className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">{label}</div>
+			<div className="text-[10px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
 			<div className="truncate text-sm">{children}</div>
 		</div>
 	);
@@ -103,14 +103,14 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 		<div className="h-full overflow-auto p-4 md:p-6">
 			<div className="mb-4 flex flex-wrap items-center gap-2">
 				<div className="relative min-w-0 flex-1 basis-72">
-					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 					<input
 						type="search"
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
 						placeholder="Search hostname, app, policy, tunnel, origin…"
 						aria-label="Search the tunnel map"
-						className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+						className={SEARCH_INPUT}
 					/>
 				</div>
 				<span className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -120,7 +120,7 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 					type="button"
 					onClick={exportCsv}
 					disabled={!rows.length}
-					className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+					className={BTN_SECONDARY}
 				>
 					Export CSV
 				</button>
@@ -128,7 +128,7 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 					type="button"
 					onClick={() => setReloadKey((k) => k + 1)}
 					disabled={loading}
-					className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium transition hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:hover:bg-zinc-800"
+					className={BTN_SECONDARY_SM}
 				>
 					<RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
 					Refresh
@@ -138,13 +138,13 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className="mb-4 rounded-lg border border-red-300/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
 					{error}
 				</div>
 			)}
 
 			{result?.errors.map((e) => (
-				<div key={e.source} role="status" className="mb-4 rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+				<div key={e.source} role="status" className={`mb-4 ${ALERT_WARN}`}>
 					{e.source}: {e.message}
 				</div>
 			))}
@@ -153,7 +153,7 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 			    than 403, so an empty map is ambiguous. Say so instead of rendering a blank table
 			    that looks like a clean bill of health. */}
 			{result && result.tunnels.length === 0 && (
-				<div role="status" className="mb-4 rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+				<div role="status" className={`mb-4 ${ALERT_WARN}`}>
 					No tunnels were returned for this account. If you expect some, the API token is missing{" "}
 					<strong>Cloudflare Tunnel: Read</strong> — Cloudflare returns an empty list for that rather than an error,
 					so this cannot be told apart from an account with no tunnels. Only the Access half of each row is shown
@@ -169,21 +169,21 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 				<div className={CARD}>
 					<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Mapped hostnames</div>
 					<div className="mt-1 text-2xl font-semibold tabular-nums">{mapped}</div>
-					<div className="mt-0.5 text-xs text-zinc-400">app + tunnel + origin</div>
+					<div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">app + tunnel + origin</div>
 				</div>
 				<div className={CARD}>
 					<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Ungated hostnames</div>
 					<div className={`mt-1 text-2xl font-semibold tabular-nums ${ungated ? "text-red-600 dark:text-red-400" : ""}`}>
 						{ungated}
 					</div>
-					<div className="mt-0.5 text-xs text-zinc-400">tunnel ingress with no Access app</div>
+					<div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">tunnel ingress with no Access app</div>
 				</div>
 				<div className={CARD}>
 					<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">No route found</div>
 					<div className={`mt-1 text-2xl font-semibold tabular-nums ${unrouted ? "text-amber-700 dark:text-amber-400" : ""}`}>
 						{unrouted}
 					</div>
-					<div className="mt-0.5 text-xs text-zinc-400">self-hosted, no tunnel ingress</div>
+					<div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">self-hosted, no tunnel ingress</div>
 				</div>
 			</div>
 
@@ -221,7 +221,7 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 												)}
 											</span>
 										) : (
-											<span className="text-zinc-400">—</span>
+											<span className="text-zinc-500 dark:text-zinc-400">—</span>
 										)}
 									</Hop>
 									<Hop label="Tunnel">
@@ -231,7 +231,7 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 												<span className={`text-xs ${statusTone(row.tunnel.status)}`}>{row.tunnel.status}</span>
 											</span>
 										) : (
-											<span className="text-zinc-400">—</span>
+											<span className="text-zinc-500 dark:text-zinc-400">—</span>
 										)}
 									</Hop>
 									<Hop label="Origin">
@@ -264,7 +264,7 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 									<span className="truncate font-medium" title={tunnel.id}>{tunnel.name}</span>
 									<span className="flex items-center gap-2 text-xs">
 										<span className={statusTone(tunnel.status)}>{tunnel.status}</span>
-										{tunnel.colos.length > 0 && <span className="text-zinc-400">{tunnel.colos.join(", ")}</span>}
+										{tunnel.colos.length > 0 && <span className="text-zinc-500 dark:text-zinc-400">{tunnel.colos.join(", ")}</span>}
 										{tunnel.configError && (
 											<span className="text-amber-600 dark:text-amber-400" title={tunnel.configError}>
 												config unavailable

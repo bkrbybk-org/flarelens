@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
+import { BTN_SECONDARY } from "../../lib/ui";
 import {
 	flexRender,
 	getCoreRowModel,
@@ -108,7 +109,7 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 				<div className="space-y-0.5 text-xs">
 					{topHosts(row.original).map(([host, count]) => (
 						<div key={host} className="truncate" title={host}>
-							{host} <span className="text-zinc-400">({count.toLocaleString()})</span>
+							{host} <span className="text-zinc-500 dark:text-zinc-400">({count.toLocaleString()})</span>
 						</div>
 					))}
 				</div>
@@ -264,7 +265,7 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 												onClick={() => toggleExpand(rowKey)}
 												className="cursor-pointer border-b border-zinc-100 transition hover:bg-zinc-50 dark:border-zinc-800/60 dark:hover:bg-zinc-800/40"
 											>
-												<td className="px-2 py-3 text-center text-zinc-400">
+												<td className="px-2 py-3 text-center text-zinc-500 dark:text-zinc-400">
 													{isOpen ? <ChevronUpIcon size={14} /> : <ChevronDownIcon size={14} />}
 												</td>
 												{row.getVisibleCells().map((cell) => (
@@ -347,7 +348,7 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 						type="button"
 						onClick={() => table.previousPage()}
 						disabled={!table.getCanPreviousPage()}
-						className="rounded-lg border border-zinc-200 px-3 py-1.5 transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+						className={BTN_SECONDARY}
 					>
 						Prev
 					</button>
@@ -356,7 +357,7 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 						type="button"
 						onClick={() => table.nextPage()}
 						disabled={!table.getCanNextPage()}
-						className="rounded-lg border border-zinc-200 px-3 py-1.5 transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+						className={BTN_SECONDARY}
 					>
 						Next
 					</button>

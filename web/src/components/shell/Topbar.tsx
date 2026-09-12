@@ -2,6 +2,7 @@ import type { CfZone } from "../../types";
 import { TIME_PRESETS, type TimePresetKey } from "../../hooks/useTimeRange";
 import type { SessionMode } from "../../hooks/useSession";
 import { LogoutIcon, MenuIcon, MoonIcon, RefreshIcon, SunIcon } from "../Icons";
+import { BTN_ICON, BTN_PRIMARY, FOCUS_RING, SELECT } from "../../lib/ui";
 
 export interface ZonePickerProps {
 	zones: CfZone[];
@@ -39,7 +40,7 @@ export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync 
 				type="button"
 				aria-label="Open menu"
 				onClick={onMobileMenu}
-				className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 md:hidden dark:hover:bg-zinc-800"
+				className={`rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 md:hidden dark:hover:bg-zinc-800 ${FOCUS_RING}`}
 			>
 				<MenuIcon size={20} />
 			</button>
@@ -51,7 +52,7 @@ export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync 
 					value={rangePicker.value}
 					onChange={(e) => rangePicker.onChange(e.target.value as TimePresetKey)}
 					aria-label="Time range"
-					className="rounded-lg border border-zinc-300 bg-transparent px-2 py-1.5 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+					className={SELECT}
 				>
 					{TIME_PRESETS.map((preset) => (
 						<option key={preset.key} value={preset.key}>{preset.label}</option>
@@ -65,7 +66,7 @@ export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync 
 					onChange={(e) => zonePicker.onChange(e.target.value)}
 					disabled={zonePicker.loading}
 					aria-label="Select zone"
-					className="max-w-52 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+					className={`max-w-52 ${SELECT}`}
 				>
 					<option value="">
 						{zonePicker.loading ? "Loading zones…" : zonePicker.accountWideLabel || "Select zone…"}
@@ -81,7 +82,7 @@ export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync 
 					type="button"
 					onClick={onSync}
 					disabled={syncing}
-					className="flex items-center gap-2 rounded-lg bg-cf px-3 py-1.5 text-sm font-medium text-white transition hover:bg-cf-hover disabled:opacity-50"
+					className={BTN_PRIMARY}
 				>
 					<RefreshIcon size={15} className={syncing ? "animate-spin" : undefined} />
 					<span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync"}</span>
@@ -92,7 +93,7 @@ export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync 
 				type="button"
 				onClick={onToggleTheme}
 				aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-				className="rounded-lg border border-zinc-200 p-2 text-zinc-500 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+				className={BTN_ICON}
 			>
 				{theme === "dark" ? <SunIcon size={16} /> : <MoonIcon size={16} />}
 			</button>
@@ -110,7 +111,7 @@ export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync 
 				}}
 				aria-label={mode === "server" ? "Sign out" : "Disconnect and clear token"}
 				title={mode === "server" ? "Sign out" : "Disconnect and clear token"}
-				className="rounded-lg border border-zinc-200 p-2 text-zinc-500 transition hover:border-red-300/50 hover:bg-red-500/10 hover:text-red-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-red-500/30 dark:hover:text-red-400"
+				className={`rounded-lg border border-zinc-200 p-2 text-zinc-500 transition hover:border-red-300/50 hover:bg-red-500/10 hover:text-red-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-red-500/30 dark:hover:text-red-400 ${FOCUS_RING}`}
 			>
 				<LogoutIcon size={16} />
 			</button>

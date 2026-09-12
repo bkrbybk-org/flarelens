@@ -60,7 +60,7 @@ export function StatsRow({ apps, idpCount }: StatsRowProps) {
 			detail: stats.errors > 0 ? <span className="text-xs text-red-500">policies unavailable</span> : null,
 			iconClass: stats.errors > 0
 				? "bg-red-500/15 text-red-600 dark:text-red-400"
-				: "bg-zinc-500/10 text-zinc-400",
+				: "bg-zinc-500/10 text-zinc-500 dark:text-zinc-400",
 		},
 	];
 

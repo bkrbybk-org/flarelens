@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { BTN_SECONDARY, FOCUS_RING, SEARCH_INPUT } from "../../lib/ui";
 import {
 	flexRender,
 	getCoreRowModel,
@@ -88,7 +89,7 @@ function facetValues(col: string, app: CfApp, ctx: RuleContext, reusableMap: Rec
 
 function DefaultCell({ value }: { value: unknown }) {
 	if (value === null || value === undefined) {
-		return <span className="text-zinc-400 dark:text-zinc-500">-</span>;
+		return <span className="text-zinc-500 dark:text-zinc-400">—</span>;
 	}
 	if (typeof value === "boolean") {
 		return <Tag label={value ? "True" : "False"} />;
@@ -178,7 +179,7 @@ function renderCell(col: string, app: CfApp, ctx: RuleContext, reusableMap: Reco
 	if (col === "logins_7d") {
 		if (value === null || value === undefined) {
 			return (
-				<span className="text-zinc-400" title="Login telemetry could not be read for this account.">
+				<span className="text-zinc-500 dark:text-zinc-400" title="Login telemetry could not be read for this account.">
 					—
 				</span>
 			);
@@ -369,14 +370,14 @@ export function AppsTable({
 			{/* Toolbar */}
 			<div className="flex flex-wrap items-center gap-2">
 				<div className="relative min-w-0 flex-1 basis-56">
-					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 					<input
 						type="search"
 						value={globalFilter}
 						onChange={(e) => setGlobalFilter(e.target.value)}
 						placeholder="Search applications…"
 						disabled={loading}
-						className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cf focus:ring-2 focus:ring-cf/30 dark:border-zinc-700 dark:bg-zinc-900"
+						className={SEARCH_INPUT}
 					/>
 				</div>
 
@@ -411,7 +412,7 @@ export function AppsTable({
 										aria-label={`Move ${formatColumnLabel(key)} up`}
 										disabled={i === 0}
 										onClick={() => moveColumn(key, -1)}
-										className="rounded p-0.5 text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
+										className="rounded p-0.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
 									>
 										<ChevronUpIcon size={14} />
 									</button>
@@ -420,7 +421,7 @@ export function AppsTable({
 										aria-label={`Move ${formatColumnLabel(key)} down`}
 										disabled={i === effectiveOrder.length - 1}
 										onClick={() => moveColumn(key, 1)}
-										className="rounded p-0.5 text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
+										className="rounded p-0.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 disabled:opacity-30 dark:hover:text-zinc-200"
 									>
 										<ChevronDownIcon size={14} />
 									</button>
@@ -616,7 +617,7 @@ export function AppsTable({
 										{(app.tags || []).map((t) => <Tag key={t} label={t} />)}
 									</div>
 									{app.updated_at != null && (
-										<div className="mt-2 text-xs text-zinc-400">Updated {formatLocalDateTime(app.updated_at)}</div>
+										<div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">Updated {formatLocalDateTime(app.updated_at)}</div>
 									)}
 								</button>
 							);
@@ -646,7 +647,7 @@ export function AppsTable({
 								type="button"
 								onClick={() => table.previousPage()}
 								disabled={!table.getCanPreviousPage()}
-								className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+								className={BTN_SECONDARY}
 							>
 								Prev
 							</button>
@@ -659,7 +660,7 @@ export function AppsTable({
 								}, [])
 								.map((item, idx) =>
 									item === "gap" ? (
-										<span key={`gap-${idx}`} className="px-1 text-zinc-400">…</span>
+										<span key={`gap-${idx}`} className="px-1 text-zinc-500 dark:text-zinc-400">…</span>
 									) : (
 										<button
 											key={item}
@@ -668,8 +669,8 @@ export function AppsTable({
 											aria-current={item === pageIndex ? "page" : undefined}
 											className={
 												item === pageIndex
-													? "rounded-lg bg-cf px-3 py-1.5 text-sm font-medium text-white"
-													: "rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+													? `rounded-lg bg-cf px-3 py-1.5 text-sm font-medium text-white ${FOCUS_RING}`
+													: BTN_SECONDARY
 											}
 										>
 											{item + 1}
@@ -680,7 +681,7 @@ export function AppsTable({
 								type="button"
 								onClick={() => table.nextPage()}
 								disabled={!table.getCanNextPage()}
-								className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+								className={BTN_SECONDARY}
 							>
 								Next
 							</button>

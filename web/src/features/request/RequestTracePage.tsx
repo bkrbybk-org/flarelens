@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { ALERT_ERROR, ALERT_WARN, CARD } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { SearchIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
@@ -14,7 +15,6 @@ import {
 } from "./types";
 import { DecryptKeyPanel, PromptPayload } from "../ai-security/PromptPayload";
 
-const CARD = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
 const LOOKBACKS: [number, string][] = [
 	[1440, "Last 24 hours"],
@@ -57,7 +57,7 @@ export function RequestTracePage({
 					<div className="min-w-0 flex-1 basis-72">
 						<label htmlFor="ray-id" className="mb-1.5 block text-sm font-medium">Ray ID</label>
 						<div className="relative">
-							<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+							<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 							<input
 								id="ray-id"
 								value={rayInput}
@@ -110,13 +110,13 @@ export function RequestTracePage({
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className="mb-4 rounded-lg border border-red-300/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
 					{error}
 				</div>
 			)}
 
 			{result?.errors.map((e) => (
-				<div key={e.zone} role="status" className="mb-4 rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+				<div key={e.zone} role="status" className={`mb-4 ${ALERT_WARN}`}>
 					{e.zone}: {e.message}
 				</div>
 			))}
@@ -272,7 +272,7 @@ export function RequestTracePage({
 					</section>
 
 					{result.unavailableFields.length > 0 && (
-						<p className="mt-4 text-xs text-zinc-400">
+						<p className="mt-4 text-xs text-zinc-500 dark:text-zinc-400">
 							Not exposed to this token or plan: {result.unavailableFields.join(", ")}.
 						</p>
 					)}

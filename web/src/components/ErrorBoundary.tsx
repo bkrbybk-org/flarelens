@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { ALERT_ERROR } from "../lib/ui";
 
 interface ErrorBoundaryProps {
 	children: ReactNode;
@@ -60,7 +61,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 						A rendering error crashed this view. Your session is still connected — reloading the page usually fixes it.
 					</p>
 
-					<div role="alert" className="mb-4 rounded-lg border border-red-300/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+					<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
 						{error.message}
 					</div>
 

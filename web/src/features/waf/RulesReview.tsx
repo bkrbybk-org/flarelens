@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { BADGE, BADGE_NEUTRAL, BTN_SECONDARY, SEARCH_INPUT } from "../../lib/ui";
 import { actionDrift, aggregateRules, topEntries } from "../../lib/waf/aggregate";
 import { relativeTime, titleCase } from "../../lib/waf/format";
 import type { FirewallEvent, RuleMetaMap, RuleReviewRow } from "../../lib/waf/types";
@@ -79,13 +80,13 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 
 			<div className="flex flex-wrap items-center gap-2">
 				<div className="relative min-w-0 flex-1 basis-56">
-					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 					<input
 						type="search"
 						value={search}
 						onChange={(e) => { setSearch(e.target.value); setPage(0); }}
 						placeholder="Search rules, expressions, hosts, paths…"
-						className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cf focus:ring-2 focus:ring-cf/30 dark:border-zinc-700 dark:bg-zinc-900"
+						className={SEARCH_INPUT}
 					/>
 				</div>
 				<select value={type} onChange={(e) => { setType(e.target.value); setPage(0); }} aria-label="Filter by type" className={selectCls}>
@@ -124,7 +125,7 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 						type="button"
 						onClick={() => setPage((p) => Math.max(0, p - 1))}
 						disabled={clampedPage === 0}
-						className="rounded-lg border border-zinc-200 px-3 py-1.5 transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+						className={BTN_SECONDARY}
 					>
 						Prev
 					</button>
@@ -133,7 +134,7 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 						type="button"
 						onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
 						disabled={clampedPage >= pageCount - 1}
-						className="rounded-lg border border-zinc-200 px-3 py-1.5 transition hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
+						className={BTN_SECONDARY}
 					>
 						Next
 					</button>
@@ -169,10 +170,10 @@ function RuleCard({ row, win, onSelect }: {
 						<RuleTypeBadge type={row.type} />
 						<RuleLevelBadge level={row.level} />
 						{!row.enabled && (
-							<span className="rounded-full bg-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">Disabled</span>
+							<span className={BADGE_NEUTRAL}>Disabled</span>
 						)}
 						{row.enabled && !row.total && (
-							<span className="rounded-full bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700 dark:bg-sky-950 dark:text-sky-300">No traffic</span>
+							<span className={`${BADGE} bg-sky-500/15 text-sky-700 dark:text-sky-300`}>No traffic</span>
 						)}
 					</div>
 					{row.ruleset && <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{row.ruleset}</div>}
@@ -189,7 +190,7 @@ function RuleCard({ row, win, onSelect }: {
 				</div>
 				<div className="flex flex-col items-end gap-2">
 					<span className="text-lg font-semibold tabular-nums">{row.total.toLocaleString()}</span>
-					<span className="text-xs text-zinc-400">{row.total ? relativeTime(row.lastSeen) : "no activity"}</span>
+					<span className="text-xs text-zinc-500 dark:text-zinc-400">{row.total ? relativeTime(row.lastSeen) : "no activity"}</span>
 					{win && row.times.length > 0 && <Sparkline times={row.times} since={win.since} until={win.until} />}
 				</div>
 			</div>

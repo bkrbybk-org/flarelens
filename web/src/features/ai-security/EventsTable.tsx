@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
+import { ALERT_WARN, BTN_SECONDARY, CARD } from "../../lib/ui";
 import {
 	flexRender,
 	getCoreRowModel,
@@ -11,7 +12,6 @@ import {
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { RawEvent, Severity } from "../../lib/ai-sec/types";
 import { ChevronDownIcon, ChevronUpIcon, SearchIcon } from "../../components/Icons";
-import { CARD_CLS } from "./charts";
 import { DecryptKeyPanel, PromptPayload } from "./PromptPayload";
 
 /**
@@ -96,7 +96,7 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 		() => [
 			{
 				id: "datetime",
-				header: () => <span>Date / time <span className="font-normal normal-case text-zinc-400">{localOffsetLabel()}</span></span>,
+				header: () => <span>Date / time <span className="font-normal normal-case text-zinc-500 dark:text-zinc-400">{localOffsetLabel()}</span></span>,
 				accessorFn: (e) => e.datetime,
 				cell: (ctx) => <span className="font-mono text-xs">{new Date(ctx.getValue<string>()).toLocaleString()}</span>,
 			},
@@ -189,11 +189,11 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 	};
 
 	return (
-		<section className={CARD_CLS}>
+		<section className={CARD}>
 			<div className="mb-3 flex flex-wrap items-center gap-2">
 				<h2 className="text-sm font-semibold">Flagged requests</h2>
 				<div className="relative ml-auto">
-					<SearchIcon size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+					<SearchIcon size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 					<input
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
@@ -206,7 +206,7 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 					type="button"
 					onClick={() => setSearch("")}
 					disabled={!search}
-					className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+					className={BTN_SECONDARY}
 				>
 					Reset
 				</button>
@@ -228,7 +228,7 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 							() => setCopied(false),
 						);
 					}}
-					className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+					className={BTN_SECONDARY}
 				>
 					{copied ? "Copied" : "Copy link"}
 				</button>
@@ -236,7 +236,7 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 					type="button"
 					onClick={exportCsv}
 					disabled={!rows.length}
-					className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+					className={BTN_SECONDARY}
 				>
 					Export CSV
 				</button>
@@ -253,7 +253,7 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 			<DecryptKeyPanel privateKey={privateKey} onChange={setPrivateKey} />
 
 			{truncated && (
-				<p className="mb-3 rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+				<p className={`mb-3 ${ALERT_WARN}`}>
 					The event list was truncated for this window — narrow the range for a complete set.
 				</p>
 			)}
@@ -312,7 +312,7 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 												}}
 												aria-expanded={open}
 												aria-label={open ? "Collapse event details" : "Expand event details"}
-												className="rounded p-0.5 text-zinc-400 transition hover:text-zinc-700 dark:hover:text-zinc-200"
+												className="rounded p-0.5 text-zinc-500 dark:text-zinc-400 transition hover:text-zinc-700 dark:hover:text-zinc-200"
 											>
 												{open ? <ChevronUpIcon size={14} /> : <ChevronDownIcon size={14} />}
 											</button>

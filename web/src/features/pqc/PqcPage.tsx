@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, BTN_SECONDARY_SM, CARD, SEARCH_INPUT } from "../../lib/ui";
 import { ProgressBar } from "../../components/ProgressBar";
 import { RefreshIcon, SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
@@ -6,7 +7,6 @@ import type { Session } from "../../hooks/useSession";
 import { usePqcReport } from "./usePqcReport";
 import type { AdoptionResult, CipherGrade, CipherSummary, InboundState, OriginState, PqcRow, PqcZoneSummary, TlsFindingSeverity, Verdict } from "./types";
 
-const CARD = "rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 
 const VERDICT_LABEL: Record<Verdict, string> = {
 	ready: "Ready",
@@ -256,7 +256,7 @@ function Kpi({ label, value, hint, tone }: { label: string; value: number; hint:
 		<div className={CARD}>
 			<div className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</div>
 			<div className={`mt-1 text-2xl font-semibold tabular-nums ${tone ?? ""}`}>{value.toLocaleString()}</div>
-			<div className="mt-0.5 text-xs text-zinc-400">{hint}</div>
+			<div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{hint}</div>
 		</div>
 	);
 }
@@ -323,14 +323,14 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 		<div className="h-full overflow-auto p-4 md:p-6">
 			<div className="mb-4 flex flex-wrap items-center gap-2">
 				<div className="relative min-w-0 flex-1 basis-72">
-					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 					<input
 						type="search"
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
 						placeholder="Search hostname or zone…"
 						aria-label="Search hostnames"
-						className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900"
+						className={SEARCH_INPUT}
 					/>
 				</div>
 				<div className="flex flex-wrap gap-1">
@@ -356,7 +356,7 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 					type="button"
 					onClick={exportCsv}
 					disabled={!rows.length}
-					className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+					className={BTN_SECONDARY}
 				>
 					Export CSV
 				</button>
@@ -364,7 +364,7 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 					type="button"
 					onClick={() => setReloadKey((k) => k + 1)}
 					disabled={loading}
-					className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium transition hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:hover:bg-zinc-800"
+					className={BTN_SECONDARY_SM}
 				>
 					<RefreshIcon size={14} className={loading ? "animate-spin" : ""} />
 					Refresh
@@ -374,13 +374,13 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
-				<div role="alert" className="mb-4 rounded-lg border border-red-300/50 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:text-red-400">
+				<div role="alert" className={`mb-4 ${ALERT_ERROR}`}>
 					{error}
 				</div>
 			)}
 
 			{result?.errors.map((e) => (
-				<div key={e.source} role="status" className="mb-4 rounded-lg border border-amber-300/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+				<div key={e.source} role="status" className={`mb-4 ${ALERT_WARN}`}>
 					{e.source}: {e.message}
 				</div>
 			))}
@@ -488,9 +488,9 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 									<span className="text-xs text-zinc-500 dark:text-zinc-400">{row.zoneName}</span>
 								</div>
 								<div className="mt-1.5 flex flex-wrap items-center gap-2">
-									<span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">Visitor → Cloudflare</span>
+									<span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Visitor → Cloudflare</span>
 									<LegChip label={INBOUND_LABEL[row.inbound]} good={row.inbound === "pqc"} bad={row.inbound === "not-proxied" || row.inbound === "tls13-off"} />
-									<span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">Cloudflare → origin</span>
+									<span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Cloudflare → origin</span>
 									<LegChip label={ORIGIN_LABEL[row.origin]} good={row.origin === "tunnel" || row.origin === "cloudflare"} bad={row.origin === "plaintext"} />
 								</div>
 								<ul className="mt-1.5 space-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
