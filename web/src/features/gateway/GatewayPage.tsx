@@ -5,7 +5,6 @@ import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
 import { ALERT_ERROR, CARD, SECTION_TITLE } from "../../lib/ui";
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
-import { ProgressBar } from "../../components/ProgressBar";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { useGatewayUsage } from "./useGatewayUsage";
@@ -160,14 +159,13 @@ export function GatewayPage({
 	const empty = EMPTY_TOTALS;
 
 	return (
-		<PageShell>
+		<PageShell progress={progress}>
 			<div className="flex flex-wrap items-center gap-3">
 				<span className="text-xs text-zinc-500 dark:text-zinc-400">
 					{granularity === "daily" ? "Daily buckets" : "Hourly buckets"}
 				</span>
 			</div>
 
-			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
 				<div role="alert" className={ALERT_ERROR}>

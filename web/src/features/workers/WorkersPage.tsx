@@ -4,7 +4,6 @@ import { EmptyRow } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
 import { ALERT_ERROR, ALERT_WARN, CARD, SECTION_TITLE } from "../../lib/ui";
-import { ProgressBar } from "../../components/ProgressBar";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { MetricsChart, type ChartType, type Series } from "./MetricsChart";
@@ -143,7 +142,7 @@ export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProp
 	}
 
 	return (
-		<PageShell>
+		<PageShell progress={progress}>
 			<div className="flex flex-wrap items-center gap-3">
 				<Segmented
 					label="Granularity"
@@ -174,7 +173,6 @@ export function WorkersPage({ session, timeRange, onAuthError }: WorkersPageProp
 				/>
 			</div>
 
-			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
 				<div role="alert" className={ALERT_ERROR}>

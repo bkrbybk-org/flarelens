@@ -5,7 +5,6 @@ import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
 import { ALERT_ERROR, CARD, CARD_HEADER, SECTION_TITLE } from "../../lib/ui";
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
-import { ProgressBar } from "../../components/ProgressBar";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { useWorkersAi } from "./useWorkersAi";
@@ -139,7 +138,7 @@ export function WorkersAiPage({
 	const avgLatency = totals.requests ? totals.inferenceTimeMs / totals.requests : null;
 
 	return (
-		<PageShell>
+		<PageShell progress={progress}>
 			<div className="flex flex-wrap items-center gap-3">
 				<div className="flex items-center gap-1" role="group" aria-label="Metric">
 					{(Object.keys(AI_METRICS) as AiMetric[]).map((key) => (
@@ -160,7 +159,6 @@ export function WorkersAiPage({
 				</div>
 			</div>
 
-			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
 				<div role="alert" className={ALERT_ERROR}>

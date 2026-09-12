@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { PageShell } from "../../components/PageShell";
 import { ALERT_ERROR, ALERT_WARN, CARD, INPUT, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
-import { ProgressBar } from "../../components/ProgressBar";
 import { SearchIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
 import type { CfZone } from "../../types";
@@ -52,7 +51,7 @@ export function RequestTracePage({
 	const shown = new Set<string>();
 
 	return (
-		<PageShell>
+		<PageShell progress={progress}>
 			<form onSubmit={submit} className={`${CARD}`}>
 				<div className="flex flex-wrap items-end gap-3">
 					<div className="min-w-0 flex-1 basis-72">
@@ -108,7 +107,6 @@ export function RequestTracePage({
 				</p>
 			</form>
 
-			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
 				<div role="alert" className={ALERT_ERROR}>

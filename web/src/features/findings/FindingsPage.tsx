@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { PageShell } from "../../components/PageShell";
+import type { LoadProgress } from "../../hooks/useEstimatedProgress";
 import { EmptyState } from "../../components/EmptyState";
 import { ALERT_ERROR } from "../../lib/ui";
 import { AlertIcon } from "../../components/Icons";
-import { ProgressBar } from "../../components/ProgressBar";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import {
 	accessFindings, cacheFindings, countBySeverity, groupsFindings, sortFindings, wafFindings, type Finding, type Severity,
@@ -19,8 +19,7 @@ interface FindingsPageProps {
 	reusableMap: Record<string, CfPolicy>;
 	loading: boolean;
 	error: string | null;
-	progressPercent: number;
-	progressRunning: boolean;
+	progress: LoadProgress;
 	onNavigate: (href: string) => void;
 }
 
@@ -54,7 +53,7 @@ function exportFindingsCsv(findings: Finding[]) {
 	downloadCsv(`flarelens-findings-${new Date().toISOString().slice(0, 10)}.csv`, csv);
 }
 
-export function FindingsPage({ accountId, apps, groups, reusableMap, loading, error, progressPercent, progressRunning, onNavigate }: FindingsPageProps) {
+export function FindingsPage({ accountId, apps, groups, reusableMap, loading, error, progress, onNavigate }: FindingsPageProps) {
 	// Scoped by account: a snapshot captured for a different customer must not
 	// be reported here, nor counted as that section having been checked.
 	const wafSnapshot = useWafSnapshot(accountId);
@@ -77,8 +76,7 @@ export function FindingsPage({ accountId, apps, groups, reusableMap, loading, er
 	const counts = useMemo(() => countBySeverity(findings), [findings]);
 
 	return (
-		<PageShell id="findings-print-root">
-			{progressRunning && <ProgressBar percent={progressPercent} />}
+		<PageShell id="findings-print-root" progress={progress}>
 
 			{error && (
 				<div role="alert" className={ALERT_ERROR}>

@@ -4,7 +4,6 @@ import { EmptyNote } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
 import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, CARD, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
-import { ProgressBar } from "../../components/ProgressBar";
 import { SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { Session } from "../../hooks/useSession";
@@ -315,7 +314,7 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 	}
 
 	return (
-		<PageShell>
+		<PageShell progress={progress}>
 			<div className="flex flex-wrap items-center gap-2">
 				<div className="relative min-w-0 flex-1 basis-72">
 					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
@@ -357,7 +356,6 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 				</button>
 			</div>
 
-			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
 				<div role="alert" className={ALERT_ERROR}>

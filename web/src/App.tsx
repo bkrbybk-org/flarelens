@@ -320,8 +320,7 @@ export default function App() {
 							idpCount={data.data?.idps.length || 0}
 							loading={data.loading}
 							error={data.error}
-							progressPercent={data.progress.percent}
-							progressRunning={data.progress.running}
+							progress={data.progress}
 							ctx={ctx}
 							reusableMap={data.reusableMap}
 							prefs={prefs}
@@ -341,8 +340,7 @@ export default function App() {
 							onPrefsChange={updatePrefs}
 							loading={data.loading}
 							error={data.error}
-							progressPercent={data.progress.percent}
-							progressRunning={data.progress.running}
+							progress={data.progress}
 							ctx={ctx}
 						/>
 					)}
@@ -376,8 +374,7 @@ export default function App() {
 							reusableMap={data.reusableMap}
 							loading={data.loading}
 							error={data.error}
-							progressPercent={data.progress.percent}
-							progressRunning={data.progress.running}
+							progress={data.progress}
 							onNavigate={(href) => {
 								window.location.hash = href.replace(/^#/, "");
 							}}

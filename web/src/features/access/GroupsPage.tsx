@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { PageShell } from "../../components/PageShell";
+import type { LoadProgress } from "../../hooks/useEstimatedProgress";
 import { TabPanel, Tabs } from "../../components/Tabs";
 import { EmptyState } from "../../components/EmptyState";
 import { ALERT_ERROR, CARD, SEARCH_INPUT } from "../../lib/ui";
 import { SearchIcon, UsersIcon } from "../../components/Icons";
-import { ProgressBar } from "../../components/ProgressBar";
 import { useHashSyncedState } from "../../hooks/useHashParams";
 import { groupUsedBy, reusablePolicyUsedBy } from "../../lib/findings";
 import { formatLocalDateTime, type RuleContext } from "../../lib/rules";
@@ -31,8 +31,7 @@ interface GroupsPageProps {
 	policyColumnVisibility: Record<string, boolean>;
 	policyColumnOrder: string[];
 	onPrefsChange: (patch: { policyColumnVisibility?: Record<string, boolean>; policyColumnOrder?: string[] }) => void;
-	progressPercent: number;
-	progressRunning: boolean;
+	progress: LoadProgress;
 	ctx: RuleContext;
 }
 
@@ -48,8 +47,7 @@ export function GroupsPage({
 	onPrefsChange,
 	loading,
 	error,
-	progressPercent,
-	progressRunning,
+	progress,
 	ctx,
 }: GroupsPageProps) {
 	const [search, setSearch] = useState("");
@@ -78,8 +76,7 @@ export function GroupsPage({
 	}, [groups, search]);
 
 	return (
-		<PageShell>
-			{progressRunning && <ProgressBar percent={progressPercent} />}
+		<PageShell progress={progress}>
 
 			{error && (
 				<div role="alert" className={ALERT_ERROR}>

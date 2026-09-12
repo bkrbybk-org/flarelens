@@ -7,7 +7,6 @@ import { ALERT_ERROR, ALERT_WARN, CARD, SECTION_TITLE } from "../../lib/ui";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
 import { AlertIcon, AppsIcon, GlobeIcon, KeyIcon, RefreshIcon } from "../../components/Icons";
-import { ProgressBar } from "../../components/ProgressBar";
 import { publishCacheSnapshot } from "../../lib/sectionSnapshot";
 import { CountsLine, RatioBar, RuleCard } from "./RuleCard";
 import { TrendChart } from "./TrendChart";
@@ -121,8 +120,7 @@ export function CachePage({ session, zoneId, timeRange, onAuthError }: CachePage
 		: [];
 
 	return (
-		<PageShell>
-			{cache.progress.running && <ProgressBar percent={cache.progress.percent} />}
+		<PageShell progress={cache.progress}>
 
 			{cache.error && (
 				<div role="alert" className={ALERT_ERROR}>

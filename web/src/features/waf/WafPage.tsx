@@ -12,7 +12,6 @@ import { AUTO_REFRESH_OPTIONS, EVENT_LIMIT, LOOKBACK_OPTIONS } from "../../lib/w
 import { relativeTime } from "../../lib/waf/format";
 import { publishWafSnapshot } from "../../lib/sectionSnapshot";
 import { AlertIcon, AppsIcon, KeyIcon, SearchIcon, ShieldIcon, UsersIcon } from "../../components/Icons";
-import { ProgressBar } from "../../components/ProgressBar";
 import { EventGraph } from "./EventGraph";
 import { RuleDrawer, type DrawerRule } from "./RuleDrawer";
 import { RulesetTable } from "./RulesetTable";
@@ -98,8 +97,7 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 	useSectionRefresh(refresh, waf.loading);
 
 	return (
-		<PageShell>
-			{waf.progress.running && <ProgressBar percent={waf.progress.percent} />}
+		<PageShell progress={waf.progress}>
 
 			{waf.error && (
 				<div role="alert" className={ALERT_ERROR}>

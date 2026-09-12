@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { GroupsPage } from "../../web/src/features/access/GroupsPage";
 import type { CfApp, CfGroup, CfPolicy } from "../../web/src/types";
 import type { RuleContext } from "../../web/src/lib/rules";
+import type { LoadProgress } from "../../web/src/hooks/useEstimatedProgress";
 
 /**
  * The Access Groups section shows two kinds of account-level configuration that applications
@@ -12,6 +13,10 @@ import type { RuleContext } from "../../web/src/lib/rules";
  */
 
 const ctx: RuleContext = { idpNames: {}, groupNames: {} };
+
+const IDLE_PROGRESS: LoadProgress = {
+	percent: 0, etaMs: null, elapsedMs: 0, measured: false, running: false, start: () => {}, stop: () => {},
+};
 
 const group: CfGroup = { id: "g1", name: "Engineering", include: [{ email_domain: { domain: "example.com" } }] };
 
@@ -35,8 +40,7 @@ function renderPage(overrides: Partial<Parameters<typeof GroupsPage>[0]> = {}) {
 			reusablePoliciesError={false}
 			loading={false}
 			error={null}
-			progressPercent={0}
-			progressRunning={false}
+			progress={IDLE_PROGRESS}
 			ctx={ctx}
 			policyColumnVisibility={{}}
 			policyColumnOrder={[]}

@@ -6,7 +6,6 @@ import { PageShell } from "../../components/PageShell";
 import { ALERT_ERROR, ALERT_WARN, CARD, SECTION_TITLE } from "../../lib/ui";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
-import { ProgressBar } from "../../components/ProgressBar";
 import { AlertIcon } from "../../components/Icons";
 import type { Kpi, SchemaReadout } from "../../lib/ai-sec/types";
 import { BarList, DetectionsChart, Sparkline, TrendChart } from "./charts";
@@ -167,8 +166,7 @@ export function AiSecurityPage({ session, zoneId, timeRange, onAuthError }: Prop
 	useSectionRefresh(refresh, ai.loading);
 
 	return (
-		<PageShell>
-			{ai.progress.running && <ProgressBar percent={ai.progress.percent} />}
+		<PageShell progress={ai.progress}>
 
 			{ai.error && (
 				<div role="alert" className={ALERT_ERROR}>

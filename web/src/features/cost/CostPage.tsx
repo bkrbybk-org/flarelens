@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { PageShell } from "../../components/PageShell";
 import { ALERT_ERROR, CARD, CARD_HEADER, FOCUS_RING, SECTION_TITLE } from "../../lib/ui";
-import { ProgressBar } from "../../components/ProgressBar";
 import type { Prefs } from "../../hooks/usePrefs";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
@@ -95,12 +94,11 @@ export function CostPage({
 	);
 
 	return (
-		<PageShell>
+		<PageShell progress={progress}>
 			<div className="flex flex-wrap items-center gap-3">
 				<span className="text-xs text-zinc-500 dark:text-zinc-400">Billable units for the selected window</span>
 			</div>
 
-			{progress.running && <ProgressBar percent={progress.percent} />}
 
 			{error && (
 				<div role="alert" className={ALERT_ERROR}>
