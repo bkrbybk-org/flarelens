@@ -1,6 +1,6 @@
 # Flarelens
 
-Ops dashboard for Cloudflare: a single pane of glass for reviewing an account's **Zero Trust Access policies**, **WAF activity**, and **Cache Rules** — served entirely from one Cloudflare Worker.
+Ops dashboard for Cloudflare: one pane of glass for reviewing an account's **Zero Trust** configuration and telemetry, **security** posture (WAF, AI Security, PQC readiness, request forensics), **cache rules**, and **developer-platform usage** — fifteen sections served entirely from one Cloudflare Worker.
 
 ## Sections
 
@@ -14,11 +14,11 @@ Ops dashboard for Cloudflare: a single pane of glass for reviewing an account's 
 | `#/gateway` | Gateway Usage | account | Zero Trust Gateway: DNS resolver queries and Gateway HTTP requests over time, split allowed/blocked, with top categories, policies, hosts and actions |
 | `#/pqc` | PQC Readiness | account | Post-quantum coverage per hostname: every A/AAAA/CNAME record in the account's zones, split by the two TLS legs — visitor→Cloudflare (proxied and TLS 1.3 on, so X25519MLKEM768 is offered) and Cloudflare→origin (tunnel, Cloudflare-hosted, automatic key exchange, or plain HTTP). Ranked worst first, with per-zone TLS settings and CSV export. The zone table also grades each zone's allowed TLS 1.0–1.2 cipher suites — forward secrecy and AEAD judged separately, obsolete families called out. A separate "TLS posture" section grades zone hygiene (minimum TLS version, Full vs Full-strict, HSTS, Always Use HTTPS) — real gaps, but never a verdict input |
 | `#/waf` | WAF Analytics | account or zone | `firewallEventsAdaptive` telemetry correlated against ruleset metadata: KPIs, events-over-time, per-ruleset/rule tables, action-drift detection, per-rule drill-down |
-| `#/ai-security` | AI Security for Apps | account or zone | Prompt-injection, PII, unsafe-topic and custom-topic detections on LLM traffic: KPIs, detections over time, endpoint/country/session breakdowns, ranked mitigations, and a flagged-request table with per-row prompt decryption |
+| `#/ai-security` | AI Security | account or zone | Prompt-injection, PII, unsafe-topic and custom-topic detections on LLM traffic: KPIs, detections over time, endpoint/country/session breakdowns, ranked mitigations, and a flagged-request table with per-row prompt decryption |
 | `#/cache` | Cache Rules | zone | Cache rules with last-match traffic attribution, hit-ratio health grade, insights, URL tester (client-side wirefilter evaluation) |
 | `#/workers` | Workers Analytics | account | Per-script invocation telemetry from `workersInvocationsAdaptive`: requests, errors, subrequests and CPU P50, as summary cards, a line/bar chart by worker, and a per-worker table with error rates |
 | `#/workers-ai` | Workers AI | account | Inference analytics from `aiInferenceAdaptiveGroups`: requests, neurons, input/output tokens, average latency and errors, with a per-model table plus request-source and error-code breakdowns |
-| `#/ai-gateway` | AI Gateway | account | AI Gateway proxy traffic: requests over time, tokens, error rate, cache hit rate and spend, with per-gateway and per-model/provider breakdowns. **The GraphQL field and dataset names behind this section are unverified** — there is no Cloudflare API token in this environment to check them against a live schema — so each of the three supplementary datasets (errors, cache, spend) degrades to a stated "unavailable" panel independently if its guess is wrong, rather than failing the whole page. See the field-by-field confidence notes at the top of [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
+| `#/ai-gateway` | AI Gateway | account | AI Gateway proxy traffic: requests over time, tokens, error rate, cache hit rate and spend, with per-gateway and per-model/provider breakdowns. Dataset, dimension and aggregate names are resolved from the live GraphQL schema at runtime rather than hardcoded, and the response names the candidates each was chosen from. Each supplementary dataset (errors, cache, spend) degrades to a stated "unavailable" panel independently, rather than failing the whole page. See [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
 | `#/cost` | Cost & Usage | account | Billable units across Workers and Workers AI for the window, priced with rates you enter. No Cloudflare list prices ship with the app |
 | `#/findings` | Findings | account (+ loaded sections) | Severity-ranked audit view: publicly-reachable apps, apps with no policy, `bypass` decisions, unreferenced groups, WAF action drift, cache insights and health grade |
 
@@ -39,7 +39,11 @@ src/lib/access-usage.ts      Access login telemetry
 src/lib/gateway-usage.ts     Zero Trust Gateway DNS + HTTP telemetry
 src/lib/workers-analytics.ts Workers invocation metrics
 src/lib/workers-ai.ts        Workers AI inference metrics
-src/lib/ai-gateway.ts        AI Gateway proxy usage (unverified field names — see file header)
+src/lib/ai-gateway.ts        AI Gateway proxy usage, field names resolved from the live schema
+src/lib/access-tunnels.ts    Tunnel Map: hostname → Access app → tunnel → origin join
+src/lib/pqc.ts               PQC readiness verdicts, TLS posture, cipher grading
+src/lib/pqc-adoption.ts      Measured post-quantum key-exchange adoption (schema-probed)
+src/lib/request-trace.ts     Ray ID forensics with schema sweep and adaptive retry
 src/lib/ai-sec/              AI Security: zone fan-out, schema probing, domain aggregation
 web/                         Vite + React 19 + Tailwind 4 + TanStack Table SPA
 web/src/hooks/useTimeRange.ts   Shared analytics window, clamped per section
@@ -48,6 +52,8 @@ web/src/features/ai-security/matchedData.ts
                              HPKE decryption of logged prompts, browser-side only
 web/src/lib/expr.ts          Wirefilter expression evaluator (single source; the
                              worker imports it for attribution, the client for the URL tester)
+web/src/lib/ui.ts            Style tokens — the single definition of cards, alerts, buttons, focus rings
+web/src/components/          PageShell, StatCard, EmptyState, Tabs, LoadingVeil, ProgressBar, shell
 ```
 
 All time-windowed sections share one range picker in the top bar, stored in minutes and clamped
@@ -89,6 +95,17 @@ or a `Refresh` button inside a page fails
 [tests/refresh-affordance.test.ts](tests/refresh-affordance.test.ts) — because the previous drift
 did not come from carelessness, it came from each new page copying whichever page its author
 happened to open, and a style guide does not stop that.
+
+### Loading
+
+Every section loads behind [LoadingVeil](web/src/components/LoadingVeil.tsx): a progress bar with
+a caption, above content dimmed while it goes stale. There are no server-side progress events, so
+the bar is estimated from how long that section's last load actually took. The caption follows
+one rule — never report a number the app cannot stand behind: a countdown appears only when the
+estimate came from a measured load and is still ahead of the clock; the first load of a section
+shows elapsed time, and a load that outruns its estimate says it is taking longer than usual
+rather than sitting at "0s". Content is dimmed, not disabled, because what is on screen during a
+reload is real data the reader may still want.
 
 Credentials resolve at one choke point, [src/lib/auth.ts](src/lib/auth.ts). In BYOT mode the
 browser keeps the API token in `sessionStorage` and sends it per request as `Authorization:
@@ -261,6 +278,14 @@ documented anywhere we control. Each is handled in code; this is why the handlin
 is therefore ambiguous, and the Tunnel Map says so rather than rendering a blank table that reads
 as a clean bill of health.
 
+**The applications list already carries every application's policies.** `GET
+/accounts/{id}/access/apps` embeds full policy objects — rules, decision, precedence, `reusable` —
+identical field for field to `/access/apps/{app}/policies` (checked for all 29 apps on this
+account, 2026-09-12). Fetching them again per application cost about six seconds per load on 29
+apps. The one exception is the `private_ip` type, which omits the field entirely; its per-app
+endpoint returns nothing either, but an absent field and an empty policy list are different
+facts, so those apps are still asked about individually rather than assumed.
+
 **A zone query may select at most 70 fields.** Exceeding it fails the whole query with
 `number of fields can't be more than 70`. Request Trace budgets its schema sweep against that
 ceiling, and parses the number out of the error to trim if the ceiling ever changes.
@@ -369,18 +394,21 @@ get a real browser-like environment, without either leaking into the other.
 
 | Layer | Files | What it covers |
 |---|---|---|
-| Unit | `tests/{expr,rules,csv,findings,cache-analysis,waf-meta,waf-aggregate,waf-chart,hash-params,auth,chart-hover}.test.ts`, `tests/ai-sec-*.test.ts` | Pure logic: wirefilter evaluation, rule rendering, findings, CSV, WAF aggregation and bucketing, hash deep-link helpers, Access JWT verification, chart hover placement, and the AI Security domain layer including `buildDashboard` |
-| Component | `tests/components/{PqcPage,ConnectPage,AppsTable}.test.tsx` | Actually rendered React components (jsdom + Testing Library, `tests/components/setup.ts`): the PQC page's verdict filter chips, hostname/zone search and zone-level error display; the Connect screen's empty-token validation and permission checklist; AppsTable's global search narrowing/restoring rows |
+| Unit | `tests/{expr,rules,csv,findings,cache-analysis,waf-meta,waf-aggregate,waf-chart,hash-params,auth,chart-hover,pqc}.test.ts`, `tests/ai-sec-*.test.ts` | Pure logic: wirefilter evaluation, rule rendering, findings, CSV, WAF aggregation and bucketing, hash deep-link helpers, Access JWT verification, chart hover placement, PQC verdicts, and the AI Security domain layer including `buildDashboard` |
+| Component | `tests/components/{PqcPage,ConnectPage,AppsTable,GroupsPage,shared-ui,tabs,progress,estimated-progress}.test.tsx` | Actually rendered React components (jsdom + Testing Library, `tests/components/setup.ts`): page behaviour for PQC, Connect, Applications and Groups; the shared StatCard/EmptyState and the rule that no page redefines them; the ARIA tabs contract; and the loading caption's honesty rules and estimate bookkeeping |
 | Integration | `tests/integration-ai-security.test.ts` | The AI route wired to the ported library, Cloudflare client and Cache API, with only the network mocked — including cache-key tenant isolation |
-| System | `tests/system-routes.test.ts`, `tests/{access-usage,gateway-usage,workers-analytics,workers-ai,ai-gateway}.test.ts` | Every route through the real app against one mocked Cloudflare: response shapes, validation, upstream error mapping, and the cross-cutting header and `no-store` contract. `ai-gateway.test.ts` additionally covers per-dataset degradation when a guessed field name is wrong |
+| System | `tests/system-routes.test.ts`, `tests/{access-usage,gateway-usage,workers-analytics,workers-ai,ai-gateway,access-tunnels,request-trace,data-fanout}.test.ts` | Every route through the real app against one mocked Cloudflare: response shapes, validation, upstream error mapping, and the cross-cutting header and `no-store` contract. `ai-gateway.test.ts` covers per-dataset degradation when a field does not resolve; `data-fanout.test.ts` pins the embedded-policy read and the concurrent tunnel fetches |
 | Compatibility | `tests/compat-upstream-shapes.test.ts` | Upstream drift the app does not control: pagination, partial-scope tokens, unknown detection categories, non-JSON responses, and the Workers globals Node lacks |
 | Security | `tests/security-boundaries.test.ts`, `tests/routes-auth.test.ts`, `tests/no-adhoc-auth.test.ts`, `tests/matched-data.test.ts` | The adversarial half: credential confinement, allowlist evasion, input handling, the guardrail keeping credential resolution in one module, and the prompt-decryption boundaries — key never stored, never sent, never exported |
-| Regression | `tests/shell-layout.test.ts`, `tests/apps-export.test.ts`, `tests/error-boundary.test.ts` | Failures with no runtime error to catch them: the flex height chain that decides whether sections or the shell scroll, CSV exporting rendered text rather than raw JSON, and the error-boundary message formatter |
+| Regression | `tests/shell-layout.test.ts`, `tests/refresh-affordance.test.ts`, `tests/apps-export.test.ts`, `tests/error-boundary.test.ts` | Failures with no runtime error to catch them: the flex height chain and PageShell as the sole scroller, refresh living only in the top bar, CSV exporting rendered text rather than raw JSON, and the error-boundary message formatter |
 | E2E | `tests/e2e-live.test.ts` | The deployed Worker through real Cloudflare Access with the bound token. **Opt-in** |
 
 Some suites assert against source text rather than behaviour — that a page has its own scroll
 container, that no module outside `src/lib/auth.ts` reads the `Authorization` header, that the
-decryption key never reaches storage. Those properties have no observable failure mode in a Node
+decryption key never reaches storage.
+
+Note that `tests/` is outside the TypeScript project, so a test file can reference a prop or
+field that no longer exists and still pass. Keep that in mind when a component's API changes. Those properties have no observable failure mode in a Node
 test environment, and reviewing for them by eye has already proved unreliable.
 
 The E2E suite needs an Access service token that the app's Access policy admits, read from the
@@ -401,7 +429,8 @@ Cloudflare API quota, which is why it never runs as part of `npm test`.
 | `npm run check` | tsc project build + tests + vite build + wrangler dry-run |
 | `npm run lint` | ESLint |
 | `npm run build` | Vite production build → `web/dist` |
-| `npm run deploy` | Build then `wrangler deploy` |
+| `npm run deploy` | Build then `wrangler deploy` with the placeholder `wrangler.jsonc` |
+| `npm run deploy:live` | Build then deploy with the gitignored `wrangler.local.jsonc` — the real deployment |
 
 ## Debugging the UI against real data
 

@@ -4,13 +4,15 @@ Status snapshot, last reviewed **2026-09-13** against a full read of the tree, a
 the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Fifteen sections, 613 tests green, `tsc -b` clean, 0 lint errors (4 known warnings).
+**TL;DR** — Fifteen sections, 17 API routes, 631 tests green across 44 files, `tsc -b` clean, 0 lint errors (4 known warnings).
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `db28da07`, deployed 2026-09-09 16:11 UTC.
+Running version `1c7369ff`, deployed 2026-09-12 18:05 UTC. The three slowest routes were cut by
+two-thirds in that deploy (`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s,
+`/api/pqc/report` 6.5s → 4.3s, measured in production) with responses verified unchanged.
 
 Source lives at `bkrbybk-org/flarelens` (public). `wrangler.jsonc` carries placeholder account,
 zone and Access ids; the real deployment config is the gitignored `wrangler.local.jsonc`, used by
@@ -20,7 +22,7 @@ pull request; there is no deploy job, deliberately — see the note under Recent
 
 ## Sections
 
-Fifteen routes, grouped in the sidebar by Cloudflare product area:
+Fifteen sections, grouped in the sidebar by Cloudflare product area:
 
 | Group | Routes |
 |---|---|
@@ -73,8 +75,8 @@ of the calling token — see the P2 entry below.
 |---|---|---|
 | `GET /health` | — | uptime checks |
 | `GET /api/accounts` | account | connect screen, account switcher |
-| `GET /api/zones` | account | zone picker (WAF + Cache) |
-| `GET /api/data` | account | Access Applications, Access Groups |
+| `GET /api/zones` | account | zone picker (WAF, Cache, AI Security) |
+| `GET /api/data` | account | Access Applications, Access Groups, Findings. Policies come from the apps list payload, which embeds them; per-app policy fetches happen only for apps missing the field |
 | `POST /api/waf/events` | account or zone | WAF Analytics (firewallEventsAdaptive, cursor-paginated 5×10k, deduped) |
 | `GET /api/waf/rulesets` | account or zone | WAF Analytics (ruleset metadata) |
 | `POST /api/cache/analyze` | zone | Cache Rules (rules + GraphQL analytics + attribution + insights) |
@@ -83,12 +85,12 @@ of the calling token — see the P2 entry below.
 | `POST /api/access/usage` | account | Access Usage. Upstream caps this dataset at 1 week |
 | `POST /api/request/trace` | account or zone | Request Trace — Ray ID lookup across zones, schema-driven field selection |
 | `GET /api/pqc/report` | account (optional zone) | PQC Readiness — zones, their TLS settings, and every A/AAAA/CNAME record classified per TLS leg |
-| `GET /api/access/tunnels` | account | Tunnel Map — joins Access apps, their policies (reusable ones resolved), tunnel ingress rules and private routes |
+| `GET /api/access/tunnels` | account | Tunnel Map — joins Access apps, their policies (reusable ones resolved), tunnel ingress rules and private routes. Tunnel-side reads start without waiting for the apps |
 | `POST /api/gateway/usage` | account | Gateway Usage (DNS resolver + Gateway HTTP) |
 | `GET /api/workers/scripts` | account | Workers Analytics filter — needs `Workers Scripts: Read`, degrades if absent |
 | `POST /api/workers/metrics` | account | Workers Analytics; also half of Cost & Usage |
 | `POST /api/workers-ai/usage` | account | Workers AI; also half of Cost & Usage |
-| `POST /api/ai-gateway/usage` | account | AI Gateway (proxy requests, tokens, errors, cache, spend). **Field names unverified** — see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
+| `POST /api/ai-gateway/usage` | account | AI Gateway (proxy requests, tokens, errors, cache, spend). Field names resolved from the live schema — see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
 | `app.all("*")` | — | static asset fallback |
 
 All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, missing/bad token →
@@ -132,6 +134,8 @@ documents, so no caller text reaches a query.
 | [web/src/components/StatCard.tsx](web/src/components/StatCard.tsx) | `StatCard` (label over value, optional icon/hint/tone; formats numbers itself) and `StatGrid` (two columns on a phone, `cols` at `lg`) |
 | [web/src/components/EmptyState.tsx](web/src/components/EmptyState.tsx) | `EmptyState` (page), `EmptyNote` (inside a card), `EmptyRow` (inside a table). `loading` is a separate state from empty |
 | [web/src/components/Tabs.tsx](web/src/components/Tabs.tsx) | The full ARIA tabs contract: `aria-controls`/`aria-labelledby` both ways, roving tabindex, Left/Right/Home/End with wrapping |
+| [web/src/components/LoadingVeil.tsx](web/src/components/LoadingVeil.tsx) | The loading treatment: progress bar with a time caption above content dimmed to 50% with `aria-busy`. Dimmed, not disabled — the stale data stays readable. Used by `PageShell` and by Applications |
+| [web/src/components/ErrorBoundary.tsx](web/src/components/ErrorBoundary.tsx) | Per-section render-failure boundary; `formatErrorDetails` is unit-tested |
 | [web/src/hooks/useSectionRefresh.ts](web/src/hooks/useSectionRefresh.ts) | Lets the mounted section register its reload so the top bar's Sync can drive it; single slot, cleared on unmount |
 
 ### Frontend
@@ -159,7 +163,7 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 | [useRoute](web/src/hooks/useRoute.ts) / [useHashParams](web/src/hooks/useHashParams.ts) | Hash routing + deep-linkable state |
 | [useZones](web/src/hooks/useZones.ts) | Lazy zone list, cached per account |
 | [useZeroTrustData](web/src/hooks/useZeroTrustData.ts) / [useWafData](web/src/features/waf/useWafData.ts) / [useCacheData](web/src/features/cache/useCacheData.ts) | Per-section fetch + state |
-| [useEstimatedProgress](web/src/hooks/useEstimatedProgress.ts) | Progress bar estimated from the last real load duration |
+| [useEstimatedProgress](web/src/hooks/useEstimatedProgress.ts) | Progress estimated from this section's last real load duration. Exposes `etaMs`, `elapsedMs` and `measured`: a countdown is shown only when the estimate was measured and still ahead of the clock, otherwise elapsed time |
 | [useSectionRefresh](web/src/hooks/useSectionRefresh.ts) | Puts the mounted section's reload behind the top bar's Sync button |
 
 **Cross-page snapshots.** WAF and Cache data lives in their pages' hooks, which unmount on
@@ -177,7 +181,7 @@ Disconnect clears the store.
 |---|---|---|
 | `cf_api_token`, `cf_account_id`, `cf_account_name` | sessionStorage | Cleared on tab close; never persisted to disk |
 | `cf_zt_prefs` | localStorage | `PREFS_VERSION = 3`; a version bump discards saved column order/visibility so new defaults apply. The policies table keeps its own `policyColumnVisibility` / `policyColumnOrder` keys: it shares column ids (`name`, `updated_at`, `id`) with the applications table, so one saved order would scramble the other |
-| `cf_zt_last_load_ms`, `cf_waf_last_load_ms`, `cf_cache_last_load_ms` | sessionStorage | Rolling load-duration estimates for the progress bar |
+| `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (13 keys, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
 
 ### Tests
 
@@ -203,7 +207,23 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | `tests/components/shared-ui.test.tsx` | The shared pieces that ended two design generations: number formatting, "loading" vs "empty" staying distinguishable, StatGrid's single breakpoint, and that no page defines its own StatCard, Kpi or EmptyState again |
 | `tests/components/tabs.test.tsx` | The ARIA tabs pattern rather than the markup: each tab points at its panel, arrows move and wrap, exactly one tab is in the tab order |
 | `tests/refresh-affordance.test.ts` | Refresh exists only in the top bar, every reloadable section registers one, and the registration clears on unmount |
-| `tests/ai-gateway.test.ts` | AI Gateway route: series/totals fold, rate arithmetic (never divides by zero), per-dataset degradation when a guessed field name is wrong, validation, auth, `no-store`, 502 on load-bearing failure, and the same "no per-user dimension" privacy assertion as the other aggregate-only sections |
+| `tests/ai-gateway.test.ts` | AI Gateway route: series/totals fold, rate arithmetic (never divides by zero), per-dataset degradation when a field does not resolve, validation, auth, `no-store`, 502 on load-bearing failure, and the same "no per-user dimension" privacy assertion as the other aggregate-only sections |
+| `tests/data-fanout.test.ts` | `/api/data` and the tunnel map use embedded app policies, fetch only apps missing the field, and issue the three tunnel-side reads concurrently (checked to fail against a serialised build) |
+| `tests/components/progress.test.tsx` | The honesty rules for the time caption (countdown only when measured and ahead; elapsed otherwise; never "0s"), the bar outside the dimmed region, content left interactive |
+| `tests/components/estimated-progress.test.tsx` | No estimate before a first timed load, recorded duration used next time, blended rather than replaced, nothing recorded from a failure |
+| `tests/system-routes.test.ts` | Every core route through the real app against one mocked Cloudflare: shapes, validation, error mapping, headers, `no-store` |
+| `tests/compat-upstream-shapes.test.ts` | Pagination, partial-scope tokens (including per-app policy failures), malformed payloads, Workers-only globals |
+| `tests/access-tunnels.test.ts` | The hostname → app → tunnel → origin chain, origin kinds, both gap types, degradation without scopes |
+| `tests/access-usage.test.ts`, `tests/gateway-usage.test.ts`, `tests/workers-analytics.test.ts`, `tests/workers-ai.test.ts` | Each telemetry route: aggregation, validation, presentation helpers; Gateway also its verdict vocabulary and the no-per-user-field privacy assertion |
+| `tests/request-trace.test.ts` | Ray ID normalisation, field-ceiling and per-zone entitlement retries, the route |
+| `tests/integration-ai-security.test.ts` | AI route wired to the real library and Cache API with only the network mocked, including cache-key tenant isolation |
+| `tests/ai-sec-{catalog,dashboard,params,transform}.test.ts` | AI Security domain layer: labels and mitigations, `buildDashboard`, window/bucket parameters, detection predicates |
+| `tests/auth.test.ts`, `tests/routes-auth.test.ts`, `tests/no-adhoc-auth.test.ts` | Credential resolution, every route gated in both modes, and the source guard keeping auth in one module (including the server-mode empty-token trap) |
+| `tests/security-boundaries.test.ts`, `tests/matched-data.test.ts` | Bound token never leaves the Worker, allowlist evasion, input handling; prompt-decryption key never stored, sent or exported |
+| `tests/shell-layout.test.ts` | The flex height chain, PageShell as the only scroll container, and Applications as the deliberate exception |
+| `tests/waf-chart.test.ts`, `tests/chart-hover.test.ts`, `tests/hash-params.test.ts` | WAF bucketing, chart hover hit-testing and placement, deep-link params including route-keyed adoption |
+| `tests/apps-export.test.ts`, `tests/error-boundary.test.ts` | CSV exports rendered text rather than raw JSON; the error-boundary formatter |
+| `tests/e2e-live.test.ts` | The deployed Worker through real Access. **Opt-in** (`FLARELENS_E2E=1`), spends real API quota |
 
 ---
 
@@ -335,9 +355,28 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 |---|---|---|---|
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules |
 | P3 | **PQC Readiness counts DNS validation records as hostnames** — the one `not-ready` row on this account is `_6390ec137f3d86b975ad6f6431d343a6.nttlab.org`, an underscore-prefixed ACME/validation record | A false positive: a validation record is not a service anyone reaches, so flagging it as unprotected is noise that trains the reader to ignore the column | Exclude underscore-prefixed labels from the inventory, or classify them as a non-service record type rather than dropping them silently |
+| P3 | **`tests/` is not type-checked.** `tsc -b` covers `src` and `web/src` only | A test can drift from the component API it exercises and keep passing — found when `GroupsPage.test.tsx` was still passing removed props, which React silently ignores | Add a `tests` tsconfig to the project references; expect a batch of unrelated errors on first run, so land it as its own change |
 | P3 | 4 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 
 ### Recently resolved
+
+- **API latency cut by two-thirds (2026-09-12).** `/api/data` and `/api/access/tunnels` each
+  fetched `/access/apps/{app}/policies` for every application — 29 round trips at five at a time,
+  about six seconds — although `GET /access/apps` already embeds identical policy objects (verified
+  field by field for all 29 apps). They now read the embedded policies and fetch individually only
+  for apps whose `policies` field is absent (`private_ip` today), so `policies_error` still means
+  what it says. The tunnel map's configuration, route and Worker-domain reads now run together,
+  and PQC's adoption probe runs alongside the readiness report. Production, before → after:
+  `/api/data` 13.8s → 4.4s, tunnels 12.7s → 4.0s, PQC 6.5s → 4.3s. Responses compared before and
+  after on live data: tunnels byte-identical, data identical apart from Cloudflare's own
+  nondeterministic array order, PQC identical apart from adoption counts in a window that slid
+  two minutes.
+
+- **Loading states say how long and show what is stale (2026-09-12).** `useEstimatedProgress`
+  computed an ETA nothing rendered. The bar now carries a caption — a countdown only when the
+  estimate came from a measured load and is still ahead of the clock, elapsed time otherwise,
+  and "taking longer than usual" once a load outruns its estimate — and the content under it dims
+  with `aria-busy` while stale. Shared through `LoadingVeil`.
 
 - **UI/UX consistency pass across every section (2026-09-13).** An audit against every page found
   the app had two design generations, split exactly rather than randomly: nine sections framed
@@ -426,7 +465,7 @@ that need a change in the Cloudflare dashboard are still open above.
   (`8c2f04d`); verified end to end, and removing the guard fails two of the four new tests.
 
 - ~~`engines.node` said `>=20.19.0` while Wrangler 4 requires `>=22`~~ — corrected to `>=22.0.0`. This mismatch already caused a real `Wrangler requires at least Node.js v22.0.0` failure; README repeated the wrong figure and is now fixed too.
-- ~~Access Groups had no Sync button~~ — `showSync` now covers `access` and `groups`, the two routes that render the `/api/data` payload. WAF and Cache keep their own in-page Refresh controls.
+- ~~Access Groups had no Sync button~~ — `showSync` now covers `access` and `groups`, the two routes that render the `/api/data` payload. *(Superseded 2026-09-13: every section now reloads from the top bar's Sync via `useSectionRefresh`; no section has an in-page Refresh.)*
 - ~~`node_modules/` empty, `npm test`/`lint` failing with `Cannot find package 'vitest'`~~ — environment only, restored with `npm install`. Noted because the symptom looks like a code failure but isn't.
 
 ---
@@ -435,12 +474,10 @@ that need a change in the Cloudflare dashboard are still open above.
 
 | Task | Why | Size | Blocked by |
 |---|---|---|---|
-| **CI/CD** — GitHub Actions: `npm run check` on PR, deploy on merge to main | Tests and lint exist but nothing enforces them | S | Git remote + `CLOUDFLARE_API_TOKEN` repo secret (deploy-scoped, separate from a browsing token) |
+| **CD** — deploy from GitHub Actions (CI already runs `check` + `lint`) | Deploys are local only | S | A way to supply account/zone/Access ids without putting them in the public repo — the reason there is no deploy job today |
+| **Frontend load waterfall** — profile `config → accounts → data` in the browser | The API side was profiled and cut by two-thirds; the client's own request ordering has not been examined | S | — |
 | **Cache range comparison** — current vs previous equivalent window (hit-ratio and volume delta) | Turns a point-in-time number into a trend signal | M | — |
-| **Component / integration tests** | Current suite covers pure logic only; UI regressions rely on manual preview checks | M | Testing-library + jsdom setup |
-| **AI Gateway section** — `aiGatewayRequestsAdaptiveGroups`, `…ErrorsAdaptiveGroups`, `…CacheAdaptiveGroups`, `…SpendSessionsAdaptiveGroups` all exist on this account | Requests, cache hit rate, errors and spend. The only spend signal Cloudflare exposes directly, and Cost & Usage currently has to be priced by hand | M | — |
 | **Findings covers the newer sections** | Findings folds in Access, Groups, WAF and Cache only. Everything since — AI detections, Workers error rates, Gateway blocks, Access login failures, and most pointedly the Tunnel Map's ungated hostnames — never reaches the audit view, though an ungated origin is exactly what a Findings entry is for | M | — |
-| **Lazy-load the HPKE bundle** | `hpke-js` costs ~130 KB on every page load for a feature used on one tab, by one role | S | — |
 | **Per-user Access and Gateway breakdowns** | `userUuid`, `email`, `deviceId` are available and deliberately unqueried | S | **A privacy decision, not a technical one** — and under a shared bound token those reads are attributable to nobody |
 | **Snapshot diff / audit trail** — capture policy snapshots, diff them (and diff the newest against live) | Biggest product differentiator; answers "what changed since the last review" | L | Nothing — **designed and ready to build** |
 
