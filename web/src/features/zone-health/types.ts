@@ -47,7 +47,7 @@ export interface DnsUnknown {
 export interface ZoneDns {
 	findings: DnsFinding[];
 	unknown: DnsUnknown[];
-	checked: { records: number; cnamesResolved: number; cnamesSkippedByCap: number };
+	checked: { records: number; cnamesResolved: number; cnamesSkippedByCap: number; validationCnamesSkipped: number };
 }
 
 export interface ZoneHealth {

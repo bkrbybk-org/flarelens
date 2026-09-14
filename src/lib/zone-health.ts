@@ -90,7 +90,7 @@ export interface DnsUnknown {
 export interface ZoneDns {
 	findings: DnsFinding[];
 	unknown: DnsUnknown[];
-	checked: { records: number; cnamesResolved: number; cnamesSkippedByCap: number };
+	checked: { records: number; cnamesResolved: number; cnamesSkippedByCap: number; validationCnamesSkipped: number };
 }
 
 export interface ZoneHealth {
@@ -368,6 +368,26 @@ function isUnderscoreRecord(name: string): boolean {
 
 const TUNNEL_CNAME_RE = /^([^.]+)\.cfargotunnel\.com\.?$/i;
 
+/**
+ * Suffixes of CNAME targets that exist only to prove domain ownership to a certificate authority
+ * or a platform — Google's `dv.googlehosted.com`, AWS Certificate Manager, GoDaddy, DigiCert,
+ * Sectigo. The verifier reads the CNAME record itself; the target is not meant to resolve, and
+ * nobody can claim it to serve content. Measured on the live account: a Google verification CNAME
+ * returned NXDOMAIN and was reported as a high-severity takeover risk, which it is not.
+ */
+const VALIDATION_TARGET_SUFFIXES = [
+	"dv.googlehosted.com",
+	"acm-validations.aws",
+	"domaincontrol.com",
+	"dcv.digicert.com",
+	"comodoca.com",
+	"sectigo.com",
+];
+
+function isValidationTarget(target: string): boolean {
+	return VALIDATION_TARGET_SUFFIXES.some((suffix) => target === suffix || target.endsWith(`.${suffix}`));
+}
+
 export type DohOutcome = { kind: "nxdomain" } | { kind: "resolved" } | { kind: "unknown"; reason: string };
 
 /**
@@ -455,12 +475,12 @@ async function buildDnsForZones(
 
 	const perZone = new Map<
 		string,
-		{ findings: DnsFinding[]; unknown: DnsUnknown[]; records: number; cnamesResolved: number; cnamesSkippedByCap: number }
+		{ findings: DnsFinding[]; unknown: DnsUnknown[]; records: number; cnamesResolved: number; cnamesSkippedByCap: number; validationCnamesSkipped: number }
 	>();
 	const externalCandidates: ExternalCandidate[] = [];
 
 	for (const raw of zoneRaws) {
-		const entry = { findings: [] as DnsFinding[], unknown: [] as DnsUnknown[], records: 0, cnamesResolved: 0, cnamesSkippedByCap: 0 };
+		const entry = { findings: [] as DnsFinding[], unknown: [] as DnsUnknown[], records: 0, cnamesResolved: 0, cnamesSkippedByCap: 0, validationCnamesSkipped: 0 };
 		perZone.set(raw.zone.id, entry);
 
 		if (raw.error) {
@@ -529,6 +549,11 @@ async function buildDnsForZones(
 				const inAccount = ownZoneNames.has(target) || [...ownZoneNames].some((z) => target.endsWith(`.${z}`));
 				if (inAccount) continue;
 				if (!target) continue;
+				// Counted rather than dropped, so the checked totals still account for every CNAME.
+				if (isValidationTarget(target)) {
+					entry.validationCnamesSkipped++;
+					continue;
+				}
 
 				externalCandidates.push({ zoneId: raw.zone.id, record: identity });
 				continue;
@@ -588,7 +613,12 @@ async function buildDnsForZones(
 		out.set(zoneId, {
 			findings: entry.findings,
 			unknown: entry.unknown,
-			checked: { records: entry.records, cnamesResolved: entry.cnamesResolved, cnamesSkippedByCap: entry.cnamesSkippedByCap },
+			checked: {
+				records: entry.records,
+				cnamesResolved: entry.cnamesResolved,
+				cnamesSkippedByCap: entry.cnamesSkippedByCap,
+				validationCnamesSkipped: entry.validationCnamesSkipped,
+			},
 		});
 	}
 	return out;
@@ -618,7 +648,11 @@ export async function buildZoneHealthReport(inputs: ZoneHealthInputs): Promise<Z
 			custom: { available: false, reason: "Not fetched", items: [] },
 			originCa: { available: false, reason: "Not fetched", items: [] },
 		},
-		dns: dnsByZone.get(zone.id) ?? { findings: [], unknown: [], checked: { records: 0, cnamesResolved: 0, cnamesSkippedByCap: 0 } },
+		dns: dnsByZone.get(zone.id) ?? {
+			findings: [],
+			unknown: [],
+			checked: { records: 0, cnamesResolved: 0, cnamesSkippedByCap: 0, validationCnamesSkipped: 0 },
+		},
 	}));
 
 	let high = 0;

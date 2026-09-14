@@ -226,6 +226,33 @@ describe("dangling tunnel CNAME", () => {
 });
 
 describe("dangling external CNAME", () => {
+	it("does not report a domain-validation CNAME as a takeover risk, and counts it as skipped", async () => {
+		// Measured live: Google's verification target returned NXDOMAIN and was flagged high. The
+		// verifier reads the record, not the target — there is nothing to take over.
+		const lookups: string[] = [];
+		const result = await buildZoneHealthReport(
+			baseInputs({
+				dnsRaw: [
+					{
+						zone: ZONE,
+						records: [
+							{ name: "gv-abc.example.com", type: "CNAME", content: "gv-abc.dv.googlehosted.com", proxied: false },
+							{ name: "shop.example.com", type: "CNAME", content: "gone.azurewebsites.net", proxied: false },
+						],
+					},
+				],
+				dohLookup: async (target) => {
+					lookups.push(target);
+					return { kind: "nxdomain" };
+				},
+			}),
+		);
+		const dns = result.zones[0].dns;
+		expect(lookups).toEqual(["gone.azurewebsites.net"]);
+		expect(dns.findings.map((f) => f.record.name)).toEqual(["shop.example.com"]);
+		expect(dns.checked.validationCnamesSkipped).toBe(1);
+	});
+
 	const record = (content: string) => ({ zone: ZONE, records: [{ name: "shop.example.com", type: "CNAME", content, proxied: true }] });
 
 	it("NXDOMAIN (DoH Status 3) is a high finding", async () => {
