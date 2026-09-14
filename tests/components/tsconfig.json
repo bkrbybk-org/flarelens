@@ -1,0 +1,21 @@
+{
+	"compilerOptions": {
+		"composite": true,
+		"target": "ES2022",
+		"module": "ES2022",
+		"moduleResolution": "Bundler",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"jsx": "react-jsx",
+		"types": ["node"],
+		"strict": true,
+		"noEmit": false,
+		"emitDeclarationOnly": true,
+		"declaration": true,
+		"outDir": "../../.tsbuild/tests-components",
+		"skipLibCheck": true,
+		"isolatedModules": true,
+		"verbatimModuleSyntax": true
+	},
+	"include": ["**/*.ts", "**/*.tsx"],
+	"references": [{ "path": "../../web/tsconfig.json" }]
+}
