@@ -114,6 +114,10 @@ export interface ZoneHealthResult {
 export function isPrivateAddress(ip: string): boolean {
 	const addr = ip.trim();
 	if (addr.includes(":")) {
+		// ::ffff:10.0.0.1 is an IPv4 address in IPv6 notation; judge it as the address it carries,
+		// or a private address written this way would be graded as a published public origin.
+		const mapped = addr.toLowerCase().match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+		if (mapped) return isPrivateAddress(mapped[1]);
 		const groups = parseIPv6(addr);
 		if (!groups) return false;
 		if (groups.slice(0, 7).every((g) => g === 0) && groups[7] === 1) return true; // ::1
@@ -281,6 +285,22 @@ async function fetchEdgeCertificates(zoneId: string, token: string, now: Date): 
 	const items: CertItem[] = [];
 	for (const pack of res.result) {
 		const certs = pack.certificates && pack.certificates.length > 0 ? pack.certificates : [];
+		// A pack stuck in pending_validation or validation_timed_out has issued nothing, so there is
+		// no expiry date to grade. Skipping it for that reason would make a hostname with no working
+		// certificate look exactly like a zone with nothing to report.
+		const issued = certs.some((cert) => cert.expires_on);
+		if (!issued && pack.status && pack.status !== "active") {
+			items.push({
+				id: pack.id || "",
+				hosts: pack.hosts || [],
+				expiresOn: "",
+				status: pack.status,
+				severity: "medium",
+				title: "Certificate pack has not issued",
+				detail: `Pack status is "${pack.status}" and no certificate has been issued for it.`,
+			});
+			continue;
+		}
 		for (const cert of certs) {
 			if (!cert.expires_on) continue;
 			const { severity, title, detail } = assessEdgeCert(cert.expires_on, pack.status ?? null, now);
@@ -647,12 +667,12 @@ export async function fetchZoneHealthReport(
 ): Promise<ZoneHealthResult> {
 	const errors: { source: string; message: string }[] = [];
 
-	const tunnels = await fetchTunnelIds(accountId, token);
-	if (tunnels.error) errors.push({ source: "tunnels", message: tunnels.error });
-
 	const certs = new Map<string, ZoneCertificates>();
 	const dnsRaw: ZoneDnsRaw[] = [];
 
+	// The tunnel list is account-wide and depends on no zone, so it is fetched alongside the
+	// per-zone reads rather than ahead of them — waiting for it first costs a round trip for nothing.
+	const tunnelsPromise = fetchTunnelIds(accountId, token);
 	await mapWithConcurrency(zones, CONCURRENCY, async (zone) => {
 		const [edge, custom, originCa, dns] = await Promise.all([
 			fetchEdgeCertificates(zone.id, token, now),
@@ -664,6 +684,8 @@ export async function fetchZoneHealthReport(
 		if (dns.error) errors.push({ source: `zone ${zone.name} DNS records`, message: dns.error });
 		dnsRaw.push({ zone, records: dns.records, error: dns.error });
 	});
+	const tunnels = await tunnelsPromise;
+	if (tunnels.error) errors.push({ source: "tunnels", message: tunnels.error });
 
 	return buildZoneHealthReport({ zones, certs, dnsRaw, tunnels, dohLookup, errors });
 }

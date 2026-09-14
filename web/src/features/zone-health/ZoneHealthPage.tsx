@@ -3,7 +3,7 @@ import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyNote } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, CARD, MUTED, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, ALERT_WARN, BADGE, BTN_SECONDARY, CARD, MUTED, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
 import { SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { Session } from "../../hooks/useSession";
@@ -60,11 +60,7 @@ function CertSourcePanel({ label, source }: { label: string; source: CertSource 
 				{flagged.map((item) => (
 					<li key={item.id} className="rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs dark:border-zinc-800">
 						<div className="flex flex-wrap items-center gap-2">
-							<span
-								className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${
-									item.severity === "high" ? "bg-red-500/10 text-red-600 dark:text-red-400" : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
-								}`}
-							>
+							<span className={`${BADGE} uppercase ${item.severity === "high" ? DNS_SEVERITY_TONE.high : DNS_SEVERITY_TONE.medium}`}>
 								{item.severity}
 							</span>
 							<span className="font-medium">{item.title}</span>
@@ -131,6 +127,20 @@ export function ZoneHealthPage({ session, onAuthError }: { session: Session; onA
 
 	const totals = result?.totals ?? { zones: 0, findings: { high: 0, medium: 0, low: 0 }, unknown: 0 };
 	const recordsChecked = (result?.zones ?? []).reduce((sum, z) => sum + z.dns.checked.records, 0);
+
+	/**
+	 * What the DNS card says when it has no findings.
+	 *
+	 * "Clean" is only true of what was checked. If some records or whole zones could not be read,
+	 * saying "no findings" without qualification would present an unchecked zone as a passing one —
+	 * so the count of what was not checked is part of the sentence, not a footnote below it.
+	 */
+	const cleanDnsTitle = (() => {
+		const unchecked = unknownRows.length;
+		if (recordsChecked === 0 && unchecked > 0) return "No DNS records could be checked — see “Unable to check” below.";
+		const base = `No findings in ${recordsChecked.toLocaleString()} DNS record${recordsChecked === 1 ? "" : "s"} checked across ${totals.zones} zone${totals.zones === 1 ? "" : "s"}.`;
+		return unchecked > 0 ? `${base} ${unchecked} could not be checked — listed below, not counted as clean.` : base;
+	})();
 
 	function exportCsv() {
 		const csv = toCsv(filteredDnsRows, [
@@ -206,10 +216,7 @@ export function ZoneHealthPage({ session, onAuthError }: { session: Session; onA
 				</div>
 
 				{dnsRows.length === 0 ? (
-					<EmptyNote
-						title={`Checked, clean — ${recordsChecked.toLocaleString()} DNS record${recordsChecked === 1 ? "" : "s"} across ${totals.zones} zone${totals.zones === 1 ? "" : "s"}, no findings.`}
-						loading={loading}
-					/>
+					<EmptyNote title={cleanDnsTitle} loading={loading} />
 				) : filteredDnsRows.length === 0 ? (
 					<EmptyNote title="No matching findings" loading={loading} />
 				) : (
@@ -227,7 +234,7 @@ export function ZoneHealthPage({ session, onAuthError }: { session: Session; onA
 								{filteredDnsRows.map((row, i) => (
 									<tr key={`${row.zoneId}|${row.record.name}|${row.record.type}|${row.title}|${i}`} className="border-t border-zinc-100 align-top dark:border-zinc-800">
 										<td className="py-1.5 pr-3">
-											<span className={`rounded px-1.5 py-0.5 text-[11px] font-medium uppercase ${DNS_SEVERITY_TONE[row.severity]}`}>{row.severity}</span>
+											<span className={`${BADGE} uppercase ${DNS_SEVERITY_TONE[row.severity]}`}>{row.severity}</span>
 										</td>
 										<td className="py-1.5 pr-3">{row.zoneName}</td>
 										<td className="py-1.5 pr-3 font-mono text-xs">

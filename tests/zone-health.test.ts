@@ -75,6 +75,10 @@ describe("isPrivateAddress", () => {
 		["fe80::1", true],
 		["fe80::abcd:1234", true],
 		["2001:4860:4860::8888", false],
+		// IPv4 written in IPv6 notation is judged as the address it carries.
+		["::ffff:10.0.0.1", true],
+		["::FFFF:192.168.0.5", true],
+		["::ffff:8.8.8.8", false],
 		["not-an-ip", false],
 	];
 	for (const [ip, expected] of cases) {
@@ -109,6 +113,25 @@ describe("certificate thresholds", () => {
 		const result = await fetchZoneHealthReport(ACCOUNT, "tok", [ZONE], NOW);
 		const item = result.zones[0].certificates.edge.items[0];
 		expect(item.severity).toBe("medium");
+	});
+
+	it("reports a pack that never issued a certificate, instead of skipping it for lack of an expiry", async () => {
+		// Nothing issued means nothing to grade by date — and skipping it for that reason would make
+		// a hostname with no working certificate look like a zone with nothing to report.
+		const pack = { id: "p1", hosts: ["shop.example.com"], status: "validation_timed_out", certificates: [] };
+		mockCloudflare({ certPacks: [pack] });
+		const result = await fetchZoneHealthReport(ACCOUNT, "tok", [ZONE], NOW);
+		const item = result.zones[0].certificates.edge.items[0];
+		expect(item.severity).toBe("medium");
+		expect(item.title).toContain("has not issued");
+		expect(item.detail).toContain("validation_timed_out");
+		expect(item.hosts).toEqual(["shop.example.com"]);
+	});
+
+	it("raises nothing for an active pack that simply lists no certificates", async () => {
+		mockCloudflare({ certPacks: [{ id: "p1", status: "active", certificates: [] }] });
+		const result = await fetchZoneHealthReport(ACCOUNT, "tok", [ZONE], NOW);
+		expect(result.zones[0].certificates.edge.items).toEqual([]);
 	});
 
 	it("leaves a healthy active managed certificate with no finding", async () => {
@@ -449,5 +472,33 @@ describe("GET /api/zone-health/report", () => {
 		globalThis.fetch = vi.fn(async () => json({ success: false, errors: [{ message: "nope" }] }, 403)) as typeof fetch;
 		const res = await app.request(`/api/zone-health/report?account_id=${ACCOUNT}`, { headers: auth }, ENV, ctx());
 		expect(res.status).toBe(403);
+	});
+});
+
+describe("request ordering", () => {
+	it("fetches the account tunnel list alongside the zone reads rather than before them", async () => {
+		// The tunnel list depends on no zone. Awaiting it before the zone fan-out cost a full round
+		// trip of wall clock for nothing. Hold every zone read open and check the tunnel list was
+		// already asked for while they were waiting.
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const requested: string[] = [];
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input instanceof Request ? input.url : input);
+			requested.push(url);
+			if (url.includes("/zones/")) await gate;
+			return new Response(JSON.stringify({ success: true, result: [], result_info: { total_pages: 1 } }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		}) as typeof fetch;
+
+		const pending = fetchZoneHealthReport(ACCOUNT, "tok", [ZONE], NOW, noDoh);
+		await new Promise((r) => setTimeout(r, 20));
+		const tunnelAskedWhileZonesOpen = requested.some((u) => u.includes("/cfd_tunnel"));
+		release();
+		await pending;
+
+		expect(tunnelAskedWhileZonesOpen).toBe(true);
 	});
 });

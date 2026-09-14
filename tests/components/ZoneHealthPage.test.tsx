@@ -72,7 +72,7 @@ describe("ZoneHealthPage", () => {
 		};
 		await renderPage(result);
 
-		expect(await screen.findByText(/Checked, clean — 42 DNS records/)).toBeInTheDocument();
+		expect(await screen.findByText(/No findings in 42 DNS records checked across 1 zone\./)).toBeInTheDocument();
 	});
 
 	it("renders DNS findings sorted high to low with severity, record and detail", async () => {
@@ -135,5 +135,47 @@ describe("ZoneHealthPage", () => {
 
 		const statuses = await screen.findAllByRole("status");
 		expect(statuses.some((el) => el.textContent?.includes("tunnels: Forbidden"))).toBe(true);
+	});
+
+	it("does not call DNS clean without saying what could not be checked", async () => {
+		// Some lookups failing is not the same as everything passing. The empty state has to carry
+		// the unchecked count in the same sentence, or a partly unread zone reads as a clean one.
+		const result: ZoneHealthResult = {
+			zones: [
+				zone({
+					dns: {
+						findings: [],
+						unknown: [{ record: { name: "app.example.com", type: "CNAME", content: "x.azurewebsites.net" }, reason: "DNS-over-HTTPS lookup timed out" }],
+						checked: { records: 10, cnamesResolved: 1, cnamesSkippedByCap: 0 },
+					},
+				}),
+			],
+			totals: { zones: 1, findings: { high: 0, medium: 0, low: 0 }, unknown: 1 },
+			errors: [],
+		};
+		await renderPage(result);
+
+		expect(await screen.findByText(/No findings in 10 DNS records checked.*1 could not be checked — listed below, not counted as clean\./)).toBeInTheDocument();
+		expect(screen.getByText("DNS-over-HTTPS lookup timed out")).toBeInTheDocument();
+	});
+
+	it("says nothing was checked when every DNS read failed, rather than reporting zero findings", async () => {
+		const result: ZoneHealthResult = {
+			zones: [
+				zone({
+					dns: {
+						findings: [],
+						unknown: [{ record: { name: "*", type: "*", content: "" }, reason: "DNS records could not be read: Authentication error" }],
+						checked: { records: 0, cnamesResolved: 0, cnamesSkippedByCap: 0 },
+					},
+				}),
+			],
+			totals: { zones: 1, findings: { high: 0, medium: 0, low: 0 }, unknown: 1 },
+			errors: [],
+		};
+		await renderPage(result);
+
+		expect(await screen.findByText(/No DNS records could be checked/)).toBeInTheDocument();
+		expect(screen.queryByText(/No findings in/)).not.toBeInTheDocument();
 	});
 });
