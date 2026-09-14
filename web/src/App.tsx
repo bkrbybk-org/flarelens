@@ -135,10 +135,13 @@ export default function App() {
 		}
 	}, [route, sessionToken, sessionAccountId, ensureZones]);
 
-	// Accounts list powers the sidebar switcher (best-effort; single-account tokens skip it)
+	// Accounts list powers the sidebar switcher (best-effort; single-account tokens skip it).
+	// Server mode already has this list from fetchConfig() (config.accounts, held in
+	// serverAccounts above) — calling fetchAccounts there too would be a second, redundant
+	// upstream round trip for data the bootstrap call already returned. Only BYOT needs to ask.
 	const [accounts, setAccounts] = useState<CfAccount[]>([]);
 	useEffect(() => {
-		if (!sessionAccountId) return;
+		if (!sessionAccountId || session?.mode === "server") return;
 		let cancelled = false;
 		fetchAccounts(sessionToken || "")
 			.then((result) => !cancelled && setAccounts(result))
@@ -146,7 +149,9 @@ export default function App() {
 		return () => {
 			cancelled = true;
 		};
-	}, [sessionToken, sessionAccountId]);
+	}, [sessionToken, sessionAccountId, session?.mode]);
+
+	const sidebarAccounts = session?.mode === "server" ? serverAccounts : accounts;
 
 	// Deep-linkable zone for zone-scoped routes: #/waf?zone=… / #/cache?zone=…
 	const activeZone =
@@ -234,7 +239,7 @@ export default function App() {
 		<div className="flex h-dvh overflow-hidden">
 			<Sidebar
 				accountId={session.accountId}
-				accounts={accounts}
+				accounts={sidebarAccounts}
 				onSwitchAccount={(account) => {
 					connect({
 						token: session.token,
