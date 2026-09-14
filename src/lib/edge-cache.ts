@@ -130,8 +130,13 @@ export async function withEdgeCache({
 		try {
 			const hit = await cache.match(key);
 			if (hit) {
-				const stored = (await hit.json()) as StoredEntry;
-				return { status: 200, body: stored.body, cachedAt: stored.cachedAt, hit: true };
+				const stored = (await hit.json()) as Partial<StoredEntry> | null;
+				// Serve only an entry that still has the shape this module wrote. Anything else — a
+				// truncated write, a shape from an older deploy — is a miss, not a 200 with no body.
+				const body = stored?.body as { success?: unknown } | undefined;
+				if (body && body.success === true && typeof stored?.cachedAt === "string") {
+					return { status: 200, body, cachedAt: stored.cachedAt, hit: true };
+				}
 			}
 		} catch {
 			// Cache unavailable or corrupt entry — fall through to a live compute below.

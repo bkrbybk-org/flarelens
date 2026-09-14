@@ -106,7 +106,8 @@ describe("PqcPage edge cache caption", () => {
 	it("shows the cached-data caption when the report came from the edge cache", async () => {
 		mockedFetchPqcReport.mockResolvedValue({ result: REPORT, cachedAt: new Date(Date.now() - 5000).toISOString() });
 		await renderPage();
-		expect(screen.getByText(/showing data cached .*ago/i)).toBeInTheDocument();
+		// A clock time, not an age: an age computed at render goes stale while the page stays open.
+		expect(screen.getByText(/showing data cached at \d{1,2}:\d{2}/i)).toBeInTheDocument();
 	});
 
 	it("renders no caption when the report was a live read", async () => {

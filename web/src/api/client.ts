@@ -227,8 +227,8 @@ export function fetchPqcReport<T>(token: string, accountId: string, opts?: { fre
 	return apiFetchCached<T>(`/api/pqc/report?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
 }
 
-export function fetchZoneHealthReport<T>(token: string, accountId: string): Promise<T> {
-	return apiFetch<T>(`/api/zone-health/report?account_id=${encodeURIComponent(accountId)}`, token);
+export function fetchZoneHealthReport<T>(token: string, accountId: string, opts?: { fresh?: boolean }): Promise<CachedResult<T>> {
+	return apiFetchCached<T>(`/api/zone-health/report?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
 }
 
 export function traceRequest<T>(

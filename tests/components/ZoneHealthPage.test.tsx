@@ -25,12 +25,12 @@ function zone(overrides: Partial<ZoneHealthResult["zones"][number]> = {}): ZoneH
 		zoneId: overrides.zoneId ?? "z1",
 		zoneName: overrides.zoneName ?? "example.com",
 		certificates: overrides.certificates ?? { edge: CLEAN_SOURCE, custom: CLEAN_SOURCE, originCa: CLEAN_SOURCE },
-		dns: overrides.dns ?? { findings: [], unknown: [], checked: { records: 0, cnamesResolved: 0, cnamesSkippedByCap: 0 } },
+		dns: overrides.dns ?? { findings: [], unknown: [], checked: { records: 0, cnamesResolved: 0, cnamesSkippedByCap: 0, validationCnamesSkipped: 0 } },
 	};
 }
 
 async function renderPage(result: ZoneHealthResult) {
-	mockedFetch.mockResolvedValue(result);
+	mockedFetch.mockResolvedValue({ result, cachedAt: null });
 	render(<ZoneHealthPage session={session} onAuthError={vi.fn()} />);
 }
 
@@ -66,7 +66,7 @@ describe("ZoneHealthPage", () => {
 
 	it("states the number of records checked when DNS hygiene is clean, so checked-clean differs from not-checked", async () => {
 		const result: ZoneHealthResult = {
-			zones: [zone({ dns: { findings: [], unknown: [], checked: { records: 42, cnamesResolved: 3, cnamesSkippedByCap: 0 } } })],
+			zones: [zone({ dns: { findings: [], unknown: [], checked: { records: 42, cnamesResolved: 3, cnamesSkippedByCap: 0, validationCnamesSkipped: 0 } } })],
 			totals: { zones: 1, findings: { high: 0, medium: 0, low: 0 }, unknown: 0 },
 			errors: [],
 		};
@@ -90,7 +90,7 @@ describe("ZoneHealthPage", () => {
 							},
 						],
 						unknown: [],
-						checked: { records: 2, cnamesResolved: 1, cnamesSkippedByCap: 0 },
+						checked: { records: 2, cnamesResolved: 1, cnamesSkippedByCap: 0, validationCnamesSkipped: 0 },
 					},
 				}),
 			],
@@ -112,7 +112,7 @@ describe("ZoneHealthPage", () => {
 					dns: {
 						findings: [],
 						unknown: [{ record: { name: "app.example.com", type: "CNAME", content: "abc.cfargotunnel.com" }, reason: "Tunnel list came back empty." }],
-						checked: { records: 1, cnamesResolved: 0, cnamesSkippedByCap: 0 },
+						checked: { records: 1, cnamesResolved: 0, cnamesSkippedByCap: 0, validationCnamesSkipped: 0 },
 					},
 				}),
 			],
@@ -146,7 +146,7 @@ describe("ZoneHealthPage", () => {
 					dns: {
 						findings: [],
 						unknown: [{ record: { name: "app.example.com", type: "CNAME", content: "x.azurewebsites.net" }, reason: "DNS-over-HTTPS lookup timed out" }],
-						checked: { records: 10, cnamesResolved: 1, cnamesSkippedByCap: 0 },
+						checked: { records: 10, cnamesResolved: 1, cnamesSkippedByCap: 0, validationCnamesSkipped: 0 },
 					},
 				}),
 			],
@@ -166,7 +166,7 @@ describe("ZoneHealthPage", () => {
 					dns: {
 						findings: [],
 						unknown: [{ record: { name: "*", type: "*", content: "" }, reason: "DNS records could not be read: Authentication error" }],
-						checked: { records: 0, cnamesResolved: 0, cnamesSkippedByCap: 0 },
+						checked: { records: 0, cnamesResolved: 0, cnamesSkippedByCap: 0, validationCnamesSkipped: 0 },
 					},
 				}),
 			],

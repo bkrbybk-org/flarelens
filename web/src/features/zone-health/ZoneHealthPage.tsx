@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyNote } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
@@ -6,6 +6,7 @@ import { PageShell } from "../../components/PageShell";
 import { ALERT_ERROR, ALERT_WARN, BADGE, BTN_SECONDARY, CARD, MUTED, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
 import { SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
+import { cacheAgeLabel } from "../../lib/edge-cache-caption";
 import type { Session } from "../../hooks/useSession";
 import { useZoneHealthReport } from "./useZoneHealthReport";
 import type { CertSource, DnsFinding, DnsSeverity, DnsUnknown, ZoneCertificates, ZoneHealth } from "./types";
@@ -91,11 +92,21 @@ function ZoneCertCard({ zone }: { zone: ZoneHealth }) {
 export function ZoneHealthPage({ session, onAuthError }: { session: Session; onAuthError: () => void }) {
 	const [search, setSearch] = useState("");
 	const [reloadKey, setReloadKey] = useState(0);
-	const { result, loading, error, progress, load } = useZoneHealthReport(onAuthError);
-	useSectionRefresh(useCallback(() => setReloadKey((k) => k + 1), []), loading);
+	const { result, loading, error, cachedAt, progress, load } = useZoneHealthReport(onAuthError);
+	// Only Sync bypasses the edge cache; a mount or account switch takes the fast cached read.
+	const freshOnNextLoadRef = useRef(false);
+	useSectionRefresh(
+		useCallback(() => {
+			freshOnNextLoadRef.current = true;
+			setReloadKey((k) => k + 1);
+		}, []),
+		loading,
+	);
 
 	useEffect(() => {
-		load(session.token, session.accountId);
+		const fresh = freshOnNextLoadRef.current;
+		freshOnNextLoadRef.current = false;
+		load(session.token, session.accountId, fresh);
 	}, [session.token, session.accountId, reloadKey, load]);
 
 	const dnsRows = useMemo<DnsRow[]>(() => {
@@ -157,6 +168,8 @@ export function ZoneHealthPage({ session, onAuthError }: { session: Session; onA
 
 	return (
 		<PageShell progress={progress}>
+			{cachedAt && <p className={`text-xs ${MUTED}`}>{cacheAgeLabel(cachedAt)}</p>}
+
 			{error && (
 				<div role="alert" className={ALERT_ERROR}>
 					{error}
