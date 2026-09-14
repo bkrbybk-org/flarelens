@@ -111,6 +111,77 @@ describe("every /api route is gated", () => {
 	});
 });
 
+/**
+ * Every account- or zone-scoped route, with a request that passes input validation — so the only
+ * thing standing between it and the upstream API is the allowlist. A request that failed
+ * validation would come back 400 and prove nothing about the scope check, which is why the
+ * control case below asserts the allowlisted request gets past the gate.
+ */
+const now = new Date();
+const RANGE = { from: new Date(now.getTime() - 3_600_000).toISOString(), to: now.toISOString() };
+const post = (body: Record<string, unknown>): RequestInit => ({
+	method: "POST",
+	headers: { "Content-Type": "application/json" },
+	body: JSON.stringify(body),
+});
+const OTHER_ZONE = "dddddddddddddddddddddddddddddddd";
+
+const SCOPED_ROUTES: { name: string; request: (account: string, zone: string) => { path: string; init?: RequestInit } }[] = [
+	{ name: "GET /api/zones", request: (a) => ({ path: `/api/zones?account_id=${a}` }) },
+	{ name: "GET /api/data", request: (a) => ({ path: `/api/data?account_id=${a}` }) },
+	{ name: "GET /api/waf/rulesets", request: (a) => ({ path: `/api/waf/rulesets?account_id=${a}` }) },
+	{ name: "GET /api/access/tunnels", request: (a) => ({ path: `/api/access/tunnels?account_id=${a}` }) },
+	{ name: "GET /api/pqc/report", request: (a) => ({ path: `/api/pqc/report?account_id=${a}` }) },
+	{ name: "GET /api/zone-health/report", request: (a) => ({ path: `/api/zone-health/report?account_id=${a}` }) },
+	{ name: "GET /api/workers/scripts", request: (a) => ({ path: `/api/workers/scripts?account_id=${a}` }) },
+	{ name: "POST /api/waf/events", request: (a) => ({ path: "/api/waf/events", init: post({ accountId: a }) }) },
+	{ name: "POST /api/access/usage", request: (a) => ({ path: "/api/access/usage", init: post({ accountId: a, ...RANGE }) }) },
+	{ name: "POST /api/gateway/usage", request: (a) => ({ path: "/api/gateway/usage", init: post({ accountId: a, ...RANGE }) }) },
+	{ name: "POST /api/workers/metrics", request: (a) => ({ path: "/api/workers/metrics", init: post({ accountId: a, ...RANGE }) }) },
+	{ name: "POST /api/workers-ai/usage", request: (a) => ({ path: "/api/workers-ai/usage", init: post({ accountId: a, ...RANGE }) }) },
+	{ name: "POST /api/ai-gateway/usage", request: (a) => ({ path: "/api/ai-gateway/usage", init: post({ accountId: a, ...RANGE }) }) },
+	{ name: "POST /api/request/trace", request: (a) => ({ path: "/api/request/trace", init: post({ accountId: a, rayId: "8c1f2a3b4c5d6e7f" }) }) },
+	{ name: "POST /api/cache/analyze", request: (_a, z) => ({ path: "/api/cache/analyze", init: post({ zoneId: z }) }) },
+];
+
+describe("server mode cannot reach a scope the deployment has not allowlisted", () => {
+	// Only 5 of these routes had this pinned before. The rest relied on the scope check being
+	// present in the handler with nothing to notice if it went — and since some routes now cache
+	// their responses, a missing check would also write another account's data into the cache.
+	let cacheCalls: string[] = [];
+	beforeEach(() => {
+		cacheCalls = [];
+		(globalThis as { caches?: unknown }).caches = {
+			default: {
+				match: async (key: string) => { cacheCalls.push(`match ${key}`); return undefined; },
+				put: async (key: string) => { cacheCalls.push(`put ${key}`); },
+			},
+		};
+	});
+
+	it.each(SCOPED_ROUTES)("$name refuses it before calling upstream or touching the cache", async ({ request }) => {
+		const jwt = await makeJwt();
+		const { path, init } = request(OTHER_ACCOUNT, OTHER_ZONE);
+		const headers = { ...((init?.headers as Record<string, string>) || {}), "Cf-Access-Jwt-Assertion": jwt };
+		const res = await app.request(path, { ...init, headers }, SERVER_ENV, { waitUntil: () => {}, passThroughOnException: () => {} });
+
+		expect(res.status).toBe(403);
+		expect(upstreamAuth).toEqual([]);
+		expect(cacheCalls).toEqual([]);
+	});
+
+	it.each(SCOPED_ROUTES)("$name lets the allowlisted scope through, so the refusal above is the allowlist's doing", async ({ request }) => {
+		const jwt = await makeJwt();
+		const { path, init } = request(ALLOWED_ACCOUNT, ZONE);
+		const headers = { ...((init?.headers as Record<string, string>) || {}), "Cf-Access-Jwt-Assertion": jwt };
+		const res = await app.request(path, { ...init, headers }, SERVER_ENV, { waitUntil: () => {}, passThroughOnException: () => {} });
+
+		expect(res.status).not.toBe(401);
+		expect(res.status).not.toBe(403);
+		expect(res.status).not.toBe(400);
+	});
+});
+
 describe("byot mode", () => {
 	it("forwards the caller's own token upstream", async () => {
 		const res = await app.request("/api/accounts", { headers: { Authorization: "Bearer caller-token" } }, BYOT_ENV);
