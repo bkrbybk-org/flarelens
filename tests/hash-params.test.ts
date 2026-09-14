@@ -46,7 +46,7 @@ interface StubbedGlobals {
 }
 const stubbed = globalThis as unknown as StubbedGlobals;
 
-let replaceState: ReturnType<typeof vi.fn>;
+let replaceState: ReturnType<typeof vi.fn<(state: unknown, unused: string, url: string) => void>>;
 
 beforeEach(() => {
 	replaceState = vi.fn();

@@ -124,7 +124,12 @@ describe("graphBuckets — bucketing maths", () => {
 		expect(bucket.counts.block).toBe(1);
 		expect(bucket.counts.log).toBe(1);
 		expect(bucket.counts.managed_challenge).toBe(1); // "challenge" normalizes into the managed_challenge group
-		const expectedTotal = CHART_ACTIONS.filter((a) => partial[a.key]).reduce((sum, a) => sum + bucket.counts[a.key], 0);
+		// ChartAction.key is typed as a generic `string` in src, but this fixture's four literal
+		// keys are exactly CHART_ACTIONS' four keys, so the index is safe.
+		const expectedTotal = CHART_ACTIONS.filter((a) => partial[a.key as keyof typeof partial]).reduce(
+			(sum, a) => sum + bucket.counts[a.key],
+			0,
+		);
 		expect(bucket.total).toBe(expectedTotal);
 		expect(bucket.total).toBe(2);
 	});

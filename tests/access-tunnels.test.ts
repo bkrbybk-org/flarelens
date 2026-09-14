@@ -74,7 +74,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("the chain", () => {
 	it("joins destination → policy → tunnel → origin", async () => {
-		const { result } = (await (await call()).json()) as { result: { rows: Record<string, never>[] } };
+		const { result } = (await (await call()).json()) as { result: { rows: Record<string, unknown>[] } };
 		const row = result.rows.find((r) => (r as { hostname: string }).hostname === "gitlab-ce.example.com") as never as {
 			service: string; tunnel: { name: string }; app: { name: string; policies: { name: string; decision: string }[] }; gap?: string;
 		};
