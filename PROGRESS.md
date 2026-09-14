@@ -10,14 +10,17 @@ mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates opera
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `1c7369ff`, deployed 2026-09-12 18:05 UTC. The three slowest routes were cut by
+Running version `8bb29774`, deployed 2026-09-15. The previous version was `1c7369ff` (2026-09-12). The three slowest routes were cut by
 two-thirds in that deploy (`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s,
 `/api/pqc/report` 6.5s → 4.3s, measured in production) with responses verified unchanged.
 
-**Not yet deployed** (on local `main`): the Zone Health section, access posture findings, a 60-second
-per-credential edge cache on four configuration routes (repeat loads ~4s → ~5ms, verified against
-the live account), PQC validation-record exclusion, the WAF wide-window warning, and an allowlist
-test over every scoped route. See the 2026-09-14 entry under Recently resolved.
+**In `8bb29774`:** the Zone Health section, access posture findings, a 60-second per-credential edge
+cache on four configuration routes, PQC validation-record exclusion, the WAF wide-window warning, and
+an allowlist test over every scoped route. Verified in production after deploy: Access gate 302,
+repeat loads 4.0s → 0.05s on tunnels and PQC with `no-store` still sent to the browser, a
+non-allowlisted account refused with 403, PQC down to 0 not-ready with 2 validation records excluded,
+Zone Health with 0 findings and 8 certificate checks unknown pending the SSL scope. See the
+2026-09-14 entry under Recently resolved.
 
 Source lives at `bkrbybk-org/flarelens` (public). `wrangler.jsonc` carries placeholder account,
 zone and Access ids; the real deployment config is the gitignored `wrangler.local.jsonc`, used by
@@ -380,7 +383,7 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 
 ### Recently resolved
 
-- **Feature batch #5–#7, #9–#13 (2026-09-14, not yet deployed).** Assessed first, implemented by
+- **Feature batch #5–#7, #10–#13 (2026-09-14, deployed as `8bb29774`).** Assessed first, implemented by
   Sonnet agents in worktrees, then reviewed, corrected and verified against the live account:
   - *Access posture findings:* long sessions, session cookies without `HttpOnly`, CORS wildcards,
     broad allows with no second condition. On live data 23 of 29 apps lack `HttpOnly`; before
@@ -397,6 +400,10 @@ into that project only, so the node project's Workers-shaped globals stay untouc
     only 5 of 15 scoped routes had it pinned. All 15 now do; 19 mutants killed.
   - *Also:* PQC excludes underscore-prefixed validation records (the lone "not ready" row was an
     ACME record); WAF warns beyond 7 days; server mode no longer refetches accounts at bootstrap.
+  - *Deploy note:* the first attempt failed with `Authentication error [code: 10000]` because the
+    deploy shell had sourced `.dev.vars`, and wrangler accepts `CF_API_TOKEN` as a legacy alias for
+    its own token — so it tried to deploy with the app's read-only token. Deploy from a shell
+    without `.dev.vars` loaded.
   - *Process note:* worktree isolation branched agents from `origin/main` (10 commits stale), and a
     `node_modules` symlink got committed and overwrote main's install on merge. Both caught before
     anything was pushed; history rewritten locally, `.gitignore` now matches symlinks.
