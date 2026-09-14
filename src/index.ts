@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { assertAllowedScope, resolveAuth, type AuthEnv } from "./lib/auth";
 import { TunnelMapError, fetchTunnelMap } from "./lib/access-tunnels";
 import { PqcError, fetchPqcReport, type PqcZone } from "./lib/pqc";
+import { ZoneHealthError, fetchZoneHealthReport, type ZhZone } from "./lib/zone-health";
 import { emptyAdoption, fetchAdoption, probeAdoptionDimension, unavailableReason } from "./lib/pqc-adoption";
 import { RequestTraceError, normaliseRayId, traceRequest } from "./lib/request-trace";
 import { MAX_AI_RANGE_MS, WorkersAiError, fetchWorkersAi, isAiGranularity } from "./lib/workers-ai";
@@ -1106,6 +1107,55 @@ app.get("/api/pqc/report", async (c) => {
 	} catch (err) {
 		const status = err instanceof PqcError ? err.status : 502;
 		const message = err instanceof Error ? err.message : "Failed to build the PQC report";
+		return c.json({ success: false, errors: [{ message }] }, status as 502);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Zone Health (certificate expiry and DNS hygiene)
+
+/**
+ * Certificate expiry and DNS hygiene for every zone in the account.
+ *
+ * Zone-wide by design, same rationale as PQC readiness: `zone_id` narrows to one zone when an
+ * operator wants that, but the inventory question is naturally account-wide. An edge-cache
+ * wrapper is applied to this route after merge; the handler itself stays a plain fetch-and-map.
+ */
+app.get("/api/zone-health/report", async (c) => {
+	const auth = await resolveAuth(c.req.raw, c.env);
+	if (!auth.ok) {
+		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
+	}
+	const accountId = validHexId(c.req.query("account_id"));
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Invalid account_id" }] }, 400);
+	}
+	const zoneParam = c.req.query("zone_id");
+	const zoneId = zoneParam ? validHexId(zoneParam) : null;
+	if (zoneParam && !zoneId) {
+		return c.json({ success: false, errors: [{ message: "Invalid zone_id" }] }, 400);
+	}
+	const scope = assertAllowedScope(auth.auth, c.env, zoneId ? { accountId, zoneId } : { accountId });
+	if (scope) {
+		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
+	}
+
+	const token = auth.auth.token;
+	const zonesRes = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`, token);
+	if (zonesRes.status !== 200) {
+		return c.json({ success: false, errors: zonesRes.errors || [{ message: "Failed to fetch zones" }] }, zonesRes.status as 200);
+	}
+
+	const zones: ZhZone[] = zonesRes.result
+		.filter((z) => !zoneId || z.id === zoneId)
+		.map((z) => ({ id: z.id, name: z.name || z.id }));
+
+	try {
+		const result = await fetchZoneHealthReport(accountId, token, zones);
+		return c.json({ success: true, result });
+	} catch (err) {
+		const status = err instanceof ZoneHealthError ? err.status : 502;
+		const message = err instanceof Error ? err.message : "Failed to build the Zone Health report";
 		return c.json({ success: false, errors: [{ message }] }, status as 502);
 	}
 });

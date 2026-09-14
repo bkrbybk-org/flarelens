@@ -60,6 +60,7 @@ describe("refresh", () => {
 			"WafPage.tsx",
 			"WorkersAiPage.tsx",
 			"WorkersPage.tsx",
+			"ZoneHealthPage.tsx",
 		]);
 	});
 

@@ -65,6 +65,7 @@ describe("app shell height chain", () => {
 			"features/workers/WorkersPage.tsx",
 			"features/workers-ai/WorkersAiPage.tsx",
 			"features/access/GroupsPage.tsx",
+			"features/zone-health/ZoneHealthPage.tsx",
 		];
 		for (const page of pages) {
 			const source = readFileSync(join(import.meta.dirname, "..", "web/src", page), "utf8");

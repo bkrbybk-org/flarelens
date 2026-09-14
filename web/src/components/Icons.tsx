@@ -120,3 +120,8 @@ export const RouteIcon = (p: IconProps) => (
 export const CoinIcon = (p: IconProps) => (
 	<svg {...base(p)}><circle cx="12" cy="12" r="9" /><path d="M14.5 9.2A3 3 0 0 0 12 8c-1.7 0-3 .9-3 2s1.3 2 3 2 3 .9 3 2-1.3 2-3 2a3 3 0 0 1-2.5-1.2M12 6.5v11" /></svg>
 );
+
+/** An ECG trace, for Zone Health: the subject is whether the zone's vitals — certs, DNS — are okay. */
+export const PulseIcon = (p: IconProps) => (
+	<svg {...base(p)}><path d="M2 12h4l2 8 4-16 2 8h4l2-4" /></svg>
+);

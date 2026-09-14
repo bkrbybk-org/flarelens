@@ -63,6 +63,7 @@ const OPTIONAL_PERMISSIONS = [
 		description:
 			"Adds workers with no traffic in the window to the Workers Analytics filter, and lets the Tunnel Map identify an Access application served by a Worker rather than reporting it as having no route. Both degrade rather than fail without it.",
 	},
+	{ label: "SSL and Certificates: Read", description: "Certificate expiry in Zone Health." },
 ] as const;
 
 function StatusBadge({ status }: { status: CheckStatus }) {

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type Route = "access" | "groups" | "waf" | "cache" | "ai-security" | "request" | "workers" | "workers-ai" | "ai-gateway" | "access-usage" | "tunnels" | "gateway" | "pqc" | "cost" | "findings";
+export type Route = "access" | "groups" | "waf" | "cache" | "ai-security" | "request" | "workers" | "workers-ai" | "ai-gateway" | "access-usage" | "tunnels" | "gateway" | "pqc" | "zone-health" | "cost" | "findings";
 
-const ROUTES: Route[] = ["access", "groups", "waf", "cache", "ai-security", "request", "workers", "workers-ai", "ai-gateway", "access-usage", "tunnels", "gateway", "pqc", "cost", "findings"];
+const ROUTES: Route[] = ["access", "groups", "waf", "cache", "ai-security", "request", "workers", "workers-ai", "ai-gateway", "access-usage", "tunnels", "gateway", "pqc", "zone-health", "cost", "findings"];
 
 function parseHash(): Route {
 	// Route is the path part only; query params (#/waf?zone=…) belong to useHashParams

@@ -12,6 +12,7 @@ import {
 	KeyIcon,
 	LockIcon,
 	PanelLeftIcon,
+	PulseIcon,
 	RouteIcon,
 	SearchIcon,
 	ShareIcon,
@@ -65,6 +66,7 @@ const NAV_GROUPS: { label: string; items: { route: Route; label: string; icon: t
 			{ route: "ai-security", label: "AI Security", icon: KeyIcon },
 			{ route: "request", label: "Request Trace", icon: SearchIcon },
 			{ route: "pqc", label: "PQC Readiness", icon: LockIcon },
+			{ route: "zone-health", label: "Zone Health", icon: PulseIcon },
 		],
 	},
 	{

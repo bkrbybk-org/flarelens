@@ -16,6 +16,7 @@ import { AiGatewayPage } from "./features/ai-gateway/AiGatewayPage";
 import { GatewayPage } from "./features/gateway/GatewayPage";
 import { TunnelMapPage } from "./features/tunnels/TunnelMapPage";
 import { PqcPage } from "./features/pqc/PqcPage";
+import { ZoneHealthPage } from "./features/zone-health/ZoneHealthPage";
 import { RequestTracePage } from "./features/request/RequestTracePage";
 import { CostPage } from "./features/cost/CostPage";
 import { AiSecurityPage } from "./features/ai-security/AiSecurityPage";
@@ -48,6 +49,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	tunnels: "Tunnel Map",
 	gateway: "Gateway Usage",
 	pqc: "PQC Readiness",
+	"zone-health": "Zone Health",
 	cost: "Cost & Usage",
 	findings: "Findings",
 };
@@ -362,6 +364,7 @@ export default function App() {
 					{route === "tunnels" && <TunnelMapPage session={session} onAuthError={handleDisconnect} />}
 					{route === "gateway" && <GatewayPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "pqc" && <PqcPage session={session} onAuthError={handleDisconnect} />}
+					{route === "zone-health" && <ZoneHealthPage session={session} onAuthError={handleDisconnect} />}
 					{route === "cost" && (
 						<CostPage
 							session={session}

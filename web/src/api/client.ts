@@ -196,6 +196,10 @@ export function fetchPqcReport<T>(token: string, accountId: string): Promise<T> 
 	return apiFetch<T>(`/api/pqc/report?account_id=${encodeURIComponent(accountId)}`, token);
 }
 
+export function fetchZoneHealthReport<T>(token: string, accountId: string): Promise<T> {
+	return apiFetch<T>(`/api/zone-health/report?account_id=${encodeURIComponent(accountId)}`, token);
+}
+
 export function traceRequest<T>(
 	token: string,
 	body: { accountId: string; rayId: string; zoneId?: string; minutes: number },
