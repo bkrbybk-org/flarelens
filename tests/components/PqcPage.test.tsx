@@ -94,12 +94,26 @@ async function renderPage() {
 
 beforeEach(() => {
 	mockedFetchPqcReport.mockReset();
-	mockedFetchPqcReport.mockResolvedValue(REPORT);
+	mockedFetchPqcReport.mockResolvedValue({ result: REPORT, cachedAt: null });
 	sessionStorage.clear();
 });
 
 afterEach(() => {
 	vi.restoreAllMocks();
+});
+
+describe("PqcPage edge cache caption", () => {
+	it("shows the cached-data caption when the report came from the edge cache", async () => {
+		mockedFetchPqcReport.mockResolvedValue({ result: REPORT, cachedAt: new Date(Date.now() - 5000).toISOString() });
+		await renderPage();
+		expect(screen.getByText(/showing data cached .*ago/i)).toBeInTheDocument();
+	});
+
+	it("renders no caption when the report was a live read", async () => {
+		mockedFetchPqcReport.mockResolvedValue({ result: REPORT, cachedAt: null });
+		await renderPage();
+		expect(screen.queryByText(/showing data cached/i)).not.toBeInTheDocument();
+	});
 });
 
 describe("PqcPage", () => {

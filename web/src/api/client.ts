@@ -34,6 +34,37 @@ async function apiFetch<T>(path: string, token: string): Promise<T> {
 	return data.result as T;
 }
 
+export interface CachedResult<T> {
+	result: T;
+	/** ISO timestamp from `X-Flarelens-Cached-At`. Null on a live (MISS) response. */
+	cachedAt: string | null;
+}
+
+/**
+ * Same contract as `apiFetch`, but for the edge-cached GET routes: also reads back the
+ * `X-Flarelens-Cache`/`X-Flarelens-Cached-At` response headers so the caller can tell a cached
+ * read from a live one, and optionally sends `X-Flarelens-Fresh: 1` to bypass the cache.
+ */
+async function apiFetchCached<T>(path: string, token: string, fresh?: boolean): Promise<CachedResult<T>> {
+	const response = await fetch(path, {
+		headers: authHeaders(token, fresh ? { "X-Flarelens-Fresh": "1" } : undefined),
+	});
+
+	let data: ApiEnvelope<T>;
+	try {
+		data = await response.json();
+	} catch {
+		throw new ApiError("Invalid response from server", response.status);
+	}
+
+	if (!response.ok || !data.success) {
+		throw new ApiError(data.errors?.[0]?.message || "Request failed", response.status);
+	}
+	const isHit = response.headers.get("X-Flarelens-Cache") === "HIT";
+	const cachedAt = isHit ? response.headers.get("X-Flarelens-Cached-At") : null;
+	return { result: data.result as T, cachedAt };
+}
+
 export function fetchAccounts(token: string): Promise<CfAccount[]> {
 	return apiFetch<CfAccount[]>("/api/accounts", token);
 }
@@ -42,8 +73,8 @@ export function fetchZeroTrustData(token: string, accountId: string): Promise<Ze
 	return apiFetch<ZeroTrustData>(`/api/data?account_id=${encodeURIComponent(accountId)}`, token);
 }
 
-export function fetchZones(token: string, accountId: string): Promise<CfZone[]> {
-	return apiFetch<CfZone[]>(`/api/zones?account_id=${encodeURIComponent(accountId)}`, token);
+export function fetchZones(token: string, accountId: string, opts?: { fresh?: boolean }): Promise<CachedResult<CfZone[]>> {
+	return apiFetchCached<CfZone[]>(`/api/zones?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
 }
 
 interface WafEventsEnvelope<T, D> extends ApiEnvelope<T> {
@@ -188,12 +219,12 @@ export function fetchAiGatewayUsage<T>(
 	return postJson<T>("/api/ai-gateway/usage", token, body);
 }
 
-export function fetchTunnelMap<T>(token: string, accountId: string): Promise<T> {
-	return apiFetch<T>(`/api/access/tunnels?account_id=${encodeURIComponent(accountId)}`, token);
+export function fetchTunnelMap<T>(token: string, accountId: string, opts?: { fresh?: boolean }): Promise<CachedResult<T>> {
+	return apiFetchCached<T>(`/api/access/tunnels?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
 }
 
-export function fetchPqcReport<T>(token: string, accountId: string): Promise<T> {
-	return apiFetch<T>(`/api/pqc/report?account_id=${encodeURIComponent(accountId)}`, token);
+export function fetchPqcReport<T>(token: string, accountId: string, opts?: { fresh?: boolean }): Promise<CachedResult<T>> {
+	return apiFetchCached<T>(`/api/pqc/report?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
 }
 
 export function fetchZoneHealthReport<T>(token: string, accountId: string): Promise<T> {

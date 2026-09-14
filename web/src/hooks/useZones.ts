@@ -8,6 +8,9 @@ export function useZones() {
 	const [zones, setZones] = useState<CfZone[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	// Not rendered anywhere today (zones has no caption per the UI spec), but kept alongside the
+	// other two edge-cached fetchers so the hook's shape matches useTunnelMap/usePqcReport.
+	const [cachedAt, setCachedAt] = useState<string | null>(null);
 	const loadedForRef = useRef<string | null>(null);
 	const inFlightRef = useRef(false);
 
@@ -19,9 +22,10 @@ export function useZones() {
 		setLoading(true);
 		setError(null);
 		try {
-			const result = await fetchZones(token, accountId);
+			const { result, cachedAt: at } = await fetchZones(token, accountId);
 			result.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
 			setZones(result);
+			setCachedAt(at);
 			loadedForRef.current = accountId;
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Failed to fetch zones");
@@ -34,8 +38,9 @@ export function useZones() {
 	const reset = useCallback(() => {
 		setZones([]);
 		setError(null);
+		setCachedAt(null);
 		loadedForRef.current = null;
 	}, []);
 
-	return { zones, loading, error, ensureLoaded, reset };
+	return { zones, loading, error, cachedAt, ensureLoaded, reset };
 }

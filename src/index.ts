@@ -33,8 +33,9 @@ import {
 	parseInstant,
 } from "./lib/workers-analytics";
 import { collectRulesetsForScope, UpstreamError, type RuleMetaMap, type RulesetScope } from "./lib/waf-meta";
-import { loadAiSecurity, type AiSecRequest } from "./lib/ai-sec";
+import { loadAiSecurity, tokenFingerprint, type AiSecRequest } from "./lib/ai-sec";
 import { CfApiError } from "./lib/ai-sec/cf/types";
+import { CACHE_TTL_SECONDS, cacheKey, withEdgeCache } from "./lib/edge-cache";
 import {
 	ALLOWED_RANGES,
 	assembleAnalytics,
@@ -355,11 +356,26 @@ app.get("/api/zones", async (c) => {
 	if (scope) {
 		return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
 	}
-	const res = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`, token);
-	if (res.status !== 200) {
-		return c.json({ success: false, errors: res.errors || [{ message: "Failed to fetch zones" }] }, res.status as 200);
-	}
-	return c.json({ success: true, result: res.result.map((z) => ({ id: z.id, name: z.name })) });
+
+	// Slowly-changing configuration (~0.5-1s upstream), so it is worth a short edge cache. Key is
+	// namespaced by the resolved token's fingerprint and auth mode — never by the raw request URL.
+	const fingerprint = await tokenFingerprint(token);
+	const key = cacheKey({ fingerprint, mode: auth.auth.mode, path: "/api/zones", params: { account_id: accountId } });
+	const fresh = c.req.header("X-Flarelens-Fresh") === "1";
+	const { status, body, cachedAt, hit } = await withEdgeCache({
+		key,
+		ttlSeconds: CACHE_TTL_SECONDS,
+		fresh,
+		waitUntil: edgeCacheWaitUntil(c),
+		compute: async () => {
+			const res = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`, token);
+			if (res.status !== 200) {
+				return { status: res.status, body: { success: false, errors: res.errors || [{ message: "Failed to fetch zones" }] } };
+			}
+			return { status: 200, body: { success: true, result: res.result.map((z) => ({ id: z.id, name: z.name })) } };
+		},
+	});
+	return withCacheHeaders(c.json(body as never, status as 200), hit, cachedAt);
 });
 
 app.get("/api/data", async (c) => {
@@ -565,6 +581,34 @@ interface GraphqlEnvelope {
 function validHexId(value: string | undefined | null): string | null {
 	const normalized = String(value || "").trim();
 	return HEX_ID_PATTERN.test(normalized) ? normalized : null;
+}
+
+/**
+ * Stamp the two edge-cache response headers.
+ *
+ * `X-Flarelens-Cached-At` only appears on a HIT — its presence, not just its value, is how the
+ * client tells "this is cached" from "this is live" apart, so it must never be sent on a MISS
+ * even with a null-ish value.
+ */
+function withCacheHeaders(res: Response, hit: boolean, cachedAt: string | null): Response {
+	res.headers.set("X-Flarelens-Cache", hit ? "HIT" : "MISS");
+	if (hit && cachedAt) res.headers.set("X-Flarelens-Cached-At", cachedAt);
+	return res;
+}
+
+/**
+ * `c.executionCtx` throws when Hono wasn't handed one (several route tests call `app.request`
+ * with only two arguments, since those routes never previously needed it). The cache write is
+ * still best-effort without it — the promise just runs unawaited instead of via waitUntil.
+ */
+function edgeCacheWaitUntil(c: { executionCtx: { waitUntil(p: Promise<unknown>): void } }): (p: Promise<unknown>) => void {
+	return (p: Promise<unknown>) => {
+		try {
+			c.executionCtx.waitUntil(p);
+		} catch {
+			void p;
+		}
+	};
 }
 
 /**
@@ -982,42 +1026,58 @@ app.get("/api/access/tunnels", async (c) => {
 	}
 
 	const token = auth.auth.token;
-	const [appsRes, policiesRes] = await Promise.all([
-		fetchCloudflareAll<CfApp>(`/accounts/${accountId}/access/apps`, token),
-		fetchCloudflareAll<CfPolicy>(`/accounts/${accountId}/access/policies`, token),
-	]);
-	if (appsRes.status !== 200) {
-		return c.json(
-			{ success: false, errors: appsRes.errors || [{ message: "Failed to fetch applications" }] },
-			appsRes.status as 200,
-		);
-	}
 
-	// Per-app policies, same bounded fan-out as /api/data. Reusable policies are resolved from
-	// the account list so a policy attached by reference still shows its name and decision.
-	const reusable = new Map((policiesRes.status === 200 ? policiesRes.result : []).map((p) => [p.id, p]));
-	// Started before the policy resolution is awaited: the tunnel map needs the applications only
-	// to join hostnames at the very end, so the two run side by side.
-	const withPolicies = policiesByApp(appsRes.result, accountId, token).then((policyMap) =>
-		appsRes.result.map((appItem) => {
-			const entry = policyMap.get(appItem.id);
-			const policies = (entry?.policies ?? []).map((p) => {
-				const hasRules = Array.isArray(p.include) || Array.isArray(p.exclude) || Array.isArray(p.require);
-				const source = !hasRules && reusable.has(p.id) ? { ...reusable.get(p.id), ...p } : p;
-				return { name: source.name, decision: source.decision };
-			});
-			return { ...appItem, policies, policies_error: entry?.error ?? false };
-		}),
-	);
+	// Measured ~4.0s upstream (Access apps + policies + tunnel fan-out), so this is the primary
+	// target for the edge cache. Key is namespaced by the resolved token's fingerprint and auth
+	// mode — never by the raw request URL.
+	const fingerprint = await tokenFingerprint(token);
+	const key = cacheKey({ fingerprint, mode: auth.auth.mode, path: "/api/access/tunnels", params: { account_id: accountId } });
+	const fresh = c.req.header("X-Flarelens-Fresh") === "1";
+	const { status, body, cachedAt, hit } = await withEdgeCache({
+		key,
+		ttlSeconds: CACHE_TTL_SECONDS,
+		fresh,
+		waitUntil: edgeCacheWaitUntil(c),
+		compute: async () => {
+			const [appsRes, policiesRes] = await Promise.all([
+				fetchCloudflareAll<CfApp>(`/accounts/${accountId}/access/apps`, token),
+				fetchCloudflareAll<CfPolicy>(`/accounts/${accountId}/access/policies`, token),
+			]);
+			if (appsRes.status !== 200) {
+				return {
+					status: appsRes.status,
+					body: { success: false, errors: appsRes.errors || [{ message: "Failed to fetch applications" }] },
+				};
+			}
 
-	try {
-		const result = await fetchTunnelMap(accountId, token, withPolicies);
-		return c.json({ success: true, result });
-	} catch (err) {
-		const status = err instanceof TunnelMapError ? err.status : 502;
-		const message = err instanceof Error ? err.message : "Failed to build the tunnel map";
-		return c.json({ success: false, errors: [{ message }] }, status as 502);
-	}
+			// Per-app policies, same bounded fan-out as /api/data. Reusable policies are resolved from
+			// the account list so a policy attached by reference still shows its name and decision.
+			const reusable = new Map((policiesRes.status === 200 ? policiesRes.result : []).map((p) => [p.id, p]));
+			// Started before the policy resolution is awaited: the tunnel map needs the applications only
+			// to join hostnames at the very end, so the two run side by side.
+			const withPolicies = policiesByApp(appsRes.result, accountId, token).then((policyMap) =>
+				appsRes.result.map((appItem) => {
+					const entry = policyMap.get(appItem.id);
+					const policies = (entry?.policies ?? []).map((p) => {
+						const hasRules = Array.isArray(p.include) || Array.isArray(p.exclude) || Array.isArray(p.require);
+						const source = !hasRules && reusable.has(p.id) ? { ...reusable.get(p.id), ...p } : p;
+						return { name: source.name, decision: source.decision };
+					});
+					return { ...appItem, policies, policies_error: entry?.error ?? false };
+				}),
+			);
+
+			try {
+				const result = await fetchTunnelMap(accountId, token, withPolicies);
+				return { status: 200, body: { success: true, result } };
+			} catch (err) {
+				const errStatus = err instanceof TunnelMapError ? err.status : 502;
+				const message = err instanceof Error ? err.message : "Failed to build the tunnel map";
+				return { status: errStatus, body: { success: false, errors: [{ message }] } };
+			}
+		},
+	});
+	return withCacheHeaders(c.json(body as never, status as 200), hit, cachedAt);
 });
 
 // ---------------------------------------------------------------------------
@@ -1067,48 +1127,73 @@ app.get("/api/pqc/report", async (c) => {
 	}
 
 	const token = auth.auth.token;
-	const zonesRes = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`, token);
-	if (zonesRes.status !== 200) {
-		return c.json({ success: false, errors: zonesRes.errors || [{ message: "Failed to fetch zones" }] }, zonesRes.status as 200);
-	}
 
-	const zones: PqcZone[] = zonesRes.result
-		.filter((z) => !zoneId || z.id === zoneId)
-		.map((z) => ({ id: z.id, name: z.name || z.id }));
+	// Measured ~4.3s upstream (zone settings + DNS inventory + adoption probe), the second target
+	// for the edge cache. Key is namespaced by the resolved token's fingerprint and auth mode —
+	// never by the raw request URL — and includes zone_id so a whole-account read and a
+	// single-zone read never collide.
+	const fingerprint = await tokenFingerprint(token);
+	const key = cacheKey({
+		fingerprint,
+		mode: auth.auth.mode,
+		path: "/api/pqc/report",
+		params: { account_id: accountId, zone_id: zoneId ?? undefined },
+	});
+	const fresh = c.req.header("X-Flarelens-Fresh") === "1";
+	const { status, body, cachedAt, hit } = await withEdgeCache({
+		key,
+		ttlSeconds: CACHE_TTL_SECONDS,
+		fresh,
+		waitUntil: edgeCacheWaitUntil(c),
+		compute: async () => {
+			const zonesRes = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`, token);
+			if (zonesRes.status !== 200) {
+				return {
+					status: zonesRes.status,
+					body: { success: false, errors: zonesRes.errors || [{ message: "Failed to fetch zones" }] },
+				};
+			}
 
-	try {
-		// Adoption is measured from the analytics schema and the report is built from REST
-		// settings and DNS; neither needs the other, so they run together. Serially the probe
-		// alone added a round trip to a response that already takes several.
-		const [report, adoption] = await Promise.all([
-			fetchPqcReport(accountId, token, zones),
-			// Measured adoption is a capability question, not a given: the key-exchange dimension
-			// may not exist in this account's schema at all. Probe, then either measure or say why
-			// not — never report 0% for a question the schema cannot answer. See lib/pqc-adoption.ts.
-			(async () => {
-				const probe = await probeAdoptionDimension(token);
-				if (!probe.dimension) {
-					return emptyAdoption(probe.error ?? unavailableReason(probe.candidates), probe.candidates);
-				}
-				const measured = await fetchAdoption(token, zones, adoptionWindow(), probe.dimension);
-				if (measured.errors.length === zones.length && zones.length > 0) {
-					// Every zone failed: the dimension introspects but cannot actually be queried,
-					// which is a different failure from it being absent and is worth saying so.
-					return emptyAdoption(
-						`The ${probe.dimension} dimension exists but no zone could be queried: ${measured.errors[0].message}`,
-						probe.candidates,
-					);
-				}
-				return measured;
-			})(),
-		]);
+			const zones: PqcZone[] = zonesRes.result
+				.filter((z) => !zoneId || z.id === zoneId)
+				.map((z) => ({ id: z.id, name: z.name || z.id }));
 
-		return c.json({ success: true, result: { ...report, adoption } });
-	} catch (err) {
-		const status = err instanceof PqcError ? err.status : 502;
-		const message = err instanceof Error ? err.message : "Failed to build the PQC report";
-		return c.json({ success: false, errors: [{ message }] }, status as 502);
-	}
+			try {
+				// Adoption is measured from the analytics schema and the report is built from REST
+				// settings and DNS; neither needs the other, so they run together. Serially the probe
+				// alone added a round trip to a response that already takes several.
+				const [report, adoption] = await Promise.all([
+					fetchPqcReport(accountId, token, zones),
+					// Measured adoption is a capability question, not a given: the key-exchange dimension
+					// may not exist in this account's schema at all. Probe, then either measure or say why
+					// not — never report 0% for a question the schema cannot answer. See lib/pqc-adoption.ts.
+					(async () => {
+						const probe = await probeAdoptionDimension(token);
+						if (!probe.dimension) {
+							return emptyAdoption(probe.error ?? unavailableReason(probe.candidates), probe.candidates);
+						}
+						const measured = await fetchAdoption(token, zones, adoptionWindow(), probe.dimension);
+						if (measured.errors.length === zones.length && zones.length > 0) {
+							// Every zone failed: the dimension introspects but cannot actually be queried,
+							// which is a different failure from it being absent and is worth saying so.
+							return emptyAdoption(
+								`The ${probe.dimension} dimension exists but no zone could be queried: ${measured.errors[0].message}`,
+								probe.candidates,
+							);
+						}
+						return measured;
+					})(),
+				]);
+
+				return { status: 200, body: { success: true, result: { ...report, adoption } } };
+			} catch (err) {
+				const errStatus = err instanceof PqcError ? err.status : 502;
+				const message = err instanceof Error ? err.message : "Failed to build the PQC report";
+				return { status: errStatus, body: { success: false, errors: [{ message }] } };
+			}
+		},
+	});
+	return withCacheHeaders(c.json(body as never, status as 200), hit, cachedAt);
 });
 
 // ---------------------------------------------------------------------------

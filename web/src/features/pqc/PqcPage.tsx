@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyNote } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
 import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, CARD, MUTED, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
+import { cacheAgeLabel } from "../../lib/edge-cache-caption";
 import { SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { Session } from "../../hooks/useSession";
@@ -266,11 +267,23 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 	const [search, setSearch] = useState("");
 	const [filter, setFilter] = useState<Verdict | "all">("all");
 	const [reloadKey, setReloadKey] = useState(0);
-	const { result, loading, error, progress, load } = usePqcReport(onAuthError);
-	useSectionRefresh(useCallback(() => setReloadKey((k) => k + 1), []), loading);
+	const { result, loading, error, cachedAt, progress, load } = usePqcReport(onAuthError);
+	// Only a Sync-triggered reload should bypass the cache — a mount or account switch should
+	// still get the fast cached read. The ref survives the render that clears reloadKey's effect
+	// dependency change; the effect below reads and resets it.
+	const freshOnNextLoadRef = useRef(false);
+	useSectionRefresh(
+		useCallback(() => {
+			freshOnNextLoadRef.current = true;
+			setReloadKey((k) => k + 1);
+		}, []),
+		loading,
+	);
 
 	useEffect(() => {
-		load(session.token, session.accountId);
+		const fresh = freshOnNextLoadRef.current;
+		freshOnNextLoadRef.current = false;
+		load(session.token, session.accountId, fresh);
 	}, [session.token, session.accountId, reloadKey, load]);
 
 	const rows = useMemo(() => {
@@ -315,6 +328,8 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 
 	return (
 		<PageShell progress={progress}>
+			{cachedAt && <p className={`text-xs ${MUTED}`}>{cacheAgeLabel(cachedAt)}</p>}
+
 			<div className="flex flex-wrap items-center gap-2">
 				<div className="relative min-w-0 flex-1 basis-72">
 					<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />

@@ -7,11 +7,13 @@ interface State {
 	result: PqcResult | null;
 	loading: boolean;
 	error: string | null;
+	/** ISO timestamp of the served entry, or null when the response was live. */
+	cachedAt: string | null;
 }
 
 /** Same loader shape as useTunnelMap: request-id guard, 401/403 escalated to a disconnect. */
 export function usePqcReport(onAuthError: () => void) {
-	const [state, setState] = useState<State>({ result: null, loading: false, error: null });
+	const [state, setState] = useState<State>({ result: null, loading: false, error: null, cachedAt: null });
 	const progress = useEstimatedProgress("cf_pqc_last_load_ms");
 	const requestIdRef = useRef(0);
 	const onAuthErrorRef = useRef(onAuthError);
@@ -21,16 +23,16 @@ export function usePqcReport(onAuthError: () => void) {
 	const { start: progressStart, stop: progressStop } = progress;
 
 	const load = useCallback(
-		async (token: string, accountId: string) => {
+		async (token: string, accountId: string, fresh?: boolean) => {
 			const requestId = ++requestIdRef.current;
 			setState((prev) => ({ ...prev, loading: true, error: null }));
 			progressStart();
 			let success = false;
 			try {
-				const result = await fetchPqcReport<PqcResult>(token, accountId);
+				const { result, cachedAt } = await fetchPqcReport<PqcResult>(token, accountId, { fresh });
 				if (requestId !== requestIdRef.current) return;
 				success = true;
-				setState({ result, loading: false, error: null });
+				setState({ result, loading: false, error: null, cachedAt });
 			} catch (err) {
 				if (requestId !== requestIdRef.current) return;
 				if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
