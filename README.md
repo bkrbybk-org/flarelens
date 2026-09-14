@@ -1,6 +1,6 @@
 # Flarelens
 
-Ops dashboard for Cloudflare: one pane of glass for reviewing an account's **Zero Trust** configuration and telemetry, **security** posture (WAF, AI Security, PQC readiness, request forensics), **cache rules**, and **developer-platform usage** — fifteen sections served entirely from one Cloudflare Worker.
+Ops dashboard for Cloudflare: one pane of glass for reviewing an account's **Zero Trust** configuration and telemetry, **security** posture (WAF, AI Security, PQC readiness, request forensics), **cache rules**, and **developer-platform usage** — sixteen sections served entirely from one Cloudflare Worker.
 
 ## Sections
 
@@ -12,15 +12,16 @@ Ops dashboard for Cloudflare: one pane of glass for reviewing an account's **Zer
 | `#/request` | Request Trace | account or zone | Everything Cloudflare records about one HTTP request, found by Ray ID: WAF attack scores, bot score and decision, JA3/JA4 fingerprints, TLS, device type, method, path, query, referer, content scanning, edge and origin timings, every firewall rule that matched, and — where a payload-logging rule captured it — the request body, decrypted in the browser. Fields beyond the curated groups are swept from the schema, so detail Cloudflare adds later appears without a code change. Field selection follows a live schema probe, and absence is reported as inconclusive because `httpRequestsAdaptive` is adaptively sampled |
 | `#/tunnels` | Tunnel Map | account | The chain behind a self-hosted app: public hostname → Access application and its policy decisions → Cloudflare Tunnel → origin service. Flags both gaps — a tunnel ingress with no Access app in front of it, and an Access app whose hostname no tunnel serves |
 | `#/gateway` | Gateway Usage | account | Zero Trust Gateway: DNS resolver queries and Gateway HTTP requests over time, split allowed/blocked, with top categories, policies, hosts and actions |
-| `#/pqc` | PQC Readiness | account | Post-quantum coverage per hostname: every A/AAAA/CNAME record in the account's zones, split by the two TLS legs — visitor→Cloudflare (proxied and TLS 1.3 on, so X25519MLKEM768 is offered) and Cloudflare→origin (tunnel, Cloudflare-hosted, automatic key exchange, or plain HTTP). Ranked worst first, with per-zone TLS settings and CSV export. The zone table also grades each zone's allowed TLS 1.0–1.2 cipher suites — forward secrecy and AEAD judged separately, obsolete families called out. A separate "TLS posture" section grades zone hygiene (minimum TLS version, Full vs Full-strict, HSTS, Always Use HTTPS) — real gaps, but never a verdict input |
-| `#/waf` | WAF Analytics | account or zone | `firewallEventsAdaptive` telemetry correlated against ruleset metadata: KPIs, events-over-time, per-ruleset/rule tables, action-drift detection, per-rule drill-down |
+| `#/pqc` | PQC Readiness | account | Post-quantum coverage per hostname: every A/AAAA/CNAME record in the account's zones, split by the two TLS legs — visitor→Cloudflare (proxied and TLS 1.3 on, so X25519MLKEM768 is offered) and Cloudflare→origin (tunnel, Cloudflare-hosted, automatic key exchange, or plain HTTP). Ranked worst first, with per-zone TLS settings and CSV export. The zone table also grades each zone's allowed TLS 1.0–1.2 cipher suites — forward secrecy and AEAD judged separately, obsolete families called out. A separate "TLS posture" section grades zone hygiene (minimum TLS version, Full vs Full-strict, HSTS, Always Use HTTPS) — real gaps, but never a verdict input. Underscore-prefixed validation records (ACME, DKIM) are excluded from the verdicts and counted, not dropped |
+| `#/zone-health` | Zone Health | account | **Certificates:** expiry across the three sources Cloudflare exposes separately — managed edge packs (flagged under 7 days, since they should have renewed; a pack that never issued is flagged too), uploaded custom certificates (14/30 days) and Origin CA (30 days) — each reported as *not checked, with the missing permission* when Cloudflare refuses it. **DNS hygiene:** CNAMEs to tunnels that no longer exist, external CNAME targets that return NXDOMAIN (subdomain takeover), DNS-only records publishing an origin IP, and exact duplicates. Every check that could not run is listed as unknown with its reason, and the clean state states how many records were checked |
+| `#/waf` | WAF Analytics | account or zone | `firewallEventsAdaptive` telemetry correlated against ruleset metadata: KPIs, events-over-time, per-ruleset/rule tables, action-drift detection, per-rule drill-down. A window wider than 7 days carries a warning: on this account a 30-day window returned fewer events than a 7-day one, so counts are not comparable across window sizes |
 | `#/ai-security` | AI Security | account or zone | Prompt-injection, PII, unsafe-topic and custom-topic detections on LLM traffic: KPIs, detections over time, endpoint/country/session breakdowns, ranked mitigations, and a flagged-request table with per-row prompt decryption |
 | `#/cache` | Cache Rules | zone | Cache rules with last-match traffic attribution, hit-ratio health grade, insights, URL tester (client-side wirefilter evaluation) |
 | `#/workers` | Workers Analytics | account | Per-script invocation telemetry from `workersInvocationsAdaptive`: requests, errors, subrequests and CPU P50, as summary cards, a line/bar chart by worker, and a per-worker table with error rates |
 | `#/workers-ai` | Workers AI | account | Inference analytics from `aiInferenceAdaptiveGroups`: requests, neurons, input/output tokens, average latency and errors, with a per-model table plus request-source and error-code breakdowns |
 | `#/ai-gateway` | AI Gateway | account | AI Gateway proxy traffic: requests over time, tokens, error rate, cache hit rate and spend, with per-gateway and per-model/provider breakdowns. Dataset, dimension and aggregate names are resolved from the live GraphQL schema at runtime rather than hardcoded, and the response names the candidates each was chosen from. Each supplementary dataset (errors, cache, spend) degrades to a stated "unavailable" panel independently, rather than failing the whole page. See [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
 | `#/cost` | Cost & Usage | account | Billable units across Workers and Workers AI for the window, priced with rates you enter. No Cloudflare list prices ship with the app |
-| `#/findings` | Findings | account (+ loaded sections) | Severity-ranked audit view: publicly-reachable apps, apps with no policy, `bypass` decisions, unreferenced groups, WAF action drift, cache insights and health grade |
+| `#/findings` | Findings | account (+ loaded sections) | Severity-ranked audit view: publicly-reachable apps, apps with no policy, `bypass` decisions, unreferenced groups, WAF action drift, cache insights and health grade. Access also flags sessions over 24h (medium from 7 days), session cookies without `HttpOnly`, CORS wildcards (medium with credentials), and allow policies admitted by email domain, login method or service token alone with no `require` |
 
 Sections carry deep-linkable state, e.g. `#/waf?zone=<id>&lookback=1440&tab=rules` or `#/cache?zone=<id>&range=168`.
 
@@ -44,6 +45,8 @@ src/lib/access-tunnels.ts    Tunnel Map: hostname → Access app → tunnel → 
 src/lib/pqc.ts               PQC readiness verdicts, TLS posture, cipher grading
 src/lib/pqc-adoption.ts      Measured post-quantum key-exchange adoption (schema-probed)
 src/lib/request-trace.ts     Ray ID forensics with schema sweep and adaptive retry
+src/lib/zone-health.ts       Zone Health: certificate expiry and DNS hygiene
+src/lib/edge-cache.ts        60s per-credential Cache API layer for configuration reads
 src/lib/ai-sec/              AI Security: zone fan-out, schema probing, domain aggregation
 web/                         Vite + React 19 + Tailwind 4 + TanStack Table SPA
 web/src/hooks/useTimeRange.ts   Shared analytics window, clamped per section
@@ -140,6 +143,7 @@ See [PROGRESS.md](PROGRESS.md) for the full route table, hook inventory, storage
 | Zone: DNS: Read | The hostname inventory behind PQC Readiness. Without it each zone is still listed, carrying its own error and no hostnames, rather than the page reporting a clean but empty account |
 | Zone Settings: Read | TLS 1.3, minimum TLS version and SSL mode, which every PQC verdict depends on. Cloudflare answers a token without it with `Unauthorized to access requested resource`, and the page reports each zone's settings as unreadable rather than assuming a default |
 | Workers Scripts: Read | Adds workers with no traffic in the window to the Workers Analytics filter, and lets the Tunnel Map identify an Access application served by a Worker on a custom domain instead of reporting it as having no route. Both degrade rather than fail without it |
+| SSL and Certificates: Read | Certificate expiry in Zone Health (edge certificate packs and uploaded certificates). Cloudflare answers a token without it with error 9109, and each source is reported as not checked, naming this scope — never as a zone with no certificates |
 
 ### Reading logged prompts
 
@@ -250,6 +254,23 @@ the section unreachable, and the sensitive part — the prompt itself — is gat
 zone's payload-logging private key rather than on the API token. The Worker only ever handles
 ciphertext.
 
+### Configuration reads are cached for 60 seconds
+
+`/api/zones`, `/api/access/tunnels`, `/api/pqc/report` and `/api/zone-health/report` take 0.5–4s
+upstream for configuration that changes on the order of minutes, so the Worker holds each response
+in the Cache API for 60 seconds. Measured against the live account: repeat loads drop from ~4s to
+~5ms.
+
+The key is `auth mode + SHA-256 fingerprint of the resolved credential + path + validated params`.
+Two BYOT tokens never share an entry; in server mode every operator shares the bound token and the
+same allowlist, so sharing is correct. The cache is consulted only after authentication, input
+validation and the allowlist have all passed — `tests/routes-auth.test.ts` asserts a refused scope
+triggers no cache lookup or write on every scoped route. Only `success: true` responses are stored.
+
+The top bar's **Sync** sends `X-Flarelens-Fresh: 1`, which bypasses and refreshes the entry; opening
+a page or switching accounts takes the cached read. A page showing cached data says so, with the
+clock time it was cached. Browser responses remain `Cache-Control: no-store`.
+
 ### What AI Security caches at the edge
 
 AI Security is the one section that caches upstream data, because a page load fans out a GraphQL
@@ -277,6 +298,18 @@ documented anywhere we control. Each is handled in code; this is why the handlin
 **Cloudflare Tunnel: Read** with `200 success:true total_count:0`, not `403`. An empty tunnel map
 is therefore ambiguous, and the Tunnel Map says so rather than rendering a blank table that reads
 as a clean bill of health.
+
+**Domain-verification CNAMEs point at names that do not exist, on purpose.** Google's
+`*.dv.googlehosted.com`, AWS Certificate Manager's `*.acm-validations.aws`, and the equivalents
+from GoDaddy, DigiCert and Sectigo are read as records by the verifier; the targets never resolve.
+Measured 2026-09-14: one returned NXDOMAIN and was initially reported by Zone Health as a high
+subdomain-takeover risk. Nothing can be taken over there, so those targets are skipped and counted.
+A dangling CNAME is otherwise NXDOMAIN (DoH `Status: 3`) and nothing else — an existing name answers
+`Status: 0` even with zero records.
+
+**`http_only_cookie_attribute: false` is real.** 23 of 29 applications on this account return it,
+which looked like a default rather than a setting. Checked against the live `CF_Authorization`
+Set-Cookie header on 2026-09-14: the cookie indeed carries no `HttpOnly` flag, so the finding stands.
 
 **The applications list already carries every application's policies.** `GET
 /accounts/{id}/access/apps` embeds full policy objects — rules, decision, precedence, `reusable` —
@@ -395,12 +428,12 @@ get a real browser-like environment, without either leaking into the other.
 | Layer | Files | What it covers |
 |---|---|---|
 | Unit | `tests/{expr,rules,csv,findings,cache-analysis,waf-meta,waf-aggregate,waf-chart,hash-params,auth,chart-hover,pqc}.test.ts`, `tests/ai-sec-*.test.ts` | Pure logic: wirefilter evaluation, rule rendering, findings, CSV, WAF aggregation and bucketing, hash deep-link helpers, Access JWT verification, chart hover placement, PQC verdicts, and the AI Security domain layer including `buildDashboard` |
-| Component | `tests/components/{PqcPage,ConnectPage,AppsTable,GroupsPage,shared-ui,tabs,progress,estimated-progress}.test.tsx` | Actually rendered React components (jsdom + Testing Library, `tests/components/setup.ts`): page behaviour for PQC, Connect, Applications and Groups; the shared StatCard/EmptyState and the rule that no page redefines them; the ARIA tabs contract; and the loading caption's honesty rules and estimate bookkeeping |
+| Component | `tests/components/{PqcPage,ConnectPage,AppsTable,GroupsPage,shared-ui,tabs,progress,estimated-progress,ZoneHealthPage}.test.tsx` | Actually rendered React components (jsdom + Testing Library, `tests/components/setup.ts`): page behaviour for PQC, Connect, Applications and Groups; the shared StatCard/EmptyState and the rule that no page redefines them; the ARIA tabs contract; and the loading caption's honesty rules and estimate bookkeeping |
 | Integration | `tests/integration-ai-security.test.ts` | The AI route wired to the ported library, Cloudflare client and Cache API, with only the network mocked — including cache-key tenant isolation |
-| System | `tests/system-routes.test.ts`, `tests/{access-usage,gateway-usage,workers-analytics,workers-ai,ai-gateway,access-tunnels,request-trace,data-fanout}.test.ts` | Every route through the real app against one mocked Cloudflare: response shapes, validation, upstream error mapping, and the cross-cutting header and `no-store` contract. `ai-gateway.test.ts` covers per-dataset degradation when a field does not resolve; `data-fanout.test.ts` pins the embedded-policy read and the concurrent tunnel fetches |
+| System | `tests/system-routes.test.ts`, `tests/{access-usage,gateway-usage,workers-analytics,workers-ai,ai-gateway,access-tunnels,request-trace,data-fanout,zone-health,edge-cache}.test.ts` | Every route through the real app against one mocked Cloudflare: response shapes, validation, upstream error mapping, and the cross-cutting header and `no-store` contract. `ai-gateway.test.ts` covers per-dataset degradation when a field does not resolve; `data-fanout.test.ts` pins the embedded-policy read and the concurrent tunnel fetches |
 | Compatibility | `tests/compat-upstream-shapes.test.ts` | Upstream drift the app does not control: pagination, partial-scope tokens, unknown detection categories, non-JSON responses, and the Workers globals Node lacks |
-| Security | `tests/security-boundaries.test.ts`, `tests/routes-auth.test.ts`, `tests/no-adhoc-auth.test.ts`, `tests/matched-data.test.ts` | The adversarial half: credential confinement, allowlist evasion, input handling, the guardrail keeping credential resolution in one module, and the prompt-decryption boundaries — key never stored, never sent, never exported |
-| Regression | `tests/shell-layout.test.ts`, `tests/refresh-affordance.test.ts`, `tests/apps-export.test.ts`, `tests/error-boundary.test.ts` | Failures with no runtime error to catch them: the flex height chain and PageShell as the sole scroller, refresh living only in the top bar, CSV exporting rendered text rather than raw JSON, and the error-boundary message formatter |
+| Security | `tests/security-boundaries.test.ts`, `tests/routes-auth.test.ts`, `tests/no-adhoc-auth.test.ts`, `tests/matched-data.test.ts` | The adversarial half: credential confinement, allowlist evasion, input handling, the guardrail keeping credential resolution in one module, and the prompt-decryption boundaries — key never stored, never sent, never exported. `routes-auth.test.ts` also requires every account- or zone-scoped route to refuse a non-allowlisted scope with no upstream call and no cache access — checked against a mutant with the check deleted from each route |
+| Regression | `tests/shell-layout.test.ts`, `tests/refresh-affordance.test.ts`, `tests/apps-export.test.ts`, `tests/error-boundary.test.ts`, `tests/waf-wide-window.test.ts`, `tests/app-server-mode-accounts.test.ts` | Failures with no runtime error to catch them: the flex height chain and PageShell as the sole scroller, refresh living only in the top bar, CSV exporting rendered text rather than raw JSON, and the error-boundary message formatter |
 | E2E | `tests/e2e-live.test.ts` | The deployed Worker through real Cloudflare Access with the bound token. **Opt-in** |
 
 Some suites assert against source text rather than behaviour — that a page has its own scroll

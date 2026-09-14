@@ -4,7 +4,7 @@ Status snapshot, last reviewed **2026-09-13** against a full read of the tree, a
 the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Fifteen sections, 17 API routes, 631 tests green across 44 files, `tsc -b` clean, 0 lint errors (4 known warnings).
+**TL;DR** — Sixteen sections, 18 API routes, 772 tests green across 49 files, `tsc -b` clean, 0 lint errors (4 known warnings).
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
@@ -14,6 +14,11 @@ Running version `1c7369ff`, deployed 2026-09-12 18:05 UTC. The three slowest rou
 two-thirds in that deploy (`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s,
 `/api/pqc/report` 6.5s → 4.3s, measured in production) with responses verified unchanged.
 
+**Not yet deployed** (on local `main`): the Zone Health section, access posture findings, a 60-second
+per-credential edge cache on four configuration routes (repeat loads ~4s → ~5ms, verified against
+the live account), PQC validation-record exclusion, the WAF wide-window warning, and an allowlist
+test over every scoped route. See the 2026-09-14 entry under Recently resolved.
+
 Source lives at `bkrbybk-org/flarelens` (public). `wrangler.jsonc` carries placeholder account,
 zone and Access ids; the real deployment config is the gitignored `wrangler.local.jsonc`, used by
 `npm run deploy:live`. GitHub Actions runs `npm run check` and `npm run lint` on every push and
@@ -22,12 +27,12 @@ pull request; there is no deploy job, deliberately — see the note under Recent
 
 ## Sections
 
-Fifteen sections, grouped in the sidebar by Cloudflare product area:
+Sixteen sections, grouped in the sidebar by Cloudflare product area:
 
 | Group | Routes |
 |---|---|
 | Zero Trust | `#/access`, `#/groups`, `#/access-usage`, `#/tunnels`, `#/gateway` |
-| Security | `#/waf`, `#/ai-security`, `#/request`, `#/pqc` |
+| Security | `#/waf`, `#/ai-security`, `#/request`, `#/pqc`, `#/zone-health` |
 | Performance | `#/cache` |
 | Developer Platform | `#/workers`, `#/workers-ai`, `#/ai-gateway`, `#/cost` |
 | Audit | `#/findings` |
@@ -75,7 +80,7 @@ of the calling token — see the P2 entry below.
 |---|---|---|
 | `GET /health` | — | uptime checks |
 | `GET /api/accounts` | account | connect screen, account switcher |
-| `GET /api/zones` | account | zone picker (WAF, Cache, AI Security) |
+| `GET /api/zones` | account | zone picker (WAF, Cache, AI Security). Edge-cached |
 | `GET /api/data` | account | Access Applications, Access Groups, Findings. Policies come from the apps list payload, which embeds them; per-app policy fetches happen only for apps missing the field |
 | `POST /api/waf/events` | account or zone | WAF Analytics (firewallEventsAdaptive, cursor-paginated 5×10k, deduped) |
 | `GET /api/waf/rulesets` | account or zone | WAF Analytics (ruleset metadata) |
@@ -84,8 +89,9 @@ of the calling token — see the P2 entry below.
 | `POST /api/ai-security/analyze` | account or zone | AI Security (one fan-out builds every panel) |
 | `POST /api/access/usage` | account | Access Usage. Upstream caps this dataset at 1 week |
 | `POST /api/request/trace` | account or zone | Request Trace — Ray ID lookup across zones, schema-driven field selection |
-| `GET /api/pqc/report` | account (optional zone) | PQC Readiness — zones, their TLS settings, and every A/AAAA/CNAME record classified per TLS leg |
-| `GET /api/access/tunnels` | account | Tunnel Map — joins Access apps, their policies (reusable ones resolved), tunnel ingress rules and private routes. Tunnel-side reads start without waiting for the apps |
+| `GET /api/pqc/report` | account (optional zone) | PQC Readiness — zones, their TLS settings, and every A/AAAA/CNAME record classified per TLS leg. Underscore-prefixed validation records are excluded and counted. Edge-cached |
+| `GET /api/zone-health/report` | account (optional zone) | Zone Health — certificate expiry across edge packs, custom certificates and Origin CA (each degrading on its own permission), plus DNS hygiene: dangling tunnel and external CNAMEs, DNS-only origins, duplicates. Edge-cached |
+| `GET /api/access/tunnels` | account | Tunnel Map — joins Access apps, their policies (reusable ones resolved), tunnel ingress rules and private routes. Tunnel-side reads start without waiting for the apps. Edge-cached |
 | `POST /api/gateway/usage` | account | Gateway Usage (DNS resolver + Gateway HTTP) |
 | `GET /api/workers/scripts` | account | Workers Analytics filter — needs `Workers Scripts: Read`, degrades if absent |
 | `POST /api/workers/metrics` | account | Workers Analytics; also half of Cost & Usage |
@@ -94,6 +100,14 @@ of the calling token — see the P2 entry below.
 | `app.all("*")` | — | static asset fallback |
 
 All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, missing/bad token →
+
+**Edge cache.** `/api/zones`, `/api/access/tunnels`, `/api/pqc/report` and `/api/zone-health/report` are held in
+the Worker's Cache API for 60 seconds ([src/lib/edge-cache.ts](src/lib/edge-cache.ts)). The key is the auth mode, a
+SHA-256 fingerprint of the *resolved* credential, the path and only the already-validated params, and it is
+consulted only after auth, validation and the allowlist have all passed. Only `success: true` 200s are stored.
+The top bar's Sync sends `X-Flarelens-Fresh: 1`, which bypasses and refreshes the entry; a mount or account
+switch takes the cached read. Pages served from cache say so with the clock time it was cached. Browser
+responses stay `no-store`.
 401/403, disallowed account or zone → 403 before any upstream call, upstream failure → 502.
 
 Every route that takes a time window parses both bounds into ISO instants and re-emits them
@@ -115,6 +129,8 @@ documents, so no caller text reaches a query.
 | [src/lib/access-tunnels.ts](src/lib/access-tunnels.ts) | Tunnel Map: joins Access apps, tunnel ingress and private routes, and classifies each destination's origin kind |
 | [src/lib/pqc.ts](src/lib/pqc.ts) | Post-quantum readiness: zone TLS settings + DNS inventory + tunnel and Worker origins, classified into two legs and one verdict, plus `gradeCipher`/`summariseCiphers` for the zone's TLS 1.0–1.2 suite list. `buildPqcReport` is pure and carries the classification rules |
 | [src/lib/pqc-adoption.ts](src/lib/pqc-adoption.ts) | Measured post-quantum adoption: introspects `httpRequestsAdaptiveGroups` for a key-exchange dimension, matched by shape rather than one spelling, then reports per-hostname adoption or states why it cannot. A cipher or protocol dimension deliberately does not match |
+| [src/lib/zone-health.ts](src/lib/zone-health.ts) | Certificate expiry (managed packs held to 7 days since they should renew themselves, custom 14/30, Origin CA 30; a pack that never issued is a finding) and DNS hygiene. Dangling means NXDOMAIN from DNS-over-HTTPS and nothing else; any other outcome is unknown. Tunnel CNAMEs are checked against the account tunnel list, domain-validation targets are skipped and counted, lookups capped at 200 per report |
+| [src/lib/edge-cache.ts](src/lib/edge-cache.ts) | `cacheKey` and `withEdgeCache`: the tenant-isolated 60s cache described under API routes. A malformed entry is a miss, a cache failure falls through to a live read |
 | [src/lib/request-trace.ts](src/lib/request-trace.ts) | Ray ID forensics: schema-swept field selection, adaptive retry around per-zone entitlements and Cloudflare's field ceiling |
 | [src/lib/workers-analytics.ts](src/lib/workers-analytics.ts) | Workers invocation metrics; script list degrades when the scope is absent |
 | [src/lib/workers-ai.ts](src/lib/workers-ai.ts) | Workers AI inference metrics; folds rows split by `errorCode` |
@@ -181,7 +197,7 @@ Disconnect clears the store.
 |---|---|---|
 | `cf_api_token`, `cf_account_id`, `cf_account_name` | sessionStorage | Cleared on tab close; never persisted to disk |
 | `cf_zt_prefs` | localStorage | `PREFS_VERSION = 3`; a version bump discards saved column order/visibility so new defaults apply. The policies table keeps its own `policyColumnVisibility` / `policyColumnOrder` keys: it shares column ids (`name`, `updated_at`, `id`) with the applications table, so one saved order would scramble the other |
-| `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (13 keys, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
+| `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (14 keys, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
 
 ### Tests
 
@@ -209,6 +225,10 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | `tests/refresh-affordance.test.ts` | Refresh exists only in the top bar, every reloadable section registers one, and the registration clears on unmount |
 | `tests/ai-gateway.test.ts` | AI Gateway route: series/totals fold, rate arithmetic (never divides by zero), per-dataset degradation when a field does not resolve, validation, auth, `no-store`, 502 on load-bearing failure, and the same "no per-user dimension" privacy assertion as the other aggregate-only sections |
 | `tests/data-fanout.test.ts` | `/api/data` and the tunnel map use embedded app policies, fetch only apps missing the field, and issue the three tunnel-side reads concurrently (checked to fail against a serialised build) |
+| `tests/zone-health.test.ts`, `tests/components/ZoneHealthPage.test.tsx` | Certificate thresholds by source, 9109/403 as not-checked, unissued packs, dangling tunnel vs live, NXDOMAIN vs every other DoH outcome, validation targets skipped, the lookup cap, private addresses (incl. IPv4-mapped IPv6), duplicates, the tunnel list fetched alongside zone reads; and a page that never calls DNS clean without saying what went unchecked |
+| `tests/edge-cache.test.ts` | Key determinism and namespacing, BYOT tokens never sharing an entry, errors never cached, Fresh bypass and repair, byte-identical HITs, cache failure falling through |
+| `tests/routes-auth.test.ts` (allowlist block) | Every one of the 15 account/zone-scoped routes refuses a non-allowlisted scope in server mode with exactly 403, no upstream call and no cache lookup or write, plus a control proving the allowlisted request passes the gate. Verified against 19 mutants |
+| `tests/waf-wide-window.test.ts`, `tests/app-server-mode-accounts.test.ts` | The WAF warning beyond 7 days; server mode reusing `config.accounts` instead of refetching accounts |
 | `tests/components/progress.test.tsx` | The honesty rules for the time caption (countdown only when measured and ahead; elapsed otherwise; never "0s"), the bar outside the dimmed region, content left interactive |
 | `tests/components/estimated-progress.test.tsx` | No estimate before a first timed load, recorded duration used next time, blended rather than replaced, nothing recorded from a failure |
 | `tests/system-routes.test.ts` | Every core route through the real app against one mocked Cloudflare: shapes, validation, error mapping, headers, `no-store` |
@@ -354,11 +374,32 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | # | Issue | Impact | Fix |
 |---|---|---|---|
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules |
-| P3 | **PQC Readiness counts DNS validation records as hostnames** — the one `not-ready` row on this account is `_6390ec137f3d86b975ad6f6431d343a6.nttlab.org`, an underscore-prefixed ACME/validation record | A false positive: a validation record is not a service anyone reaches, so flagging it as unprotected is noise that trains the reader to ignore the column | Exclude underscore-prefixed labels from the inventory, or classify them as a non-service record type rather than dropping them silently |
+| P3 | **Bound token lacks SSL and Certificates: Read** | Zone Health reports edge and custom certificates as *not checked* on every zone (8 unknown checks), so certificate expiry is currently unmonitored | Add the scope to `CF_API_TOKEN`; no code change — the section starts grading on the next load |
 | P3 | **`tests/` is not type-checked.** `tsc -b` covers `src` and `web/src` only | A test can drift from the component API it exercises and keep passing — found when `GroupsPage.test.tsx` was still passing removed props, which React silently ignores | Add a `tests` tsconfig to the project references; expect a batch of unrelated errors on first run, so land it as its own change |
 | P3 | 4 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 
 ### Recently resolved
+
+- **Feature batch #5–#7, #9–#13 (2026-09-14, not yet deployed).** Assessed first, implemented by
+  Sonnet agents in worktrees, then reviewed, corrected and verified against the live account:
+  - *Access posture findings:* long sessions, session cookies without `HttpOnly`, CORS wildcards,
+    broad allows with no second condition. On live data 23 of 29 apps lack `HttpOnly`; before
+    shipping a finding that fires that often, the API field was checked against the real
+    `CF_Authorization` Set-Cookie header, which indeed carries no `HttpOnly` flag.
+  - *Zone Health (new section):* see the modules table. The live run caught a false positive the
+    tests could not — Google's `dv.googlehosted.com` verification target is NXDOMAIN by design and
+    was reported as a high takeover risk; validation targets are now skipped and counted. Review
+    also added unissued certificate packs as findings and stopped the DNS card calling a partly
+    unread account "clean".
+  - *Edge cache:* see API routes. Review replaced an age caption that went stale on screen with a
+    clock time, and made malformed entries a miss.
+  - *Allowlist coverage:* deleting the scope check from `/api/pqc/report` passed the entire suite —
+    only 5 of 15 scoped routes had it pinned. All 15 now do; 19 mutants killed.
+  - *Also:* PQC excludes underscore-prefixed validation records (the lone "not ready" row was an
+    ACME record); WAF warns beyond 7 days; server mode no longer refetches accounts at bootstrap.
+  - *Process note:* worktree isolation branched agents from `origin/main` (10 commits stale), and a
+    `node_modules` symlink got committed and overwrote main's install on merge. Both caught before
+    anything was pushed; history rewritten locally, `.gitignore` now matches symlinks.
 
 - **API latency cut by two-thirds (2026-09-12).** `/api/data` and `/api/access/tunnels` each
   fetched `/access/apps/{app}/policies` for every application — 29 round trips at five at a time,
@@ -475,9 +516,8 @@ that need a change in the Cloudflare dashboard are still open above.
 | Task | Why | Size | Blocked by |
 |---|---|---|---|
 | **CD** — deploy from GitHub Actions (CI already runs `check` + `lint`) | Deploys are local only | S | A way to supply account/zone/Access ids without putting them in the public repo — the reason there is no deploy job today |
-| **Frontend load waterfall** — profile `config → accounts → data` in the browser | The API side was profiled and cut by two-thirds; the client's own request ordering has not been examined | S | — |
 | **Cache range comparison** — current vs previous equivalent window (hit-ratio and volume delta) | Turns a point-in-time number into a trend signal | M | — |
-| **Findings covers the newer sections** | Findings folds in Access, Groups, WAF and Cache only. Everything since — AI detections, Workers error rates, Gateway blocks, Access login failures, and most pointedly the Tunnel Map's ungated hostnames — never reaches the audit view, though an ungated origin is exactly what a Findings entry is for | M | — |
+| **Findings covers the newer sections** | Findings folds in Access, Groups, WAF and Cache only. Everything since — AI detections, Workers error rates, Gateway blocks, Access login failures, and most pointedly the Tunnel Map's ungated hostnames, Zone Health's dangling CNAMEs and expiring certificates — never reaches the audit view, though an ungated origin is exactly what a Findings entry is for | M | — |
 | **Per-user Access and Gateway breakdowns** | `userUuid`, `email`, `deviceId` are available and deliberately unqueried | S | **A privacy decision, not a technical one** — and under a shared bound token those reads are attributable to nobody |
 | **Snapshot diff / audit trail** — capture policy snapshots, diff them (and diff the newest against live) | Biggest product differentiator; answers "what changed since the last review" | L | Nothing — **designed and ready to build** |
 
