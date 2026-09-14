@@ -433,15 +433,16 @@ get a real browser-like environment, without either leaking into the other.
 | System | `tests/system-routes.test.ts`, `tests/{access-usage,gateway-usage,workers-analytics,workers-ai,ai-gateway,access-tunnels,request-trace,data-fanout,zone-health,edge-cache}.test.ts` | Every route through the real app against one mocked Cloudflare: response shapes, validation, upstream error mapping, and the cross-cutting header and `no-store` contract. `ai-gateway.test.ts` covers per-dataset degradation when a field does not resolve; `data-fanout.test.ts` pins the embedded-policy read and the concurrent tunnel fetches |
 | Compatibility | `tests/compat-upstream-shapes.test.ts` | Upstream drift the app does not control: pagination, partial-scope tokens, unknown detection categories, non-JSON responses, and the Workers globals Node lacks |
 | Security | `tests/security-boundaries.test.ts`, `tests/routes-auth.test.ts`, `tests/no-adhoc-auth.test.ts`, `tests/matched-data.test.ts` | The adversarial half: credential confinement, allowlist evasion, input handling, the guardrail keeping credential resolution in one module, and the prompt-decryption boundaries — key never stored, never sent, never exported. `routes-auth.test.ts` also requires every account- or zone-scoped route to refuse a non-allowlisted scope with no upstream call and no cache access — checked against a mutant with the check deleted from each route |
-| Regression | `tests/shell-layout.test.ts`, `tests/refresh-affordance.test.ts`, `tests/apps-export.test.ts`, `tests/error-boundary.test.ts`, `tests/waf-wide-window.test.ts`, `tests/app-server-mode-accounts.test.ts` | Failures with no runtime error to catch them: the flex height chain and PageShell as the sole scroller, refresh living only in the top bar, CSV exporting rendered text rather than raw JSON, and the error-boundary message formatter |
+| Regression | `tests/shell-layout.test.ts`, `tests/refresh-affordance.test.ts`, `tests/apps-export.test.ts`, `tests/error-boundary.test.ts`, `tests/waf-wide-window.test.ts`, `tests/app-server-mode-accounts.test.ts`, `tests/tsconfig-references.test.ts` | Failures with no runtime error to catch them: the flex height chain and PageShell as the sole scroller, refresh living only in the top bar, CSV exporting rendered text rather than raw JSON, and the error-boundary message formatter |
 | E2E | `tests/e2e-live.test.ts` | The deployed Worker through real Cloudflare Access with the bound token. **Opt-in** |
 
 Some suites assert against source text rather than behaviour — that a page has its own scroll
 container, that no module outside `src/lib/auth.ts` reads the `Authorization` header, that the
 decryption key never reaches storage.
 
-Note that `tests/` is outside the TypeScript project, so a test file can reference a prop or
-field that no longer exists and still pass. Keep that in mind when a component's API changes. Those properties have no observable failure mode in a Node
+Tests are type-checked by `tsc -b` like the source: `tests/tsconfig.json` (Workers types, no DOM)
+and `tests/components/tsconfig.json` (DOM, JSX) reference the projects they import, so a fixture
+that drifts from a real type fails the build rather than passing quietly. Those properties have no observable failure mode in a Node
 test environment, and reviewing for them by eye has already proved unreliable.
 
 The E2E suite needs an Access service token that the app's Access policy admits, read from the

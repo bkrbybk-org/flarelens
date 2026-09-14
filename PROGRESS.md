@@ -4,7 +4,7 @@ Status snapshot, last reviewed **2026-09-13** against a full read of the tree, a
 the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Sixteen sections, 18 API routes, 772 tests green across 49 files, `tsc -b` clean, 0 lint errors (4 known warnings).
+**TL;DR** — Sixteen sections, 18 API routes, 773 tests green across 50 files, all type-checked, `tsc -b` clean, 0 lint errors (4 known warnings).
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
@@ -232,6 +232,7 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | `tests/edge-cache.test.ts` | Key determinism and namespacing, BYOT tokens never sharing an entry, errors never cached, Fresh bypass and repair, byte-identical HITs, cache failure falling through |
 | `tests/routes-auth.test.ts` (allowlist block) | Every one of the 15 account/zone-scoped routes refuses a non-allowlisted scope in server mode with exactly 403, no upstream call and no cache lookup or write, plus a control proving the allowlisted request passes the gate. Verified against 19 mutants |
 | `tests/waf-wide-window.test.ts`, `tests/app-server-mode-accounts.test.ts` | The WAF warning beyond 7 days; server mode reusing `config.accounts` instead of refetching accounts |
+| `tests/tsconfig-references.test.ts` | Root `tsconfig.json` keeps referencing both test projects, so tests cannot silently drop out of type-checking again |
 | `tests/components/progress.test.tsx` | The honesty rules for the time caption (countdown only when measured and ahead; elapsed otherwise; never "0s"), the bar outside the dimmed region, content left interactive |
 | `tests/components/estimated-progress.test.tsx` | No estimate before a first timed load, recorded duration used next time, blended rather than replaced, nothing recorded from a failure |
 | `tests/system-routes.test.ts` | Every core route through the real app against one mocked Cloudflare: shapes, validation, error mapping, headers, `no-store` |
@@ -378,10 +379,19 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 |---|---|---|---|
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules |
 | P3 | **Bound token lacks SSL and Certificates: Read** | Zone Health reports edge and custom certificates as *not checked* on every zone (8 unknown checks), so certificate expiry is currently unmonitored | Add the scope to `CF_API_TOKEN`; no code change — the section starts grading on the next load |
-| P3 | **`tests/` is not type-checked.** `tsc -b` covers `src` and `web/src` only | A test can drift from the component API it exercises and keep passing — found when `GroupsPage.test.tsx` was still passing removed props, which React silently ignores | Add a `tests` tsconfig to the project references; expect a batch of unrelated errors on first run, so land it as its own change |
 | P3 | 4 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 
 ### Recently resolved
+
+- ~~`tests/` was not type-checked~~ (2026-09-15, #9). `tsc -b` now builds two more projects —
+  `tests/tsconfig.json` (Workers types + Node, no DOM) and `tests/components/tsconfig.json` (DOM +
+  JSX) — referencing the source projects they import, so tests are checked against the real
+  declarations. One real stale fixture surfaced: `GroupsPage.test.tsx` built `RuleContext` as
+  `{ idpNames, groupNames }` lookup maps while the real type takes resolver functions. Verified the
+  check bites: a planted wrong type in a node test, a planted wrong type in a component test, and
+  that exact stale fixture each fail `tsc -b`. `tests/tsconfig-references.test.ts` fails if the
+  root tsconfig stops referencing either project; a shared typed `ctx()` in
+  `tests/helpers/execution-context.ts` replaced nine ad-hoc mocks.
 
 - **Feature batch #5–#7, #10–#13 (2026-09-14, deployed as `8bb29774`).** Assessed first, implemented by
   Sonnet agents in worktrees, then reviewed, corrected and verified against the live account:
