@@ -34,6 +34,17 @@ const CONCURRENCY = 4;
 /** Record types that can carry proxied HTTP traffic. Everything else has no TLS leg to assess. */
 const PROXIABLE_TYPES = new Set(["A", "AAAA", "CNAME"]);
 
+/**
+ * An underscore-led label (`_acme-challenge.example.com`, `_6390ec…nttlab.org`) names a
+ * DNS-validation record (ACME, DKIM, service discovery), not a hostname anyone browses to.
+ * It has no visitor-facing TLS posture, so counting it as "not ready" misreports a report about
+ * services as a report about the zone's raw record list. Only a label that STARTS with `_`
+ * qualifies — `a_b.example.com` is an ordinary hostname that happens to contain an underscore.
+ */
+function isValidationRecord(name: string): boolean {
+	return name.split(".").some((label) => label.startsWith("_"));
+}
+
 export class PqcError extends Error {
 	constructor(message: string, readonly status: number) {
 		super(message);
@@ -129,6 +140,8 @@ export interface PqcZoneSummary {
 	eligible: number;
 	notReady: number;
 	unknown: number;
+	/** Underscore-prefixed records (ACME/DNS-validation, e.g. _acme-challenge) excluded from the counts above — not services. */
+	validationRecordsExcluded: number;
 	/** Set when this zone's settings or records could not be read. */
 	error?: string;
 }
@@ -136,7 +149,15 @@ export interface PqcZoneSummary {
 export interface PqcResult {
 	rows: PqcRow[];
 	zones: PqcZoneSummary[];
-	totals: { hostnames: number; ready: number; eligible: number; notReady: number; unknown: number; tlsFindings: number };
+	totals: {
+		hostnames: number;
+		ready: number;
+		eligible: number;
+		notReady: number;
+		unknown: number;
+		tlsFindings: number;
+		validationRecordsExcluded: number;
+	};
 	/** Per-source failures, so a partial report states what is missing rather than looking complete. */
 	errors: { source: string; message: string }[];
 	/** False when the tunnel list could not be read, so "tunnel origin" cannot be claimed for any row. */
@@ -431,7 +452,9 @@ export function buildPqcReport(inputs: PqcInputs): PqcResult {
 			hsts: null,
 			error: "Settings not fetched",
 		};
-		const records = (inputs.records.get(zone.id) ?? []).filter((r) => PROXIABLE_TYPES.has(r.type.toUpperCase()));
+		const proxiableRecords = (inputs.records.get(zone.id) ?? []).filter((r) => PROXIABLE_TYPES.has(r.type.toUpperCase()));
+		const validationRecordsExcluded = proxiableRecords.filter((r) => isValidationRecord(r.name)).length;
+		const records = proxiableRecords.filter((r) => !isValidationRecord(r.name));
 		const summary: PqcZoneSummary = {
 			zoneId: zone.id,
 			zoneName: zone.name,
@@ -445,6 +468,7 @@ export function buildPqcReport(inputs: PqcInputs): PqcResult {
 			eligible: 0,
 			notReady: 0,
 			unknown: 0,
+			validationRecordsExcluded,
 			error: tls.error,
 		};
 
@@ -488,6 +512,7 @@ export function buildPqcReport(inputs: PqcInputs): PqcResult {
 			notReady: rows.filter((r) => r.verdict === "not-ready").length,
 			unknown: rows.filter((r) => r.verdict === "unknown").length,
 			tlsFindings: zones.reduce((sum, z) => sum + z.tlsFindings.length, 0),
+			validationRecordsExcluded: zones.reduce((sum, z) => sum + z.validationRecordsExcluded, 0),
 		},
 		errors: inputs.errors,
 		tunnelsKnown: inputs.tunnelsKnown,

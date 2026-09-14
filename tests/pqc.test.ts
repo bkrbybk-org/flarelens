@@ -167,9 +167,36 @@ describe("inventory", () => {
 				]),
 			}),
 		);
-		expect(report.totals).toEqual({ hostnames: 3, ready: 0, eligible: 2, notReady: 1, unknown: 0, tlsFindings: 1 });
+		expect(report.totals).toEqual({ hostnames: 3, ready: 0, eligible: 2, notReady: 1, unknown: 0, tlsFindings: 1, validationRecordsExcluded: 0 });
 		const zone = report.zones[0];
 		expect(zone.eligible + zone.notReady + zone.ready + zone.unknown).toBe(zone.hostnames);
+	});
+
+	it("excludes underscore-prefixed validation records from rows and counts them separately", () => {
+		const report = buildPqcReport(
+			inputs({
+				records: new Map([
+					[
+						"z1",
+						[
+							rec({ name: "app.example.com" }),
+							rec({ name: "_6390ec137f3d86b975ad6f6431d343a6.example.com", type: "CNAME", content: "validations.aws.com" }),
+							rec({ name: "_dkim.example.com", type: "CNAME", content: "dkim.example.net" }),
+						],
+					],
+				]),
+			}),
+		);
+		expect(report.rows.map((r) => r.fqdn)).toEqual(["app.example.com"]);
+		expect(report.zones[0].validationRecordsExcluded).toBe(2);
+		expect(report.totals.validationRecordsExcluded).toBe(2);
+		// Excluded records never count toward hostnames or any verdict bucket.
+		expect(report.zones[0].hostnames).toBe(1);
+	});
+
+	it("does not exclude a record whose label merely contains an underscore, not starts with one", () => {
+		const row = only({ records: new Map([["z1", [rec({ name: "a_b.example.com" })]]]) });
+		expect(row.fqdn).toBe("a_b.example.com");
 	});
 });
 

@@ -56,6 +56,8 @@ export interface PqcZoneSummary {
 	eligible: number;
 	notReady: number;
 	unknown: number;
+	/** Underscore-prefixed records (ACME/DNS-validation, e.g. _acme-challenge) excluded from the counts above — not services. */
+	validationRecordsExcluded: number;
 	error?: string;
 }
 
@@ -81,7 +83,15 @@ export interface AdoptionResult {
 export interface PqcResult {
 	rows: PqcRow[];
 	zones: PqcZoneSummary[];
-	totals: { hostnames: number; ready: number; eligible: number; notReady: number; unknown: number; tlsFindings: number };
+	totals: {
+		hostnames: number;
+		ready: number;
+		eligible: number;
+		notReady: number;
+		unknown: number;
+		tlsFindings: number;
+		validationRecordsExcluded: number;
+	};
 	errors: { source: string; message: string }[];
 	tunnelsKnown: boolean;
 	workersKnown: boolean;

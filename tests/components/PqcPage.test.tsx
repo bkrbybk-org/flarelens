@@ -34,6 +34,7 @@ function zone(overrides: Partial<PqcResult["zones"][number]>): PqcResult["zones"
 		eligible: 0,
 		notReady: 0,
 		unknown: 0,
+		validationRecordsExcluded: 0,
 		...overrides,
 	};
 }
@@ -79,7 +80,7 @@ const REPORT: PqcResult = {
 		zone({ zoneId: "z2", zoneName: "other.net", hostnames: 1, eligible: 1 }),
 		zone({ zoneId: "z3", zoneName: "broken.org", tls13: null, sslMode: null, error: "Zone Settings: Read scope missing" }),
 	],
-	totals: { hostnames: 3, ready: 1, eligible: 1, notReady: 1, unknown: 0, tlsFindings: 0 },
+	totals: { hostnames: 3, ready: 1, eligible: 1, notReady: 1, unknown: 0, tlsFindings: 0, validationRecordsExcluded: 0 },
 	errors: [{ source: "broken.org", message: "Zone Settings: Read scope missing" }],
 	tunnelsKnown: true,
 	workersKnown: true,

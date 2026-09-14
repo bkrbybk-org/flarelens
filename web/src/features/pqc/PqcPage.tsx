@@ -3,7 +3,7 @@ import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyNote } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, CARD, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, CARD, MUTED, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
 import { SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { Session } from "../../hooks/useSession";
@@ -281,7 +281,7 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 		return all;
 	}, [result, search, filter]);
 
-	const totals = result?.totals ?? { hostnames: 0, ready: 0, eligible: 0, notReady: 0, unknown: 0, tlsFindings: 0 };
+	const totals = result?.totals ?? { hostnames: 0, ready: 0, eligible: 0, notReady: 0, unknown: 0, tlsFindings: 0, validationRecordsExcluded: 0 };
 
 	function exportCsv() {
 		const csv = toCsv(rows, [
@@ -455,6 +455,13 @@ export function PqcPage({ session, onAuthError }: { session: Session; onAuthErro
 
 			<section className={CARD}>
 				<h2 className={`mb-3 ${SECTION_TITLE}`}>Hostnames</h2>
+				{/* Stated rather than silently dropped: a validation record is not a service, but a count that
+				    shrank with no explanation would read as missing data. */}
+				{totals.validationRecordsExcluded > 0 && (
+					<p className={`mb-3 text-xs ${MUTED}`}>
+						{totals.validationRecordsExcluded.toLocaleString()} validation record{totals.validationRecordsExcluded === 1 ? "" : "s"} (underscore-prefixed) excluded — not services.
+					</p>
+				)}
 				{rows.length === 0 ? (
 					<EmptyNote title="No matching hostnames" loading={loading} />
 				) : (
