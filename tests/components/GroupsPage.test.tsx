@@ -12,7 +12,10 @@ import type { LoadProgress } from "../../web/src/hooks/useEstimatedProgress";
  * them. Neither is visible on the Applications page, so both need to be reachable here.
  */
 
-const ctx: RuleContext = { idpNames: {}, groupNames: {} };
+// `RuleContext` resolves ids to display names; no fixture here has real names to resolve, so
+// both fall back to returning the id unchanged (equivalent to the "no names available" case in
+// the real caller, which builds these from a Map and falls back to the raw id on a miss).
+const ctx: RuleContext = { idpName: (id) => id, groupName: (id) => id };
 
 const IDLE_PROGRESS: LoadProgress = {
 	percent: 0, etaMs: null, elapsedMs: 0, measured: false, running: false, start: () => {}, stop: () => {},
