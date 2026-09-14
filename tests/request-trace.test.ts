@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import { normaliseRayId } from "../src/lib/request-trace";
+import { ctx } from "./helpers/execution-context";
 
 /** Cover for Ray ID forensics: input handling, the cross-zone search, and honest absence. */
 
@@ -10,7 +11,6 @@ const ZONE_B = "33333333333333333333333333333333";
 const RAY = "a3633412999ba62b";
 const ENV = { ASSETS: { fetch: async () => new Response("", { status: 404 }) } };
 const auth = { Authorization: "Bearer caller-token", "Content-Type": "application/json" };
-const ctx = () => ({ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} });
 
 let graphqlQueries: string[] = [];
 

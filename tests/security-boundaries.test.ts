@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SignJWT, exportJWK, generateKeyPair, type KeyObject } from "jose";
 import app from "../src/index";
 import { assertAllowedScope, resetJwksCache } from "../src/lib/auth";
+import { ctx } from "./helpers/execution-context";
 
 /**
  * Security cover for the boundaries that are not about "does a valid request work": credential
@@ -27,7 +28,6 @@ const SERVER_ENV = {
 	ALLOWED_ACCOUNT_IDS: ALLOWED,
 	ALLOWED_ZONE_IDS: ZONE,
 };
-const ctx = () => ({ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} });
 
 let signingKey: KeyObject | CryptoKey;
 let upstreamUrls: string[] = [];

@@ -8,6 +8,7 @@ import {
 	type ZhZone,
 	type ZoneHealthInputs,
 } from "../src/lib/zone-health";
+import { ctx } from "./helpers/execution-context";
 
 /**
  * Cover for Zone Health: certificate expiry thresholds, and DNS hygiene (dangling tunnel CNAMEs,
@@ -19,7 +20,6 @@ import {
 
 const ACCOUNT = "11111111111111111111111111111111";
 const ENV = { ASSETS: { fetch: async () => new Response("", { status: 404 }) } };
-const ctx = () => ({ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} });
 const auth = { Authorization: "Bearer caller-token" };
 
 const ZONE: ZhZone = { id: "z1", name: "example.com" };

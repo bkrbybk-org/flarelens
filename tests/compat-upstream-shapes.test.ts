@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import { bucketTs } from "../src/lib/ai-sec/domain/transform";
 import { piiLabel, unsafeTopicLabel } from "../src/lib/ai-sec/domain/catalog";
+import { ctx } from "./helpers/execution-context";
 
 /**
  * Compatibility cover: the app must survive Cloudflare API drift and runtime differences it
@@ -14,7 +15,6 @@ import { piiLabel, unsafeTopicLabel } from "../src/lib/ai-sec/domain/catalog";
 const ACCOUNT = "11111111111111111111111111111111";
 const ZONE = "44444444444444444444444444444444";
 const ENV = { ASSETS: { fetch: async () => new Response("", { status: 404 }) } };
-const ctx = () => ({ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} });
 
 const auth = { Authorization: "Bearer caller-token" };
 

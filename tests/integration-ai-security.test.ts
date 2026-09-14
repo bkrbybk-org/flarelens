@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import { tokenFingerprint } from "../src/lib/ai-sec";
+import { ctx } from "./helpers/execution-context";
 
 /**
  * Integration cover for POST /api/ai-security/analyze: the Hono route, the ported ai-sec
@@ -15,7 +16,6 @@ const ZONE_B = "33333333333333333333333333333333";
 const ENV = { ASSETS: { fetch: async () => new Response("", { status: 404 }) } };
 
 /** Hono needs an executionCtx because the ai-sec layer writes its caches through waitUntil. */
-const ctx = () => ({ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} });
 
 interface CacheRecord {
 	keys: string[];

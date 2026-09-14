@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
+import { ctx } from "./helpers/execution-context";
 
 /**
  * `/api/data` and the tunnel map used to fetch every application's policies one application at a
@@ -16,7 +17,6 @@ import app from "../src/index";
 
 const ACCOUNT = "11111111111111111111111111111111";
 const ENV = { ASSETS: { fetch: async () => new Response("", { status: 404 }) } };
-const ctx = () => ({ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} });
 const auth = { Authorization: "Bearer caller-token" };
 
 const json = (body: unknown, status = 200) =>
@@ -119,8 +119,12 @@ describe("/api/access/tunnels policy resolution", () => {
 		// Configurations, private routes and Worker domains depend only on the tunnel list. Run
 		// in sequence they cost three round trips of wall clock for no reason.
 		const started: string[] = [];
-		let release: (() => void) | null = null;
-		const gate = new Promise<void>((resolve) => { release = resolve; });
+		// A ref object rather than a reassigned `let`: TypeScript's control-flow analysis narrows a
+		// closure-reassigned `let` of this shape to `never` at the call site below (reproducible
+		// with just `let x: (() => void) | null = null; new Promise(r => { x = r }); x?.()`), which
+		// is a checker quirk, not a real narrowing — the mutation is genuine and runs synchronously.
+		const release: { current: (() => void) | null } = { current: null };
+		const gate = new Promise<void>((resolve) => { release.current = resolve; });
 
 		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input instanceof Request ? input.url : input);
@@ -140,7 +144,7 @@ describe("/api/access/tunnels policy resolution", () => {
 		// Let the tunnel list resolve and the next wave be issued.
 		await new Promise((r) => setTimeout(r, 20));
 		const inFlight = started.length;
-		release?.();
+		release.current?.();
 		await pending;
 
 		// All three were in flight before any of them completed.

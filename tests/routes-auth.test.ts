@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SignJWT, exportJWK, generateKeyPair, type KeyObject } from "jose";
 import app from "../src/index";
 import { resetJwksCache } from "../src/lib/auth";
+import { ctx } from "./helpers/execution-context";
 
 /**
  * Route-level cover for the auth retrofit. The unit tests prove resolveAuth itself; these prove
@@ -163,7 +164,7 @@ describe("server mode cannot reach a scope the deployment has not allowlisted", 
 		const jwt = await makeJwt();
 		const { path, init } = request(OTHER_ACCOUNT, OTHER_ZONE);
 		const headers = { ...((init?.headers as Record<string, string>) || {}), "Cf-Access-Jwt-Assertion": jwt };
-		const res = await app.request(path, { ...init, headers }, SERVER_ENV, { waitUntil: () => {}, passThroughOnException: () => {} });
+		const res = await app.request(path, { ...init, headers }, SERVER_ENV, ctx());
 
 		expect(res.status).toBe(403);
 		expect(upstreamAuth).toEqual([]);
@@ -174,7 +175,7 @@ describe("server mode cannot reach a scope the deployment has not allowlisted", 
 		const jwt = await makeJwt();
 		const { path, init } = request(ALLOWED_ACCOUNT, ZONE);
 		const headers = { ...((init?.headers as Record<string, string>) || {}), "Cf-Access-Jwt-Assertion": jwt };
-		const res = await app.request(path, { ...init, headers }, SERVER_ENV, { waitUntil: () => {}, passThroughOnException: () => {} });
+		const res = await app.request(path, { ...init, headers }, SERVER_ENV, ctx());
 
 		expect(res.status).not.toBe(401);
 		expect(res.status).not.toBe(403);

@@ -5,6 +5,7 @@ import app from "../src/index";
 import { resetJwksCache } from "../src/lib/auth";
 import { tokenFingerprint } from "../src/lib/ai-sec";
 import { cacheKey, withEdgeCache } from "../src/lib/edge-cache";
+import { ctx } from "./helpers/execution-context";
 
 /**
  * Cover for the Worker-internal edge cache (src/lib/edge-cache.ts) and its three call sites in
@@ -21,7 +22,6 @@ import { cacheKey, withEdgeCache } from "../src/lib/edge-cache";
 const ACCOUNT = "11111111111111111111111111111111";
 const OTHER_ACCOUNT = "22222222222222222222222222222222";
 const ENV = { ASSETS: { fetch: async () => new Response("", { status: 404 }) } };
-const ctx = () => ({ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} });
 
 const json = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -65,7 +65,7 @@ function mockZonesUpstream(result: { id: string; name: string }[] = [{ id: "z1",
 	}) as typeof fetch;
 }
 
-function getZones(accountId: string, token: string, extraHeaders: Record<string, string> = {}, env: unknown = ENV) {
+function getZones(accountId: string, token: string, extraHeaders: Record<string, string> = {}, env: typeof ENV = ENV) {
 	return app.request(
 		`/api/zones?account_id=${accountId}`,
 		{ headers: { Authorization: `Bearer ${token}`, ...extraHeaders } },

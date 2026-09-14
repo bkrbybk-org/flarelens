@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
+import { ctx } from "./helpers/execution-context";
 
 /**
  * System-level cover: every route driven through the real Hono app against one mocked
@@ -17,7 +18,6 @@ const assets = {
 			: new Response("", { status: 404 }),
 };
 const ENV = { ASSETS: assets };
-const ctx = () => ({ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} });
 
 function get(path: string, headers: Record<string, string> = { Authorization: `Bearer ${TOKEN}` }) {
 	return app.request(path, { headers }, ENV, ctx());
