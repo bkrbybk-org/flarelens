@@ -35,6 +35,14 @@ export interface CfPolicy {
 	[key: string]: unknown;
 }
 
+/** Origins allowed to make cross-origin requests to the app, per Access's CORS setting. */
+export interface CfCorsHeaders {
+	allow_all_origins?: boolean;
+	allowed_origins?: string[];
+	allow_credentials?: boolean;
+	[key: string]: unknown;
+}
+
 export interface CfApp {
 	id: string;
 	name?: string;
@@ -48,6 +56,11 @@ export interface CfApp {
 	updated_at?: string;
 	policies: CfPolicy[];
 	policies_error: boolean;
+	/** Go-style duration string, e.g. "24h", "730h", "30m". Parse with parseSessionDuration. */
+	session_duration?: string;
+	/** Explicit false means the session cookie is readable by page scripts (not HttpOnly). */
+	http_only_cookie_attribute?: boolean;
+	cors_headers?: CfCorsHeaders;
 	[key: string]: unknown;
 }
 

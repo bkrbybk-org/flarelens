@@ -9,6 +9,7 @@ import {
 	countBySeverity,
 	groupsFindings,
 	groupUsedBy,
+	parseSessionDuration,
 	policyReferencesGroup,
 	sortFindings,
 	wafFindings,
@@ -69,6 +70,184 @@ describe("accessFindings", () => {
 		const apps = [app({ policies: [{ id: "shared-1" } as CfPolicy] })];
 		const findings = accessFindings(apps, reusableMap);
 		expect(findings.some((f) => f.id.startsWith("access:everyone:"))).toBe(true);
+	});
+
+	describe("parseSessionDuration", () => {
+		it("parses simple Go-style durations to minutes", () => {
+			expect(parseSessionDuration("24h")).toBe(1440);
+			expect(parseSessionDuration("730h")).toBe(43800);
+			expect(parseSessionDuration("30m")).toBe(30);
+			expect(parseSessionDuration("15m")).toBe(15);
+		});
+
+		it("parses compound durations", () => {
+			expect(parseSessionDuration("1h30m")).toBe(90);
+		});
+
+		it("returns null, never 0, for missing or unparseable values", () => {
+			expect(parseSessionDuration(undefined)).toBeNull();
+			expect(parseSessionDuration(null)).toBeNull();
+			expect(parseSessionDuration("")).toBeNull();
+			expect(parseSessionDuration("forever")).toBeNull();
+			expect(parseSessionDuration("24")).toBeNull();
+		});
+	});
+
+	describe("long session", () => {
+		it("flags over 24h as low", () => {
+			const apps = [app({ session_duration: "48h", policies: [] })];
+			const findings = accessFindings(apps, {});
+			expect(findings).toEqual(
+				expect.arrayContaining([expect.objectContaining({ id: "access:long-session:app-1", severity: "low" })]),
+			);
+		});
+
+		it("flags 168h (7 days) or more as medium", () => {
+			const apps = [app({ session_duration: "168h", policies: [] })];
+			const findings = accessFindings(apps, {});
+			expect(findings).toEqual(
+				expect.arrayContaining([expect.objectContaining({ id: "access:long-session:app-1", severity: "medium" })]),
+			);
+		});
+
+		it("does not flag exactly 24h", () => {
+			const apps = [app({ session_duration: "24h", policies: [] })];
+			const findings = accessFindings(apps, {});
+			expect(findings.some((f) => f.id.startsWith("access:long-session:"))).toBe(false);
+		});
+
+		it("does not flag a missing or unparseable session_duration", () => {
+			const apps = [app({ policies: [] }), app({ id: "app-2", session_duration: "bogus", policies: [] })];
+			const findings = accessFindings(apps, {});
+			expect(findings.some((f) => f.id.startsWith("access:long-session:"))).toBe(false);
+		});
+	});
+
+	describe("cookie not HttpOnly", () => {
+		it("flags http_only_cookie_attribute explicitly false as low", () => {
+			const apps = [app({ http_only_cookie_attribute: false, policies: [] })];
+			const findings = accessFindings(apps, {});
+			expect(findings).toEqual(
+				expect.arrayContaining([expect.objectContaining({ id: "access:cookie-not-httponly:app-1", severity: "low" })]),
+			);
+		});
+
+		it("does not flag when the field is undefined", () => {
+			const apps = [app({ policies: [] })];
+			const findings = accessFindings(apps, {});
+			expect(findings.some((f) => f.id.startsWith("access:cookie-not-httponly:"))).toBe(false);
+		});
+
+		it("does not flag when the field is explicitly true", () => {
+			const apps = [app({ http_only_cookie_attribute: true, policies: [] })];
+			const findings = accessFindings(apps, {});
+			expect(findings.some((f) => f.id.startsWith("access:cookie-not-httponly:"))).toBe(false);
+		});
+	});
+
+	describe("CORS wildcard", () => {
+		it("flags allow_all_origins with credentials as medium", () => {
+			const apps = [app({ cors_headers: { allow_all_origins: true, allow_credentials: true }, policies: [] })];
+			const findings = accessFindings(apps, {});
+			expect(findings).toEqual(
+				expect.arrayContaining([expect.objectContaining({ id: "access:cors-wildcard:app-1", severity: "medium" })]),
+			);
+		});
+
+		it("flags a wildcard in allowed_origins without credentials as low", () => {
+			const apps = [app({ cors_headers: { allowed_origins: ["*"] }, policies: [] })];
+			const findings = accessFindings(apps, {});
+			expect(findings).toEqual(
+				expect.arrayContaining([expect.objectContaining({ id: "access:cors-wildcard:app-1", severity: "low" })]),
+			);
+		});
+
+		it("does not flag a specific origin list", () => {
+			const apps = [app({ cors_headers: { allowed_origins: ["https://example.com"], allow_credentials: true }, policies: [] })];
+			const findings = accessFindings(apps, {});
+			expect(findings.some((f) => f.id.startsWith("access:cors-wildcard:"))).toBe(false);
+		});
+
+		it("does not flag when cors_headers is absent", () => {
+			const apps = [app({ policies: [] })];
+			const findings = accessFindings(apps, {});
+			expect(findings.some((f) => f.id.startsWith("access:cors-wildcard:"))).toBe(false);
+		});
+	});
+
+	describe("broad allow with no require", () => {
+		it("flags an allow policy whose include is all broad kinds and require is empty", () => {
+			const apps = [
+				app({ policies: [policy({ decision: "allow", include: [{ email_domain: { domain: "example.com" } }], require: [] })] }),
+			];
+			const findings = accessFindings(apps, {});
+			expect(findings).toEqual(
+				expect.arrayContaining([expect.objectContaining({ id: "access:broad-allow:app-1:pol-1", severity: "low" })]),
+			);
+		});
+
+		it("flags login_method and any_valid_service_token as broad kinds too", () => {
+			const apps = [
+				app({
+					policies: [
+						policy({ id: "pol-a", decision: "allow", include: [{ login_method: { id: "idp-1" } }], require: [] }),
+						policy({ id: "pol-b", decision: "allow", include: [{ any_valid_service_token: {} }], require: [] }),
+					],
+				}),
+			];
+			const findings = accessFindings(apps, {});
+			expect(findings.some((f) => f.id === "access:broad-allow:app-1:pol-a")).toBe(true);
+			expect(findings.some((f) => f.id === "access:broad-allow:app-1:pol-b")).toBe(true);
+		});
+
+		it("does not flag when require is non-empty", () => {
+			const apps = [
+				app({
+					policies: [
+						policy({
+							decision: "allow",
+							include: [{ email_domain: { domain: "example.com" } }],
+							require: [{ email_domain: { domain: "example.com" } }],
+						}),
+					],
+				}),
+			];
+			const findings = accessFindings(apps, {});
+			expect(findings.some((f) => f.id.startsWith("access:broad-allow:"))).toBe(false);
+		});
+
+		it("does not flag when include mixes in a non-broad rule", () => {
+			const apps = [
+				app({
+					policies: [
+						policy({
+							decision: "allow",
+							include: [{ email_domain: { domain: "example.com" } }, { email: { email: "a@example.com" } }],
+							require: [],
+						}),
+					],
+				}),
+			];
+			const findings = accessFindings(apps, {});
+			expect(findings.some((f) => f.id.startsWith("access:broad-allow:"))).toBe(false);
+		});
+
+		it("does not flag a non-allow decision", () => {
+			const apps = [
+				app({ policies: [policy({ decision: "deny", include: [{ email_domain: { domain: "example.com" } }], require: [] })] }),
+			];
+			const findings = accessFindings(apps, {});
+			expect(findings.some((f) => f.id.startsWith("access:broad-allow:"))).toBe(false);
+		});
+
+		it("is skipped when the policy is already reachable-by-everyone", () => {
+			// "everyone" is not a broad kind, so this also documents that the two rules never both
+			// fire on the same include list.
+			const apps = [app({ policies: [policy({ decision: "allow", include: [{ everyone: {} }], require: [] })] })];
+			const findings = accessFindings(apps, {});
+			expect(findings.some((f) => f.id.startsWith("access:broad-allow:"))).toBe(false);
+			expect(findings.some((f) => f.id.startsWith("access:everyone:"))).toBe(true);
+		});
 	});
 });
 

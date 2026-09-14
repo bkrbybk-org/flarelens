@@ -45,6 +45,56 @@ function reachableByEveryone(policy: CfPolicy): boolean {
 	return hasEveryone && requireEmpty;
 }
 
+/** Broad admission rule kinds: satisfying one alone (domain membership, login method, any service
+ * token) is not evidence of who or what is on the other end, unlike an email/group/IP match. */
+const BROAD_INCLUDE_KINDS = new Set(["email_domain", "login_method", "any_valid_service_token"]);
+
+function isBroadIncludeRule(rule: unknown): boolean {
+	if (typeof rule !== "object" || rule === null) return false;
+	const key = Object.keys(rule as Record<string, unknown>)[0];
+	return key !== undefined && BROAD_INCLUDE_KINDS.has(key);
+}
+
+// An allow policy whose include is entirely broad-kind rules and has no require is one condition
+// away from "reachable by everyone" — anyone in the domain/login method/holding any service token
+// gets in with nothing else checked. Distinct from reachableByEveryone (an explicit everyone
+// rule): this is the same shape reached through a wider-than-intended domain or IdP instead.
+function broadAllowNoRequire(policy: CfPolicy): boolean {
+	if ((policy.decision || "").toLowerCase() !== "allow") return false;
+	const requireEmpty = !policy.require || (policy.require as unknown[]).length === 0;
+	if (!requireEmpty) return false;
+	const include = (policy.include || []) as unknown[];
+	return include.length > 0 && include.every(isBroadIncludeRule);
+}
+
+/**
+ * Minutes for a Go-style duration string ("24h", "730h", "30m", "15m", "1h30m"). Cloudflare
+ * Access's session_duration field is exactly this format. Returns null — never 0 — for a missing
+ * or unparseable value, so a field this dashboard cannot read is never mistaken for a short
+ * session.
+ */
+const DURATION_TOKEN_RE = /(\d+(?:\.\d+)?)(h|m|s)/g;
+const DURATION_SHAPE_RE = /^(?:\d+(?:\.\d+)?(?:h|m|s))+$/;
+
+export function parseSessionDuration(s: string | undefined | null): number | null {
+	if (!s) return null;
+	const trimmed = s.trim();
+	if (!DURATION_SHAPE_RE.test(trimmed)) return null;
+	let minutes = 0;
+	for (const match of trimmed.matchAll(DURATION_TOKEN_RE)) {
+		const value = Number.parseFloat(match[1]);
+		const unit = match[2];
+		if (unit === "h") minutes += value * 60;
+		else if (unit === "m") minutes += value;
+		else minutes += value / 60; // seconds
+	}
+	return minutes;
+}
+
+const HOUR_MINUTES = 60;
+const LONG_SESSION_MINUTES = 24 * HOUR_MINUTES;
+const VERY_LONG_SESSION_MINUTES = 7 * 24 * HOUR_MINUTES;
+
 // Does any rule in this policy reference the group id? Shared by the Access
 // Groups "used by" cross-reference and the unreferenced-group finding below —
 // extracted here so neither copy drifts from the other.
@@ -120,6 +170,60 @@ export function accessFindings(apps: CfApp[], reusableMap: Record<string, CfPoli
 	for (const app of apps) {
 		const label = app.name || app.id;
 
+		// These read straight off the app object, independent of whether its policies fetch
+		// succeeded, so they run before the policies_error branch below can `continue` past them.
+		const sessionMinutes = parseSessionDuration(app.session_duration);
+		if (sessionMinutes !== null) {
+			if (sessionMinutes >= VERY_LONG_SESSION_MINUTES) {
+				findings.push({
+					id: `access:long-session:${app.id}`,
+					severity: "medium",
+					title: `${label}: very long session duration`,
+					detail: `session_duration is "${app.session_duration}" (7 days or more) — a stolen or leaked token stays valid for a long time.`,
+					source: "access",
+					href: "#/access",
+				});
+			} else if (sessionMinutes > LONG_SESSION_MINUTES) {
+				findings.push({
+					id: `access:long-session:${app.id}`,
+					severity: "low",
+					title: `${label}: long session duration`,
+					detail: `session_duration is "${app.session_duration}" (over 24h) — longer than a typical workday before re-authentication is required.`,
+					source: "access",
+					href: "#/access",
+				});
+			}
+		}
+
+		if (app.http_only_cookie_attribute === false) {
+			findings.push({
+				id: `access:cookie-not-httponly:${app.id}`,
+				severity: "low",
+				title: `${label}: session cookie readable by scripts`,
+				detail: "http_only_cookie_attribute is disabled, so page JavaScript can read the Access session cookie — a bigger blast radius if the app has an XSS bug.",
+				source: "access",
+				href: "#/access",
+			});
+		}
+
+		const cors = app.cors_headers;
+		if (cors) {
+			const wildcard = cors.allow_all_origins === true || (Array.isArray(cors.allowed_origins) && cors.allowed_origins.includes("*"));
+			if (wildcard) {
+				const withCredentials = cors.allow_credentials === true;
+				findings.push({
+					id: `access:cors-wildcard:${app.id}`,
+					severity: withCredentials ? "medium" : "low",
+					title: `${label}: CORS allows any origin${withCredentials ? " with credentials" : ""}`,
+					detail: withCredentials
+						? "cors_headers allows all origins and allow_credentials is true — any site can make authenticated cross-origin requests and read the response."
+						: "cors_headers allows all origins — any site can make cross-origin requests to this app.",
+					source: "access",
+					href: "#/access",
+				});
+			}
+		}
+
 		if (app.policies_error) {
 			findings.push({
 				id: `access:policies-error:${app.id}`,
@@ -164,6 +268,17 @@ export function accessFindings(apps: CfApp[], reusableMap: Record<string, CfPoli
 					severity: "medium",
 					title: `${label}: "${policyLabel}" bypasses Access`,
 					detail: "This policy's decision is bypass — it skips Access entirely for matching requests.",
+					source: "access",
+					href: "#/access",
+				});
+			}
+
+			if (!reachableByEveryone(policy) && broadAllowNoRequire(policy)) {
+				findings.push({
+					id: `access:broad-allow:${app.id}:${policy.id}`,
+					severity: "low",
+					title: `${label}: "${policyLabel}" allows a broad group with no second check`,
+					detail: "Every include rule is a broad kind (email domain, login method, or any valid service token) and require is empty — anyone matching is admitted with no additional condition.",
 					source: "access",
 					href: "#/access",
 				});
