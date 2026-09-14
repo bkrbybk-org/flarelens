@@ -27,6 +27,18 @@ interface WafPageProps {
 
 type Tab = "overview" | "rules";
 
+const SEVEN_DAYS_MINUTES = 7 * 24 * 60;
+
+/**
+ * Measured on this account 2026-09-12: a 30-day window returned fewer WAF events (5,388) than a
+ * 7-day window (18,440). Past 7 days the event log is a sparse, non-uniform sample rather than
+ * more data, so counts from it are not comparable with a narrower window. Null at or under 7 days.
+ */
+export function wideWindowWarning(minutes: number): string | null {
+	if (minutes <= SEVEN_DAYS_MINUTES) return null;
+	return "This window is wider than 7 days. On this account a 30-day window returned fewer events than a 7-day window (5,388 vs 18,440, measured 2026-09-12) — beyond 7 days the event log is a sparse sample, not a complete count. Don't read trends from event counts at this window size.";
+}
+
 export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProps) {
 	const waf = useWafData(onAuthError);
 	const { load } = waf;
@@ -96,6 +108,8 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 	);
 	useSectionRefresh(refresh, waf.loading);
 
+	const wideWindowNote = wideWindowWarning(minutes);
+
 	return (
 		<PageShell progress={waf.progress}>
 
@@ -109,6 +123,12 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 				<div className={`flex items-center gap-2 ${ALERT_WARN}`}>
 					<AlertIcon size={16} />
 					Event window truncated at ~{EVENT_LIMIT.toLocaleString()} rows — narrow the lookback for complete data.
+				</div>
+			)}
+
+			{wideWindowNote && (
+				<div role="status" className={ALERT_WARN}>
+					{wideWindowNote}
 				</div>
 			)}
 
