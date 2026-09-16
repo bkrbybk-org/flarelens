@@ -9,6 +9,7 @@ import { SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { Session } from "../../hooks/useSession";
 import { useTunnelMap } from "./useTunnelMap";
+import { TunnelSankey } from "./TunnelSankey";
 import { appTypeLabel, chainText, originKindLabel, statusTone, type MappingRow, type OriginKind } from "./types";
 
 
@@ -186,6 +187,18 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 					tone={unrouted ? "text-amber-700 dark:text-amber-400" : undefined}
 				/>
 			</StatGrid>
+
+			{/* Proportion first, then the rows. The table says what each destination is; only the
+			    flow can say that most of the estate is gated yet reaches no tunnel. Filtered rows
+			    feed it, so the picture always describes what is listed below it. */}
+			<section className={CARD}>
+				<h2 className={`mb-3 ${SECTION_TITLE}`}>Access → tunnel → origin</h2>
+				{rows.length === 0 ? (
+					<EmptyNote title="No matching hostnames" loading={loading} />
+				) : (
+					<TunnelSankey rows={rows} onSelectTunnel={setSearch} />
+				)}
+			</section>
 
 			<section className={`${CARD}`}>
 				<h2 className={`mb-3 ${SECTION_TITLE}`}>Destination → application → route → origin</h2>

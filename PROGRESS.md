@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-13** against a full read of the tree, a
 the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Sixteen sections, 18 API routes, 773 tests green across 50 files, all type-checked, `tsc -b` clean, 0 lint errors (4 known warnings).
+**TL;DR** — Sixteen sections, 18 API routes, 784 tests green across 51 files, all type-checked, `tsc -b` clean, 0 lint errors (4 known warnings).
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `fe2564bb`, deployed 2026-09-16. The previous versions were `8bb29774` (2026-09-15)
-and `1c7369ff` (2026-09-12). The three slowest routes were cut by
+Running version `3a924e84`, deployed 2026-09-16. The previous versions were `fe2564bb` and
+`8bb29774` (2026-09-15). The three slowest routes were cut by
 two-thirds in that deploy (`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s,
 `/api/pqc/report` 6.5s → 4.3s, measured in production) with responses verified unchanged.
 
@@ -150,6 +150,8 @@ documents, so no caller text reaches a query.
 | [web/src/lib/csv.ts](web/src/lib/csv.ts) | RFC 4180 `toCsv` + `downloadCsv` (quotes fields containing commas/quotes/newlines) |
 | [web/src/lib/sectionSnapshot.ts](web/src/lib/sectionSnapshot.ts) | Account-scoped cross-page store carrying the last WAF/Cache load to Findings — see the note under Frontend |
 | [web/src/lib/ui.ts](web/src/lib/ui.ts) | **Style tokens — single source.** `CARD`, `ALERT_ERROR`/`ALERT_WARN`, `BTN_*`, `INPUT`/`SEARCH_INPUT`/`SELECT`, `BADGE`, `MUTED`, `SECTION_TITLE`, `FOCUS_RING`/`FOCUS_ROW`. Adding a second token for one role is a bug, not a choice |
+| [web/src/features/tunnels/sankey.ts](web/src/features/tunnels/sankey.ts) | Pure layout for the Tunnel Map's flow diagram (Access → tunnel → origin): node stacking, ribbon geometry, and the tone rules — a node reads as the worst thing inside it, so "No tunnel" turns amber when it holds an unidentified origin |
+| [web/src/features/tunnels/TunnelSankey.tsx](web/src/features/tunnels/TunnelSankey.tsx) | Renders that layout as inline SVG; a tunnel node is a filter for the table below |
 | [web/src/components/PageShell.tsx](web/src/components/PageShell.tsx) | The frame every section renders inside: `h-full overflow-auto` + `space-y-4 p-4 md:p-6`. Applications is the deliberate exception — its table owns the scrolling |
 | [web/src/components/StatCard.tsx](web/src/components/StatCard.tsx) | `StatCard` (label over value, optional icon/hint/tone; formats numbers itself) and `StatGrid` (two columns on a phone, `cols` at `lg`) |
 | [web/src/components/EmptyState.tsx](web/src/components/EmptyState.tsx) | `EmptyState` (page), `EmptyNote` (inside a card), `EmptyRow` (inside a table). `loading` is a separate state from empty |
@@ -234,6 +236,7 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | `tests/routes-auth.test.ts` (allowlist block) | Every one of the 15 account/zone-scoped routes refuses a non-allowlisted scope in server mode with exactly 403, no upstream call and no cache lookup or write, plus a control proving the allowlisted request passes the gate. Verified against 19 mutants |
 | `tests/waf-wide-window.test.ts`, `tests/app-server-mode-accounts.test.ts` | The WAF warning beyond 7 days; server mode reusing `config.accounts` instead of refetching accounts |
 | `tests/tsconfig-references.test.ts` | Root `tsconfig.json` keeps referencing both test projects, so tests cannot silently drop out of type-checking again |
+| `tests/tunnel-sankey.test.ts` | The flow diagram's arithmetic, which fails silently: every column sums to the row count, each node's ribbons sum to the node, no band overflows the node it leaves, no two nodes in a column overlap, and an unidentified origin never folds into the others |
 | `tests/components/progress.test.tsx` | The honesty rules for the time caption (countdown only when measured and ahead; elapsed otherwise; never "0s"), the bar outside the dimmed region, content left interactive |
 | `tests/components/estimated-progress.test.tsx` | No estimate before a first timed load, recorded duration used next time, blended rather than replaced, nothing recorded from a failure |
 | `tests/system-routes.test.ts` | Every core route through the real app against one mocked Cloudflare: shapes, validation, error mapping, headers, `no-store` |
@@ -383,6 +386,16 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | P3 | 4 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 
 ### Recently resolved
+
+- **Tunnel Map gained a flow diagram (2026-09-16, `3a924e84`).** The table says what each
+  destination is; it cannot say that most of the estate is gated yet reaches no tunnel. Three
+  columns — Access → tunnel → origin — each ribbon one destination tall. An earlier four-column
+  draft opened with application type, but "no Access app" and "ungated" are the same rows under two
+  names, so that column was dropped. Drawn against the live account before shipping, which caught
+  three things tests could not: "reaches a tunnel" was rendered in the Cloudflare brand orange and
+  read as a warning next to the red exposure bands (now emerald), long tunnel names ran into the
+  middle of the drawing (now right-aligned outside it), and the "No tunnel" node was grey while
+  carrying all eight unidentified origins (now amber, matching its own ribbons).
 
 - ~~`tests/` was not type-checked~~ (2026-09-15, #9). `tsc -b` now builds two more projects —
   `tests/tsconfig.json` (Workers types + Node, no DOM) and `tests/components/tsconfig.json` (DOM +
