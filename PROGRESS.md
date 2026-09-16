@@ -10,11 +10,12 @@ mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates opera
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `8bb29774`, deployed 2026-09-15. The previous version was `1c7369ff` (2026-09-12). The three slowest routes were cut by
+Running version `fe2564bb`, deployed 2026-09-16. The previous versions were `8bb29774` (2026-09-15)
+and `1c7369ff` (2026-09-12). The three slowest routes were cut by
 two-thirds in that deploy (`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s,
 `/api/pqc/report` 6.5s → 4.3s, measured in production) with responses verified unchanged.
 
-**In `8bb29774`:** the Zone Health section, access posture findings, a 60-second per-credential edge
+**In `8bb29774` and `fe2564bb`:** the Zone Health section, access posture findings, a 60-second per-credential edge
 cache on four configuration routes, PQC validation-record exclusion, the WAF wide-window warning, and
 an allowlist test over every scoped route. Verified in production after deploy: Access gate 302,
 repeat loads 4.0s → 0.05s on tunnels and PQC with `no-store` still sent to the browser, a

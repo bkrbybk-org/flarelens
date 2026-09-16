@@ -35,7 +35,7 @@ const CONCURRENCY = 4;
 const PROXIABLE_TYPES = new Set(["A", "AAAA", "CNAME"]);
 
 /**
- * An underscore-led label (`_acme-challenge.example.com`, `_6390ec…nttlab.org`) names a
+ * An underscore-led label (`_acme-challenge.example.com`, `_6390ec….example.com`) names a
  * DNS-validation record (ACME, DKIM, service discovery), not a hostname anyone browses to.
  * It has no visitor-facing TLS posture, so counting it as "not ready" misreports a report about
  * services as a report about the zone's raw record list. Only a label that STARTS with `_`
