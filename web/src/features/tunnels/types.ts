@@ -1,9 +1,33 @@
+export interface TunnelConnection {
+	id: string;
+	colo: string;
+	openedAt?: string;
+	originIp?: string;
+	pendingReconnect: boolean;
+}
+
+export interface TunnelConnector {
+	id: string;
+	version: string;
+	arch: string;
+	startedAt?: string;
+	features: string[];
+	connections: TunnelConnection[];
+}
+
 export interface TunnelSummary {
 	id: string;
 	name: string;
 	status: string;
 	colos: string[];
 	configError?: string;
+	createdAt?: string;
+	activeSince?: string;
+	inactiveSince?: string;
+	configSource?: string;
+	connectors: TunnelConnector[];
+	connectorsError?: string;
+	health: { level: "warn" | "info"; message: string }[];
 }
 
 export type OriginKind = "tunnel" | "worker" | "cloudflare" | "private" | "unknown";

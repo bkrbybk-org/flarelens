@@ -72,8 +72,57 @@ interface CfTunnel {
 	status?: string;
 	deleted_at?: string | null;
 	created_at?: string;
+	conns_active_at?: string | null;
+	conns_inactive_at?: string | null;
+	/** "cloudflare" when ingress is managed from the dashboard, "local" when from a config file. */
+	config_src?: string;
+	remote_config?: boolean;
+	/** Deprecated by Cloudflare (2026-07-09) in favour of `/connections`; read only as a fallback. */
 	connections?: { colo_name?: string }[];
 }
+
+/** One `cloudflared` process, as `GET /cfd_tunnel/{id}/connections` returns it. */
+interface CfConnector {
+	id?: string;
+	version?: string;
+	arch?: string;
+	run_at?: string;
+	features?: string[];
+	conns?: {
+		id?: string;
+		colo_name?: string;
+		opened_at?: string;
+		origin_ip?: string;
+		is_pending_reconnect?: boolean;
+	}[];
+}
+
+export interface TunnelConnection {
+	id: string;
+	colo: string;
+	openedAt?: string;
+	/** Public address the connector dialled out from — the host's egress IP, not the origin service. */
+	originIp?: string;
+	pendingReconnect: boolean;
+}
+
+export interface TunnelConnector {
+	id: string;
+	version: string;
+	arch: string;
+	/** When this `cloudflared` process started. */
+	startedAt?: string;
+	features: string[];
+	connections: TunnelConnection[];
+}
+
+export interface TunnelHealthNote {
+	level: "warn" | "info";
+	message: string;
+}
+
+/** `cloudflared` opens four connections to the edge; fewer means some are down or still dialling. */
+export const EXPECTED_CONNECTIONS_PER_CONNECTOR = 4;
 
 interface CfIngressRule {
 	hostname?: string;
@@ -102,6 +151,74 @@ export interface TunnelSummary {
 	colos: string[];
 	/** Ingress rules could not be read for this tunnel. */
 	configError?: string;
+	createdAt?: string;
+	/** When the tunnel last went from no connections to some. */
+	activeSince?: string;
+	/** When the tunnel last lost its final connection. */
+	inactiveSince?: string;
+	/** Where ingress is configured: "cloudflare" (dashboard/API) or "local" (config file). */
+	configSource?: string;
+	connectors: TunnelConnector[];
+	/** Connectors could not be read; `connectors` is then empty for that reason, not because none run. */
+	connectorsError?: string;
+	health: TunnelHealthNote[];
+}
+
+function toConnector(raw: CfConnector): TunnelConnector {
+	return {
+		id: raw.id || "",
+		version: raw.version || "unknown",
+		arch: raw.arch || "unknown",
+		startedAt: raw.run_at || undefined,
+		features: raw.features || [],
+		connections: (raw.conns || []).map((c) => ({
+			id: c.id || "",
+			colo: c.colo_name || "unknown",
+			openedAt: c.opened_at || undefined,
+			originIp: c.origin_ip || undefined,
+			pendingReconnect: c.is_pending_reconnect === true,
+		})),
+	};
+}
+
+/**
+ * What an operator should know about a tunnel's connectors, from what the API reports.
+ *
+ * Nothing here is said when the connectors could not be read: an unread list is not an empty
+ * one, and "no redundancy" from a failed fetch would be a false finding.
+ */
+export function tunnelHealth(status: string, connectors: TunnelConnector[], connectorsError?: string): TunnelHealthNote[] {
+	if (connectorsError) return [];
+	const notes: TunnelHealthNote[] = [];
+	const s = status.toLowerCase();
+	if (connectors.length === 0) {
+		if (s !== "inactive") notes.push({ level: "warn", message: "No connector is running, so nothing this tunnel routes is reachable." });
+		return notes;
+	}
+	if (connectors.length === 1) {
+		notes.push({
+			level: "warn",
+			message: "Only one connector is running — no redundancy. Restarting or losing that host takes every route on this tunnel down.",
+		});
+	}
+	const versions = [...new Set(connectors.map((c) => c.version))];
+	if (versions.length > 1) {
+		notes.push({ level: "info", message: `Connectors run different cloudflared versions (${versions.sort().join(", ")}).` });
+	}
+	for (const connector of connectors) {
+		const label = connector.id.slice(0, 8) || "a connector";
+		const live = connector.connections.filter((c) => !c.pendingReconnect).length;
+		if (connector.connections.some((c) => c.pendingReconnect)) {
+			notes.push({ level: "warn", message: `Connector ${label} has a connection waiting to reconnect.` });
+		}
+		if (live < EXPECTED_CONNECTIONS_PER_CONNECTOR) {
+			notes.push({
+				level: "warn",
+				message: `Connector ${label} holds ${live} of ${EXPECTED_CONNECTIONS_PER_CONNECTOR} edge connections.`,
+			});
+		}
+	}
+	return notes;
 }
 
 /**
@@ -230,6 +347,36 @@ function originLabel(kind: OriginKind): string {
  * array would make the caller wait for the applications before this function could start, which
  * is a round trip of wall clock spent on an ordering accident.
  */
+type RequestHeaders = Record<string, string>;
+
+async function readConfig(url: string, headers: RequestHeaders): Promise<{ ingress: CfIngressRule[]; error?: string }> {
+	const response = await fetch(url, { headers });
+	let body: { success?: boolean; result?: { config?: { ingress?: CfIngressRule[] } }; errors?: { message?: string }[] };
+	try {
+		body = await response.json();
+	} catch {
+		return { ingress: [], error: "Non-JSON configuration response" };
+	}
+	if (!response.ok || !body.success) {
+		return { ingress: [], error: body.errors?.[0]?.message || `HTTP ${response.status}` };
+	}
+	return { ingress: body.result?.config?.ingress || [] };
+}
+
+async function readConnectors(url: string, headers: RequestHeaders): Promise<{ connectors: TunnelConnector[]; connectorsError?: string }> {
+	const response = await fetch(url, { headers });
+	let body: { success?: boolean; result?: CfConnector[]; errors?: { message?: string }[] };
+	try {
+		body = await response.json();
+	} catch {
+		return { connectors: [], connectorsError: "Non-JSON connections response" };
+	}
+	if (!response.ok || !body.success) {
+		return { connectors: [], connectorsError: body.errors?.[0]?.message || `HTTP ${response.status}` };
+	}
+	return { connectors: (body.result || []).map(toConnector) };
+}
+
 export async function fetchTunnelMap(
 	accountId: string,
 	token: string,
@@ -254,19 +401,11 @@ export async function fetchTunnelMap(
 	// after the loop.
 	const [configs, routesRes, domainsRes] = await Promise.all([
 		mapWithConcurrency(tunnels, 5, async (tunnel) => {
-			const response = await fetch(`${REST_BASE}/accounts/${accountId}/cfd_tunnel/${tunnel.id}/configurations`, {
-				headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-			});
-			let body: { success?: boolean; result?: { config?: { ingress?: CfIngressRule[] } }; errors?: { message?: string }[] };
-			try {
-				body = await response.json();
-			} catch {
-				return { tunnel, ingress: [] as CfIngressRule[], error: "Non-JSON configuration response" };
-			}
-			if (!response.ok || !body.success) {
-				return { tunnel, ingress: [] as CfIngressRule[], error: body.errors?.[0]?.message || `HTTP ${response.status}` };
-			}
-			return { tunnel, ingress: body.result?.config?.ingress || [], error: undefined as string | undefined };
+			const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+			const base = `${REST_BASE}/accounts/${accountId}/cfd_tunnel/${tunnel.id}`;
+			// Configuration and connectors are independent reads of the same tunnel.
+			const [config, connectors] = await Promise.all([readConfig(`${base}/configurations`, headers), readConnectors(`${base}/connections`, headers)]);
+			return { tunnel, ...config, ...connectors };
 		}),
 		restList<CfRoute>(`/accounts/${accountId}/teamnet/routes`, token),
 		// Worker custom domains, so an app served by a Worker on its own hostname is identified
@@ -282,13 +421,28 @@ export async function fetchTunnelMap(
 		if (domain.hostname) workerDomains.set(normaliseHost(domain.hostname), domain.service || "Worker");
 	}
 
-	const summaries: TunnelSummary[] = configs.map(({ tunnel, error }) => ({
-		id: tunnel.id,
-		name: tunnel.name || tunnel.id,
-		status: tunnel.status || "unknown",
-		colos: [...new Set((tunnel.connections || []).map((c) => c.colo_name).filter((c): c is string => !!c))],
-		configError: error,
-	}));
+	const summaries: TunnelSummary[] = configs.map(({ tunnel, error, connectors, connectorsError }) => {
+		const status = tunnel.status || "unknown";
+		// Colos come from the connectors; the list's own `connections` field is deprecated and is
+		// only read when the connectors could not be.
+		const colos = connectorsError
+			? (tunnel.connections || []).map((c) => c.colo_name)
+			: connectors.flatMap((c) => c.connections.filter((conn) => !conn.pendingReconnect).map((conn) => conn.colo));
+		return {
+			id: tunnel.id,
+			name: tunnel.name || tunnel.id,
+			status,
+			colos: [...new Set(colos.filter((c): c is string => !!c && c !== "unknown"))].sort(),
+			configError: error,
+			createdAt: tunnel.created_at || undefined,
+			activeSince: tunnel.conns_active_at || undefined,
+			inactiveSince: tunnel.conns_inactive_at || undefined,
+			configSource: tunnel.config_src || (tunnel.remote_config === true ? "cloudflare" : tunnel.remote_config === false ? "local" : undefined),
+			connectors,
+			connectorsError,
+			health: tunnelHealth(status, connectors, connectorsError),
+		};
+	});
 
 	const apps = await appsPromise;
 

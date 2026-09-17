@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
+import { tunnelHealth, type TunnelConnector } from "../src/lib/access-tunnels";
 
 /** Cover for the Access app → tunnel → origin join, including the gaps it is meant to surface. */
 
@@ -17,6 +18,8 @@ interface Upstream {
 	configs?: Record<string, unknown>;
 	routes?: unknown[];
 	tunnelStatus?: number;
+	/** Per tunnel id; a number is an HTTP error status. Absent means no connectors. */
+	connectors?: Record<string, unknown[] | number>;
 }
 
 function mockUpstream(u: Upstream) {
@@ -29,6 +32,13 @@ function mockUpstream(u: Upstream) {
 			const id = url.split("/cfd_tunnel/")[1].split("/")[0];
 			const config = (u.configs ?? {})[id];
 			return config ? json({ success: true, result: config }) : json({ success: false, errors: [{ message: "nope" }] }, 404);
+		}
+		if (url.includes("/cfd_tunnel/") && url.includes("/connections")) {
+			const id = url.split("/cfd_tunnel/")[1].split("/")[0];
+			const c = (u.connectors ?? {})[id] ?? [];
+			return typeof c === "number"
+				? json({ success: false, errors: [{ message: "Authentication error" }] }, c)
+				: json({ success: true, result: c });
 		}
 		if (url.includes("/cfd_tunnel")) {
 			if (u.tunnelStatus && u.tunnelStatus !== 200) {
@@ -209,5 +219,74 @@ describe("degradation", () => {
 	it("requires authentication and a valid account id", async () => {
 		expect((await app.request(`/api/access/tunnels?account_id=${ACCOUNT}`, undefined, ENV)).status).toBe(401);
 		expect((await app.request("/api/access/tunnels?account_id=nope", { headers: auth }, ENV)).status).toBe(400);
+	});
+});
+
+const connector = (id: string, version: string, colos: string[], pending = false) => ({
+	id, version, arch: "linux_amd64", run_at: "2026-09-01T00:00:00Z", features: ["management_logs"],
+	conns: colos.map((colo, i) => ({ id: `${id}-${i}`, colo_name: colo, opened_at: "2026-09-15T00:00:00Z", origin_ip: "203.0.113.7", is_pending_reconnect: pending && i === 0 })),
+});
+
+describe("connectors", () => {
+	type Tunnel = { colos: string[]; connectors: TunnelConnector[]; connectorsError?: string; health: { level: string; message: string }[]; configSource?: string; activeSince?: string };
+	const tunnelsOf = async () => ((await (await call()).json()) as { result: { tunnels: Tunnel[] } }).result.tunnels;
+
+	it("reads connectors and their connections from the connections endpoint", async () => {
+		mockUpstream({
+			apps: [], configs: {},
+			tunnels: [{ ...cwLab, connections: [{ colo_name: "STALE" }], config_src: "cloudflare", conns_active_at: "2026-09-01T00:00:00Z" }],
+			connectors: { "t-1": [connector("c-1", "2026.6.0", ["sin18", "sin16", "sin18", "sin16"]), connector("c-2", "2026.6.1", ["bkk01", "sin16", "bkk01", "sin16"])] },
+		});
+		const [t] = await tunnelsOf();
+		expect(t.connectors.map((c) => [c.id, c.version, c.connections.length])).toEqual([["c-1", "2026.6.0", 4], ["c-2", "2026.6.1", 4]]);
+		expect(t.connectors[0].connections[0]).toMatchObject({ colo: "sin18", originIp: "203.0.113.7", pendingReconnect: false });
+		// Colos come from the connectors, not the deprecated list field.
+		expect(t.colos).toEqual(["bkk01", "sin16", "sin18"]);
+		expect(t).toMatchObject({ configSource: "cloudflare", activeSince: "2026-09-01T00:00:00Z" });
+		expect(t.health).toEqual([{ level: "info", message: "Connectors run different cloudflared versions (2026.6.0, 2026.6.1)." }]);
+	});
+
+	it("keeps a connectors failure distinct from no connectors, and falls back to the list's colos", async () => {
+		mockUpstream({ apps: [], configs: {}, tunnels: [cwLab], connectors: { "t-1": 403 } });
+		const [t] = await tunnelsOf();
+		expect(t.connectors).toEqual([]);
+		expect(t.connectorsError).toBe("Authentication error");
+		expect(t.health).toEqual([]);
+		expect(t.colos).toEqual(["BKK"]);
+	});
+});
+
+describe("tunnelHealth", () => {
+	const c = (id: string, version: string, live: number, pending = 0): TunnelConnector => ({
+		id, version, arch: "linux_amd64", features: [],
+		connections: [
+			...Array.from({ length: live }, (_, i) => ({ id: `${id}${i}`, colo: "sin", pendingReconnect: false })),
+			...Array.from({ length: pending }, (_, i) => ({ id: `${id}p${i}`, colo: "sin", pendingReconnect: true })),
+		],
+	});
+
+	it("says nothing for two full, same-version connectors", () => {
+		expect(tunnelHealth("healthy", [c("aaaaaaaa1", "1", 4), c("bbbbbbbb1", "1", 4)])).toEqual([]);
+	});
+
+	it("flags a single connector as having no redundancy", () => {
+		expect(tunnelHealth("healthy", [c("aaaaaaaa1", "1", 4)]).map((n) => n.level)).toEqual(["warn"]);
+	});
+
+	it("flags missing and reconnecting connections per connector", () => {
+		const messages = tunnelHealth("degraded", [c("aaaaaaaa1", "1", 3, 1), c("bbbbbbbb1", "1", 4)]).map((n) => n.message);
+		expect(messages).toEqual([
+			"Connector aaaaaaaa has a connection waiting to reconnect.",
+			"Connector aaaaaaaa holds 3 of 4 edge connections.",
+		]);
+	});
+
+	it("warns when a down tunnel has no connector, but not for an inactive one", () => {
+		expect(tunnelHealth("down", [])).toHaveLength(1);
+		expect(tunnelHealth("inactive", [])).toEqual([]);
+	});
+
+	it("draws no conclusion from connectors it could not read", () => {
+		expect(tunnelHealth("down", [], "Authentication error")).toEqual([]);
 	});
 });

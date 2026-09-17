@@ -3,13 +3,14 @@ import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { EmptyNote } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, CARD, MUTED, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, ALERT_WARN, BTN_SECONDARY, CARD, FOCUS_RING, MUTED, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
 import { cacheAgeLabel } from "../../lib/edge-cache-caption";
 import { SearchIcon } from "../../components/Icons";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import type { Session } from "../../hooks/useSession";
 import { useTunnelMap } from "./useTunnelMap";
 import { TunnelSankey } from "./TunnelSankey";
+import { TunnelDrawer } from "./TunnelDrawer";
 import { appTypeLabel, chainText, originKindLabel, statusTone, type MappingRow, type OriginKind } from "./types";
 
 
@@ -71,8 +72,11 @@ function Hop({ label, children }: { label: string; children: React.ReactNode }) 
 
 export function TunnelMapPage({ session, onAuthError }: { session: Session; onAuthError: () => void }) {
 	const [search, setSearch] = useState("");
+	const [openTunnelId, setOpenTunnelId] = useState<string | null>(null);
 	const [reloadKey, setReloadKey] = useState(0);
 	const { result, loading, error, cachedAt, progress, load } = useTunnelMap(onAuthError);
+	// Looked up by id so a Sync refreshes an open drawer rather than leaving it on stale data.
+	const openTunnel = result?.tunnels.find((t) => t.id === openTunnelId) ?? null;
 	// Only a Sync-triggered reload should bypass the cache — a mount or account switch should
 	// still get the fast cached read. The ref survives the render that clears reloadKey's effect
 	// dependency change; the effect below reads and resets it.
@@ -271,17 +275,34 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 					) : (
 						<ul className="space-y-2 text-sm">
 							{result?.tunnels.map((tunnel) => (
-								<li key={tunnel.id} className="flex flex-wrap items-baseline justify-between gap-2">
-									<span className="truncate font-medium" title={tunnel.id}>{tunnel.name}</span>
-									<span className="flex items-center gap-2 text-xs">
-										<span className={statusTone(tunnel.status)}>{tunnel.status}</span>
-										{tunnel.colos.length > 0 && <span className="text-zinc-500 dark:text-zinc-400">{tunnel.colos.join(", ")}</span>}
-										{tunnel.configError && (
-											<span className="text-amber-600 dark:text-amber-400" title={tunnel.configError}>
-												config unavailable
-											</span>
-										)}
-									</span>
+								<li key={tunnel.id}>
+									<button
+										type="button"
+										onClick={() => setOpenTunnelId(tunnel.id)}
+										className={`-mx-2 flex w-[calc(100%+1rem)] flex-wrap items-baseline justify-between gap-2 rounded-md px-2 py-1 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${FOCUS_RING}`}
+									>
+										<span className="truncate font-medium">{tunnel.name}</span>
+										<span className="flex flex-wrap items-center gap-2 text-xs">
+											<span className={statusTone(tunnel.status)}>{tunnel.status}</span>
+											{!tunnel.connectorsError && (
+												<span className="text-zinc-500 dark:text-zinc-400">
+													{tunnel.connectors.length} {tunnel.connectors.length === 1 ? "connector" : "connectors"}
+												</span>
+											)}
+											{tunnel.colos.length > 0 && <span className="text-zinc-500 dark:text-zinc-400">{tunnel.colos.join(", ").toUpperCase()}</span>}
+											{tunnel.health.some((n) => n.level === "warn") && (
+												<span className="text-amber-600 dark:text-amber-400">
+													{tunnel.health.filter((n) => n.level === "warn").length} warning
+													{tunnel.health.filter((n) => n.level === "warn").length === 1 ? "" : "s"}
+												</span>
+											)}
+											{tunnel.configError && (
+												<span className="text-amber-600 dark:text-amber-400" title={tunnel.configError}>
+													config unavailable
+												</span>
+											)}
+										</span>
+									</button>
 								</li>
 							))}
 						</ul>
@@ -307,6 +328,14 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 					)}
 				</section>
 			</div>
+			{openTunnel && (
+				<TunnelDrawer
+					tunnel={openTunnel}
+					rows={result?.rows ?? []}
+					privateRoutes={result?.privateRoutes ?? []}
+					onClose={() => setOpenTunnelId(null)}
+				/>
+			)}
 		</PageShell>
 	);
 }

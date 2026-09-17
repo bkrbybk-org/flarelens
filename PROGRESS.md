@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-17** against a full read of the tree, a
 the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Eighteen sections, 20 API routes, 901 tests green across 60 files, all type-checked, `tsc -b` clean, 0 lint errors (5 known warnings).
+**TL;DR** — Eighteen sections, 20 API routes, 912 tests green across 61 files, all type-checked, `tsc -b` clean, 0 lint errors (5 known warnings).
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `6394e637`, deployed 2026-09-17 (WAF Rules Review grouped by ruleset). The previous
-versions were `286c5402` (same day: DNS Records, Rate Limits & Bots, command palette, saved views,
+Running version `0f744ea2`, deployed 2026-09-17 (Tunnel Map connector details). The previous
+versions were `fe0829a7` (same day, same feature before a small UI fix), `6394e637` (same day: WAF Rules Review grouped by ruleset), `286c5402` (same day: DNS Records, Rate Limits & Bots, command palette, saved views,
 system theme), `b18efed1` (same day, superseded by UI fixes), `3a924e84` (2026-09-16), and `fe2564bb` and `8bb29774` (2026-09-15). The three slowest routes were cut by
 two-thirds in that deploy (`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s,
 `/api/pqc/report` 6.5s → 4.3s, measured in production) with responses verified unchanged.
@@ -391,6 +391,18 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | P3 | 5 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx), [PoliciesTable](web/src/features/access/PoliciesTable.tsx), [EventsTable](web/src/features/ai-security/EventsTable.tsx), [RulesetTable](web/src/features/waf/RulesetTable.tsx) and [DnsPage](web/src/features/dns/DnsPage.tsx) | None — React Compiler just skips memoizing those components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 
 ### Recently resolved
+
+- **Tunnel Map connector details (2026-09-17, `0f744ea2`).** Clicking a tunnel opens a detail
+  panel: its connectors (cloudflared version, architecture, start time, features) and each
+  connector's edge connections (data center, when opened, source IP, reconnecting). Also its
+  hostnames and private routes. Connectors come from `GET /cfd_tunnel/{id}/connections`. Cloudflare
+  deprecated the `connections` field on the tunnel list on 2026-07-09, so the app now reads that
+  field only when the connections call fails. Live: 8 tunnels,
+  no read errors. One tunnel runs two connectors on different versions (2026.6.0 / 2026.6.1),
+  five healthy tunnels run a **single connector with no redundancy**, two are down with none.
+  **CPU and memory are not available**: Cloudflare's API does not report them, and `cloudflared`
+  serves them only on its local Prometheus endpoint, which the Worker cannot reach. The page says
+  so. Cost: 8 more upstream calls, so an uncached `/api/access/tunnels` went from about 4.0s to 5.3s.
 
 - **WAF Rules Review grouped by ruleset (2026-09-17, `6394e637`).** A flat list of 1,208 rules,
   25 per page, did not show which ruleset a rule belongs to until each card was read. Rules are now
