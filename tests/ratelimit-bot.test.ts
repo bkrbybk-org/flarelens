@@ -6,6 +6,7 @@ import {
 	fetchRateLimitScope,
 	fetchRatelimitBotReport,
 	inferPlanTier,
+	isBotProtectionOn,
 	type BbZone,
 	type BotManagementZone,
 	type RateLimitScope,
@@ -221,6 +222,26 @@ describe("computeFindings", () => {
 	it("does not flag bot protection off when an sbfm action is set beyond off", () => {
 		const findings = computeFindings([], [okBotZone({ fight_mode: false, sbfm_definitely_automated: "block" })]);
 		expect(findings.find((f) => f.title === "Bot protection is off")).toBeUndefined();
+	});
+
+	it("treats SBFM with every mitigating group set to allow as off — Cloudflare's documented way to disable it", () => {
+		const settings = { fight_mode: false, sbfm_definitely_automated: "allow", sbfm_likely_automated: "allow", sbfm_verified_bots: "allow" };
+		expect(isBotProtectionOn(settings)).toBe(false);
+		expect(computeFindings([], [okBotZone(settings)])).toContainEqual(expect.objectContaining({ title: "Bot protection is off" }));
+	});
+
+	it("does not count verified bots alone as protection", () => {
+		expect(isBotProtectionOn({ fight_mode: false, sbfm_verified_bots: "block" })).toBe(false);
+	});
+
+	it("counts an Enterprise Bot Management zone as protected without fight_mode", () => {
+		const settings = { using_latest_model: true, enable_js: true };
+		expect(isBotProtectionOn(settings)).toBe(true);
+		expect(computeFindings([], [okBotZone(settings)]).find((f) => f.title === "Bot protection is off")).toBeUndefined();
+	});
+
+	it("does not read ai_bots_protection as an Enterprise signal — it exists on every plan", () => {
+		expect(inferPlanTier({ fight_mode: true, ai_bots_protection: "block" })).toBe("bot_fight_mode");
 	});
 
 	it("flags enable_js disabled", () => {

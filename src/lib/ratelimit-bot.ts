@@ -183,13 +183,32 @@ export async function fetchRateLimitScope(
  */
 export type BotPlanTier = "enterprise" | "super_bot_fight_mode" | "bot_fight_mode" | "unknown";
 
-const ENTERPRISE_KEYS = ["using_latest_model", "suppress_session_score", "auto_update_model", "ai_bots_protection"];
+// ai_bots_protection is deliberately absent: "Block AI bots" is offered on every plan, so its
+// presence says nothing about the tier.
+const ENTERPRISE_KEYS = ["using_latest_model", "suppress_session_score", "auto_update_model"];
 const SBFM_KEYS = [
 	"sbfm_definitely_automated",
 	"sbfm_likely_automated",
 	"sbfm_verified_bots",
 	"sbfm_static_resource_protection",
 ];
+
+/**
+ * Super Bot Fight Mode groups that mitigate automated traffic. Verified bots are excluded — they
+ * are allowed by design — and Cloudflare's documented way to turn SBFM off is to set every group
+ * to "allow", so "allow" (and "off") count as not protecting.
+ */
+const SBFM_MITIGATING_KEYS = ["sbfm_definitely_automated", "sbfm_likely_automated"];
+
+/**
+ * Whether this zone's bot settings mitigate anything. Enterprise Bot Management scores every
+ * request regardless of the toggles here, so an Enterprise response counts as protected.
+ */
+export function isBotProtectionOn(settings: Record<string, unknown>): boolean {
+	if (inferPlanTier(settings) === "enterprise") return true;
+	if (settings.fight_mode === true) return true;
+	return SBFM_MITIGATING_KEYS.some((k) => typeof settings[k] === "string" && settings[k] !== "allow" && settings[k] !== "off");
+}
 
 export function inferPlanTier(settings: Record<string, unknown>): BotPlanTier {
 	if (ENTERPRISE_KEYS.some((k) => k in settings)) return "enterprise";
@@ -281,9 +300,7 @@ export function computeFindings(rateLimitScopes: RateLimitScope[], botZones: Bot
 	for (const zone of botZones) {
 		if (zone.status !== "ok") continue;
 		const s = zone.settings;
-		const fightMode = s.fight_mode === true;
-		const anySbfmAction = SBFM_KEYS.some((k) => typeof s[k] === "string" && s[k] !== "off");
-		if (!fightMode && !anySbfmAction) {
+		if (!isBotProtectionOn(s)) {
 			findings.push({
 				severity: "high",
 				zoneId: zone.zoneId,
@@ -307,7 +324,7 @@ export function computeFindings(rateLimitScopes: RateLimitScope[], botZones: Bot
 				zoneId: zone.zoneId,
 				zoneName: zone.zoneName,
 				title: "AI bots not blocked",
-				detail: `ai_bots_protection is "${s.ai_bots_protection}", not "block".`,
+				detail: `ai_bots_protection is "${s.ai_bots_protection}", not "block". Cloudflare deprecated this legacy setting on 2026-09-15 in favour of per-behaviour AI bot policies, which this API field does not show.`,
 			});
 		}
 	}
@@ -380,7 +397,7 @@ export async function fetchRatelimitBotReport(accountId: string, zones: BbZone[]
 	const zonesWithNoRateLimitRules = zoneResults.filter((r) => r.rateLimit.status === "ok" && r.rateLimit.rules.length === 0).length;
 	const botProtectionOn = botManagement.filter((z) => {
 		if (z.status !== "ok") return false;
-		return z.settings.fight_mode === true || SBFM_KEYS.some((k) => typeof z.settings[k] === "string" && z.settings[k] !== "off");
+		return isBotProtectionOn(z.settings);
 	}).length;
 	const botProtectionUnknown = botManagement.filter((z) => z.status !== "ok").length;
 	const botProtectionOff = botManagement.length - botProtectionOn - botProtectionUnknown;
