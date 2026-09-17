@@ -11,8 +11,7 @@
  * scopes differ: a token can read Access and not Tunnels, and a partial map is still useful.
  */
 
-const REST_BASE = "https://api.cloudflare.com/client/v4";
-const PER_PAGE = 100;
+import { CF_API_BASE as REST_BASE, authHeaders, mapWithConcurrency, restList } from "./cf-rest";
 
 export class TunnelMapError extends Error {
 	constructor(message: string, readonly status: number) {
@@ -21,50 +20,8 @@ export class TunnelMapError extends Error {
 	}
 }
 
-interface CfListEnvelope<T> {
-	success?: boolean;
-	result?: T[];
-	errors?: { message?: string }[];
-	result_info?: { total_pages?: number };
-}
 
-async function restList<T>(path: string, token: string): Promise<{ result: T[]; error?: string; status: number }> {
-	const all: T[] = [];
-	let page = 1;
-	while (true) {
-		const sep = path.includes("?") ? "&" : "?";
-		const response = await fetch(`${REST_BASE}${path}${sep}per_page=${PER_PAGE}&page=${page}`, {
-			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-		});
-		let body: CfListEnvelope<T>;
-		try {
-			body = await response.json();
-		} catch {
-			return { result: [], error: "Cloudflare returned a non-JSON response", status: 502 };
-		}
-		if (!response.ok || !body.success) {
-			return { result: [], error: body.errors?.[0]?.message || `HTTP ${response.status}`, status: response.status };
-		}
-		all.push(...(body.result || []));
-		const totalPages = body.result_info?.total_pages ?? 1;
-		if (page >= totalPages || (body.result || []).length === 0) return { result: all, status: 200 };
-		page++;
-	}
-}
 
-/** Run tasks with bounded concurrency; Workers allow ~6 simultaneous connections per host. */
-async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-	const results: R[] = new Array(items.length);
-	let next = 0;
-	async function worker(): Promise<void> {
-		while (next < items.length) {
-			const index = next++;
-			results[index] = await fn(items[index]);
-		}
-	}
-	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-	return results;
-}
 
 interface CfTunnel {
 	id: string;
@@ -347,10 +304,8 @@ function originLabel(kind: OriginKind): string {
  * array would make the caller wait for the applications before this function could start, which
  * is a round trip of wall clock spent on an ordering accident.
  */
-type RequestHeaders = Record<string, string>;
-
-async function readConfig(url: string, headers: RequestHeaders): Promise<{ ingress: CfIngressRule[]; error?: string }> {
-	const response = await fetch(url, { headers });
+async function readConfig(url: string, token: string): Promise<{ ingress: CfIngressRule[]; error?: string }> {
+	const response = await fetch(url, { headers: authHeaders(token) });
 	let body: { success?: boolean; result?: { config?: { ingress?: CfIngressRule[] } }; errors?: { message?: string }[] };
 	try {
 		body = await response.json();
@@ -363,8 +318,8 @@ async function readConfig(url: string, headers: RequestHeaders): Promise<{ ingre
 	return { ingress: body.result?.config?.ingress || [] };
 }
 
-async function readConnectors(url: string, headers: RequestHeaders): Promise<{ connectors: TunnelConnector[]; connectorsError?: string }> {
-	const response = await fetch(url, { headers });
+async function readConnectors(url: string, token: string): Promise<{ connectors: TunnelConnector[]; connectorsError?: string }> {
+	const response = await fetch(url, { headers: authHeaders(token) });
 	let body: { success?: boolean; result?: CfConnector[]; errors?: { message?: string }[] };
 	try {
 		body = await response.json();
@@ -401,10 +356,9 @@ export async function fetchTunnelMap(
 	// after the loop.
 	const [configs, routesRes, domainsRes] = await Promise.all([
 		mapWithConcurrency(tunnels, 5, async (tunnel) => {
-			const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 			const base = `${REST_BASE}/accounts/${accountId}/cfd_tunnel/${tunnel.id}`;
 			// Configuration and connectors are independent reads of the same tunnel.
-			const [config, connectors] = await Promise.all([readConfig(`${base}/configurations`, headers), readConnectors(`${base}/connections`, headers)]);
+			const [config, connectors] = await Promise.all([readConfig(`${base}/configurations`, token), readConnectors(`${base}/connections`, token)]);
 			return { tunnel, ...config, ...connectors };
 		}),
 		restList<CfRoute>(`/accounts/${accountId}/teamnet/routes`, token),

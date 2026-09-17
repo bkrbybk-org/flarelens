@@ -108,7 +108,9 @@ describe("allowlist cannot be evaded", () => {
 			SERVER_ENV,
 			ctx(),
 		);
-		expect(res.status).toBe(403);
+		// A malformed id is refused as invalid (400) before the allowlist is consulted (403);
+		// either way it is refused, and nothing reaches Cloudflare.
+		expect([400, 403]).toContain(res.status);
 		expect(upstreamUrls).toHaveLength(0);
 	});
 
@@ -192,5 +194,20 @@ describe("response hardening", () => {
 		const body = (await res.json()) as { result: { mode: string; accounts?: unknown } };
 		expect(body.result.mode).toBe("byot");
 		expect(body.result.accounts).toBeUndefined();
+	});
+});
+
+describe("ids are ids before they reach an upstream path", () => {
+	// With the caller's own token the allowlist does not apply, so the id check is the only
+	// thing between a query parameter and the Cloudflare URL.
+	it.each(["/api/zones", "/api/data"])("%s refuses a path-shaped account_id with no upstream call", async (path) => {
+		const res = await app.request(
+			`${path}?account_id=${encodeURIComponent("../../user/tokens")}`,
+			{ headers: { Authorization: "Bearer caller-token" } },
+			SERVER_ENV,
+			ctx(),
+		);
+		expect(res.status).toBe(400);
+		expect(upstreamUrls).toHaveLength(0);
 	});
 });

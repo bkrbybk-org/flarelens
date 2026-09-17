@@ -47,6 +47,7 @@ import {
 	fetchZoneName,
 	type CacheCredentials,
 } from "./lib/cache-analysis";
+import { mapWithConcurrency } from "./lib/cf-rest";
 
 interface Env extends AuthEnv {
 	ASSETS: Fetcher;
@@ -98,6 +99,9 @@ interface CfPolicy {
 // richer type was always the accurate one.
 /** Cap on items returned per list: this payload is for reading a policy, not exporting a directory. */
 const LIST_ITEM_CAP = 500;
+
+/** Zero Trust list ids are UUIDs. */
+const LIST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface CfListMeta {
 	id: string;
@@ -221,22 +225,6 @@ async function fetchCloudflareAll<T>(
 	}
 }
 
-// Run tasks with bounded concurrency (Workers allow ~6 simultaneous connections per host).
-async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-	const results: R[] = new Array(items.length);
-	let next = 0;
-
-	async function worker(): Promise<void> {
-		while (next < items.length) {
-			const index = next++;
-			results[index] = await fn(items[index]);
-		}
-	}
-
-	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-	return results;
-}
-
 /**
  * Policies for every application, without a request per application.
  *
@@ -350,9 +338,14 @@ app.get("/api/zones", async (c) => {
 		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
 	}
 	const token = auth.auth.token;
-	const accountId = c.req.query("account_id");
-	if (!accountId) {
+	const rawAccountId = c.req.query("account_id");
+	if (!rawAccountId) {
 		return c.json({ success: false, errors: [{ message: "Missing account_id query parameter" }] }, 400);
+	}
+	// Interpolated into upstream paths below, so it must be an id and nothing else.
+	const accountId = validHexId(rawAccountId);
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Invalid account_id" }] }, 400);
 	}
 	const scope = assertAllowedScope(auth.auth, c.env, { accountId });
 	if (scope) {
@@ -386,9 +379,14 @@ app.get("/api/data", async (c) => {
 		return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
 	}
 	const token = auth.auth.token;
-	const accountId = c.req.query("account_id");
-	if (!accountId) {
+	const rawAccountId = c.req.query("account_id");
+	if (!rawAccountId) {
 		return c.json({ success: false, errors: [{ message: "Missing account_id query parameter" }] }, 400);
+	}
+	// Interpolated into upstream paths below, so it must be an id and nothing else.
+	const accountId = validHexId(rawAccountId);
+	if (!accountId) {
+		return c.json({ success: false, errors: [{ message: "Invalid account_id" }] }, 400);
 	}
 	const scope = assertAllowedScope(auth.auth, c.env, { accountId });
 	if (scope) {
@@ -443,7 +441,8 @@ app.get("/api/data", async (c) => {
 			for (const [key, value] of Object.entries(rule as Record<string, unknown>)) {
 				if (!key.endsWith("_list") || !value || typeof value !== "object") continue;
 				const id = (value as { id?: unknown }).id;
-				if (typeof id === "string" && id) referencedListIds.add(id);
+				// Interpolated into an upstream path, so only something shaped like a list id.
+				if (typeof id === "string" && LIST_ID_PATTERN.test(id)) referencedListIds.add(id);
 			}
 		}
 	};
@@ -474,7 +473,7 @@ app.get("/api/data", async (c) => {
 				name: meta?.name || id,
 				type: meta?.type || "",
 				// The list's own count, which stands even when items could not be read.
-                count: typeof meta?.count === "number" ? meta.count : values.length,
+				count: typeof meta?.count === "number" ? meta.count : values.length,
 				items: values.slice(0, LIST_ITEM_CAP),
 				items_truncated: values.length > LIST_ITEM_CAP,
 				error: itemsRes.status !== 200 ? itemsRes.errors?.[0]?.message || `HTTP ${itemsRes.status}` : undefined,

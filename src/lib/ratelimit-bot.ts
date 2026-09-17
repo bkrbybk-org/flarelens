@@ -14,7 +14,8 @@
  *                    a future plan tier adds one this file does not yet know about.
  */
 
-const CF_API_BASE = "https://api.cloudflare.com/client/v4";
+import { CF_API_BASE, mapWithConcurrency } from "./cf-rest";
+
 const RATE_LIMIT_PHASE = "http_ratelimit";
 
 export class RatelimitBotError extends Error {
@@ -355,18 +356,6 @@ export interface RatelimitBotResult {
 	};
 }
 
-async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-	const results: R[] = new Array(items.length);
-	let next = 0;
-	async function worker(): Promise<void> {
-		while (next < items.length) {
-			const index = next++;
-			results[index] = await fn(items[index]);
-		}
-	}
-	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-	return results;
-}
 
 /** Workers allow ~6 simultaneous connections per host — same budget as pqc.ts and zone-health.ts. */
 const CONCURRENCY = 5;

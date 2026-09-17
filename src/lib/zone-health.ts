@@ -19,8 +19,7 @@
  * that times out — all of these are absences, and an absence must never render the same as a zero.
  */
 
-const REST_BASE = "https://api.cloudflare.com/client/v4";
-const PER_PAGE = 100;
+import { mapWithConcurrency, restList as restListZh } from "./cf-rest";
 /** Same rationale as pqc.ts: Workers allow ~6 simultaneous connections per host. */
 const CONCURRENCY = 5;
 /** Total DNS-over-HTTPS lookups this report will make, across every zone. */
@@ -246,36 +245,7 @@ function certUnavailableReason(status: number, code: number | undefined, message
 	return message || `HTTP ${status}`;
 }
 
-interface CfListEnvelopeZh<T> {
-	success?: boolean;
-	result?: T[];
-	errors?: { message?: string; code?: number }[];
-	result_info?: { total_pages?: number };
-}
 
-async function restListZh<T>(path: string, token: string): Promise<{ result: T[]; error?: string; code?: number; status: number }> {
-	const all: T[] = [];
-	let page = 1;
-	for (;;) {
-		const sep = path.includes("?") ? "&" : "?";
-		const response = await fetch(`${REST_BASE}${path}${sep}per_page=${PER_PAGE}&page=${page}`, {
-			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-		});
-		let body: CfListEnvelopeZh<T>;
-		try {
-			body = await response.json();
-		} catch {
-			return { result: [], error: "Cloudflare returned a non-JSON response", status: 502 };
-		}
-		if (!response.ok || !body.success) {
-			return { result: [], error: body.errors?.[0]?.message || `HTTP ${response.status}`, code: body.errors?.[0]?.code, status: response.status };
-		}
-		all.push(...(body.result || []));
-		const totalPages = body.result_info?.total_pages ?? 1;
-		if (page >= totalPages || (body.result || []).length === 0) return { result: all, status: 200 };
-		page++;
-	}
-}
 
 async function fetchEdgeCertificates(zoneId: string, token: string, now: Date): Promise<CertSource> {
 	const res = await restListZh<CfCertPack>(`/zones/${zoneId}/ssl/certificate_packs?status=all`, token);
@@ -424,18 +394,6 @@ export async function defaultDohLookup(target: string): Promise<DohOutcome> {
 	}
 }
 
-async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-	const results: R[] = new Array(items.length);
-	let next = 0;
-	async function worker(): Promise<void> {
-		while (next < items.length) {
-			const index = next++;
-			results[index] = await fn(items[index]);
-		}
-	}
-	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-	return results;
-}
 
 async function fetchDnsRecords(zoneId: string, token: string): Promise<{ records: CfDnsRecordZh[]; error?: string }> {
 	const res = await restListZh<CfDnsRecordZh>(`/zones/${zoneId}/dns_records`, token);

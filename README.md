@@ -29,7 +29,7 @@ Sections carry deep-linkable state, e.g. `#/waf?zone=<id>&lookback=1440&tab=rule
 
 Findings always covers Access and Groups. WAF and Cache are zone-scoped and fetched by their own pages, so their findings fold in only once you have opened those sections — the page says so explicitly per source rather than implying a clean bill of health it has not checked.
 
-**Export:** the Access table and the Findings page export CSV (respecting the active filters and visible columns), and Findings has a print stylesheet for Save-as-PDF.
+**Export:** the Access table and the Findings page export CSV (respecting the active filters and visible columns; UTF-8 with a byte-order mark, and any cell that would run as a spreadsheet formula starts with an apostrophe so it stays text), and Findings has a print stylesheet for Save-as-PDF.
 
 ### Shell
 
@@ -82,6 +82,7 @@ src/lib/dns-records.ts       DNS Records: account-wide flattening, exposed-origi
 src/lib/ratelimit-bot.ts     Rate Limits & Bots: rate-limit rule review, bot management settings
 web/src/features/tunnels/sankey.ts
                              Flow-diagram layout for the Tunnel Map (pure geometry, unit-tested)
+src/lib/cf-rest.ts           Shared Cloudflare REST plumbing: base URL, paginated list read, bounded fan-out
 src/lib/edge-cache.ts        60s per-credential Cache API layer for configuration reads
 src/lib/ai-sec/              AI Security: zone fan-out, schema probing, domain aggregation
 web/                         Vite + React 19 + Tailwind 4 + TanStack Table SPA

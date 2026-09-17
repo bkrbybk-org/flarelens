@@ -26,8 +26,7 @@
  * would be reporting a setting that does nothing.
  */
 
-const REST_BASE = "https://api.cloudflare.com/client/v4";
-const PER_PAGE = 100;
+import { CF_API_BASE as REST_BASE, mapWithConcurrency, restList } from "./cf-rest";
 /** Workers allow ~6 simultaneous connections per host; the zone fan-out is two calls per zone. */
 const CONCURRENCY = 4;
 
@@ -520,49 +519,8 @@ export function buildPqcReport(inputs: PqcInputs): PqcResult {
 	};
 }
 
-interface CfListEnvelope<T> {
-	success?: boolean;
-	result?: T[];
-	errors?: { message?: string }[];
-	result_info?: { total_pages?: number };
-}
 
-async function restList<T>(path: string, token: string): Promise<{ result: T[]; error?: string; status: number }> {
-	const all: T[] = [];
-	let page = 1;
-	for (;;) {
-		const sep = path.includes("?") ? "&" : "?";
-		const response = await fetch(`${REST_BASE}${path}${sep}per_page=${PER_PAGE}&page=${page}`, {
-			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-		});
-		let body: CfListEnvelope<T>;
-		try {
-			body = await response.json();
-		} catch {
-			return { result: [], error: "Cloudflare returned a non-JSON response", status: 502 };
-		}
-		if (!response.ok || !body.success) {
-			return { result: [], error: body.errors?.[0]?.message || `HTTP ${response.status}`, status: response.status };
-		}
-		all.push(...(body.result || []));
-		const totalPages = body.result_info?.total_pages ?? 1;
-		if (page >= totalPages || (body.result || []).length === 0) return { result: all, status: 200 };
-		page++;
-	}
-}
 
-async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-	const results: R[] = new Array(items.length);
-	let next = 0;
-	async function worker(): Promise<void> {
-		while (next < items.length) {
-			const index = next++;
-			results[index] = await fn(items[index]);
-		}
-	}
-	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-	return results;
-}
 
 interface CfSetting {
 	id?: string;

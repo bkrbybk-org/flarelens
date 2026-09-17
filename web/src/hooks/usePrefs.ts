@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { storageSet } from "../lib/storage";
 
 const PREFS_KEY = "cf_zt_prefs";
 // Bump when column defaults change shape: stale saved order/visibility is
@@ -100,7 +101,7 @@ export function usePrefs() {
 	}
 
 	useEffect(() => {
-		localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+		storageSet("local", PREFS_KEY, JSON.stringify(prefs));
 	}, [prefs]);
 
 	useEffect(() => {

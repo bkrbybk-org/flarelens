@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-17** against a full read of the tree, a
 the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Eighteen sections, 20 API routes, 912 tests green across 61 files, all type-checked, `tsc -b` clean, 0 lint errors (5 known warnings).
+**TL;DR** — Eighteen sections, 20 API routes, 920 tests green across 63 files, all type-checked, `tsc -b` clean, 0 lint errors (5 known warnings).
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `0f744ea2`, deployed 2026-09-17 (Tunnel Map connector details). The previous
-versions were `fe0829a7` (same day, same feature before a small UI fix), `6394e637` (same day: WAF Rules Review grouped by ruleset), `286c5402` (same day: DNS Records, Rate Limits & Bots, command palette, saved views,
+Running version `5eaae590`, deployed 2026-09-17 (audit fixes). The previous versions were
+`0f744ea2` (same day: Tunnel Map connector details), `fe0829a7` (same day, same feature before a small UI fix), `6394e637` (same day: WAF Rules Review grouped by ruleset), `286c5402` (same day: DNS Records, Rate Limits & Bots, command palette, saved views,
 system theme), `b18efed1` (same day, superseded by UI fixes), `3a924e84` (2026-09-16), and `fe2564bb` and `8bb29774` (2026-09-15). The three slowest routes were cut by
 two-thirds in that deploy (`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s,
 `/api/pqc/report` 6.5s → 4.3s, measured in production) with responses verified unchanged.
@@ -391,6 +391,32 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | P3 | 5 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx), [PoliciesTable](web/src/features/access/PoliciesTable.tsx), [EventsTable](web/src/features/ai-security/EventsTable.tsx), [RulesetTable](web/src/features/waf/RulesetTable.tsx) and [DnsPage](web/src/features/dns/DnsPage.tsx) | None — React Compiler just skips memoizing those components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 
 ### Recently resolved
+
+- **Audit pass: bugs, security, debt (2026-09-17, `5eaae590`).** Fixes:
+  - *CSV formula injection.* Exports include text other people control: WAF request paths,
+    DNS TXT content, application names. A cell starting `=`, `+`, `-`, `@`, tab or CR now gets a
+    leading apostrophe, so spreadsheets show it as text instead of running it as a formula.
+    Numbers are not changed.
+  - *CSV encoding.* Downloads now start with a UTF-8 byte-order mark. Without it, Excel shows
+    Thai application names as unreadable characters.
+  - *Unchecked ids in upstream paths.* `/api/zones` and `/api/data` put `account_id` into the
+    Cloudflare URL without checking it. The allowlist blocked this in server mode, but a caller
+    using their own token could send a path-shaped value. Both routes now require a 32-hex id,
+    like every other route. List ids taken from policy rules must be UUIDs before they go into a
+    path. The allowlist test now accepts either refusal code (400 or 403); it still requires
+    that nothing reaches Cloudflare.
+  - *Blocked browser storage crashed the app.* When a browser blocks site data, simply touching
+    `sessionStorage` throws, and the session, prefs and progress hooks did so while the app was
+    starting. They now go through `web/src/lib/storage.ts`, which never throws. The new test was
+    checked by putting one unguarded call back: the test failed.
+  - *Hono advisories.* 7 moderate advisories, fixed by moving to 4.13.8 (`package.json` now
+    requires at least that version). Other dependencies were updated within their existing
+    version ranges. `npm audit` reports 0.
+  - *Duplicated Cloudflare client code.* `mapWithConcurrency` had five identical copies and the
+    paginated list reader had four. Both now live in `src/lib/cf-rest.ts` (−157 lines).
+  - Checked and left alone: the `zone` value kept in the URL is shared by App and the DNS page.
+    App does nothing with it on `#/dns`, so DNS deep links work, but the arrangement breaks
+    easily if either side changes.
 
 - **Tunnel Map connector details (2026-09-17, `0f744ea2`).** Clicking a tunnel opens a detail
   panel: its connectors (cloudflared version, architecture, start time, features) and each

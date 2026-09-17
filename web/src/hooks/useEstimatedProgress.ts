@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { storageGet, storageSet } from "../lib/storage";
 
 /**
  * Fake-but-honest progress.
@@ -45,7 +46,7 @@ export function useEstimatedProgress(storageKey = "cf_zt_last_load_ms"): LoadPro
 	};
 
 	const start = useCallback(() => {
-		const stored = Number(sessionStorage.getItem(storageKey));
+		const stored = Number(storageGet("session", storageKey));
 		const hasMeasurement = stored > 0;
 		const estimateMs = hasMeasurement ? stored : DEFAULT_ESTIMATE_MS;
 		startedAtRef.current = performance.now();
@@ -74,8 +75,8 @@ export function useEstimatedProgress(storageKey = "cf_zt_last_load_ms"): LoadPro
 		if (success) {
 			const elapsed = performance.now() - startedAtRef.current;
 			// Blend with the previous estimate so occasional slow loads don't overreact next time.
-			const previous = Number(sessionStorage.getItem(storageKey)) || elapsed;
-			sessionStorage.setItem(storageKey, String(Math.round((previous + elapsed) / 2)));
+			const previous = Number(storageGet("session", storageKey)) || elapsed;
+			storageSet("session", storageKey, String(Math.round((previous + elapsed) / 2)));
 			setPercent(100);
 			setElapsedMs(elapsed);
 			setEtaMs(0);

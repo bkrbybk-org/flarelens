@@ -42,4 +42,15 @@ describe("toCsv", () => {
 		const csv = toCsv([], [{ header: "V", value: () => "" }]);
 		expect(csv).toBe("V");
 	});
+
+	it("neutralises cells a spreadsheet would run as a formula", () => {
+		const cols = [{ header: "v", value: (r: { v: unknown }) => r.v }];
+		const out = toCsv([{ v: "=HYPERLINK(\"http://x\")" }, { v: "+1" }, { v: "-cmd" }, { v: "@SUM(A1)" }, { v: "\tx" }], cols);
+		expect(out.split("\r\n").slice(1)).toEqual(['"\'=HYPERLINK(""http://x"")"', "'+1", "'-cmd", "'@SUM(A1)", "'\tx"]);
+	});
+
+	it("leaves numbers and ordinary text alone", () => {
+		const cols = [{ header: "v", value: (r: { v: unknown }) => r.v }];
+		expect(toCsv([{ v: -5 }, { v: "a-b" }, { v: "/path" }], cols).split("\r\n").slice(1)).toEqual(["-5", "a-b", "/path"]);
+	});
 });

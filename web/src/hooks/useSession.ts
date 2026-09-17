@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { storageGet, storageRemove, storageSet } from "../lib/storage";
 
 const TOKEN_KEY = "cf_api_token";
 const ACCOUNT_ID_KEY = "cf_account_id";
@@ -23,15 +24,15 @@ export interface Session {
 }
 
 function readSession(): Session | null {
-	const token = sessionStorage.getItem(TOKEN_KEY);
-	const accountId = sessionStorage.getItem(ACCOUNT_ID_KEY);
+	const token = storageGet("session", TOKEN_KEY);
+	const accountId = storageGet("session", ACCOUNT_ID_KEY);
 	if (!token || !accountId) {
 		return null;
 	}
 	return {
 		token,
 		accountId,
-		accountName: sessionStorage.getItem(ACCOUNT_NAME_KEY) || accountId,
+		accountName: storageGet("session", ACCOUNT_NAME_KEY) || accountId,
 		mode: "byot",
 	};
 }
@@ -43,17 +44,17 @@ export function useSession() {
 		// A server-mode session is derived from /api/config on every load and must not outlive
 		// the Access session that produced it, so it is never written to storage.
 		if (next.mode === "byot") {
-			sessionStorage.setItem(TOKEN_KEY, next.token);
-			sessionStorage.setItem(ACCOUNT_ID_KEY, next.accountId);
-			sessionStorage.setItem(ACCOUNT_NAME_KEY, next.accountName);
+			storageSet("session", TOKEN_KEY, next.token);
+			storageSet("session", ACCOUNT_ID_KEY, next.accountId);
+			storageSet("session", ACCOUNT_NAME_KEY, next.accountName);
 		}
 		setSession(next);
 	}, []);
 
 	const disconnect = useCallback(() => {
-		sessionStorage.removeItem(TOKEN_KEY);
-		sessionStorage.removeItem(ACCOUNT_ID_KEY);
-		sessionStorage.removeItem(ACCOUNT_NAME_KEY);
+		storageRemove("session", TOKEN_KEY);
+		storageRemove("session", ACCOUNT_ID_KEY);
+		storageRemove("session", ACCOUNT_NAME_KEY);
 		setSession(null);
 	}, []);
 
