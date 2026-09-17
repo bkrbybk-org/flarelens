@@ -67,6 +67,7 @@ const NAV_GROUPS: { label: string; items: { route: Route; label: string; icon: t
 			{ route: "request", label: "Request Trace", icon: SearchIcon },
 			{ route: "pqc", label: "PQC Readiness", icon: LockIcon },
 			{ route: "zone-health", label: "Zone Health", icon: PulseIcon },
+			{ route: "bots", label: "Rate Limits & Bots", icon: BoltIcon },
 		],
 	},
 	{

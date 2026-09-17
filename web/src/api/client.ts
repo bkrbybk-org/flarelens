@@ -231,6 +231,17 @@ export function fetchZoneHealthReport<T>(token: string, accountId: string, opts?
 	return apiFetchCached<T>(`/api/zone-health/report?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
 }
 
+export function fetchBotsReport<T>(
+	token: string,
+	accountId: string,
+	zoneId: string,
+	opts?: { fresh?: boolean },
+): Promise<CachedResult<T>> {
+	const params = new URLSearchParams({ account_id: accountId });
+	if (zoneId) params.set("zone_id", zoneId);
+	return apiFetchCached<T>(`/api/bots/report?${params.toString()}`, token, opts?.fresh);
+}
+
 export function traceRequest<T>(
 	token: string,
 	body: { accountId: string; rayId: string; zoneId?: string; minutes: number },

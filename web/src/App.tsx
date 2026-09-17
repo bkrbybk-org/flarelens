@@ -17,6 +17,7 @@ import { GatewayPage } from "./features/gateway/GatewayPage";
 import { TunnelMapPage } from "./features/tunnels/TunnelMapPage";
 import { PqcPage } from "./features/pqc/PqcPage";
 import { ZoneHealthPage } from "./features/zone-health/ZoneHealthPage";
+import { BotsPage } from "./features/bots/BotsPage";
 import { RequestTracePage } from "./features/request/RequestTracePage";
 import { CostPage } from "./features/cost/CostPage";
 import { AiSecurityPage } from "./features/ai-security/AiSecurityPage";
@@ -50,6 +51,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	gateway: "Gateway Usage",
 	pqc: "PQC Readiness",
 	"zone-health": "Zone Health",
+	bots: "Rate Limits & Bots",
 	cost: "Cost & Usage",
 	findings: "Findings",
 };
@@ -132,7 +134,7 @@ export default function App() {
 	// Zone list is only needed by zone-scoped features; fetch on first visit
 	const ensureZones = zones.ensureLoaded;
 	useEffect(() => {
-		if (sessionAccountId && (route === "waf" || route === "cache" || route === "ai-security" || route === "request")) {
+		if (sessionAccountId && (route === "waf" || route === "cache" || route === "ai-security" || route === "request" || route === "bots")) {
 			ensureZones(sessionToken || "", sessionAccountId);
 		}
 	}, [route, sessionToken, sessionAccountId, ensureZones]);
@@ -157,7 +159,15 @@ export default function App() {
 
 	// Deep-linkable zone for zone-scoped routes: #/waf?zone=… / #/cache?zone=…
 	const activeZone =
-		route === "waf" ? prefs.wafZone : route === "cache" ? prefs.cacheZone : route === "ai-security" ? prefs.aiSecZone : "";
+		route === "waf"
+			? prefs.wafZone
+			: route === "cache"
+				? prefs.cacheZone
+				: route === "ai-security"
+					? prefs.aiSecZone
+					: route === "bots"
+						? prefs.botsZone
+						: "";
 	useHashSyncedState(
 		"zone",
 		activeZone,
@@ -165,6 +175,7 @@ export default function App() {
 			if (route === "waf") updatePrefs({ wafZone: zoneId });
 			else if (route === "cache") updatePrefs({ cacheZone: zoneId });
 			else if (route === "ai-security") updatePrefs({ aiSecZone: zoneId });
+			else if (route === "bots") updatePrefs({ botsZone: zoneId });
 		},
 		route,
 	);
@@ -250,7 +261,7 @@ export default function App() {
 						mode: session.mode,
 					});
 					zones.reset();
-					updatePrefs({ wafZone: "", cacheZone: "", aiSecZone: "" });
+					updatePrefs({ wafZone: "", cacheZone: "", aiSecZone: "", botsZone: "" });
 				}}
 				route={route}
 				onNavigate={navigate}
@@ -304,7 +315,15 @@ export default function App() {
 										// picked, which is the useful default for "is anything wrong".
 										accountWideLabel: "Account (all zones)",
 									}
-									: undefined
+									: route === "bots"
+										? {
+											zones: zones.zones,
+											value: prefs.botsZone,
+											onChange: (zoneId) => updatePrefs({ botsZone: zoneId }),
+											loading: zones.loading,
+											accountWideLabel: "Account (all zones)",
+										}
+										: undefined
 					}
 					rangePicker={
 						TIME_RANGE_ROUTES.has(route) ? { value: timeRange.preset, onChange: timeRange.setPreset } : undefined
@@ -365,6 +384,7 @@ export default function App() {
 					{route === "gateway" && <GatewayPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "pqc" && <PqcPage session={session} onAuthError={handleDisconnect} />}
 					{route === "zone-health" && <ZoneHealthPage session={session} onAuthError={handleDisconnect} />}
+					{route === "bots" && <BotsPage session={session} zoneId={prefs.botsZone} onAuthError={handleDisconnect} />}
 					{route === "cost" && (
 						<CostPage
 							session={session}
