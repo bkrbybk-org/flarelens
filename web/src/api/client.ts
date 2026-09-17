@@ -231,6 +231,10 @@ export function fetchZoneHealthReport<T>(token: string, accountId: string, opts?
 	return apiFetchCached<T>(`/api/zone-health/report?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
 }
 
+export function fetchDnsRecords<T>(token: string, accountId: string, opts?: { fresh?: boolean }): Promise<CachedResult<T>> {
+	return apiFetchCached<T>(`/api/dns/records?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
+}
+
 export function traceRequest<T>(
 	token: string,
 	body: { accountId: string; rayId: string; zoneId?: string; minutes: number },
