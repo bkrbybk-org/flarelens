@@ -125,3 +125,24 @@ export const CoinIcon = (p: IconProps) => (
 export const PulseIcon = (p: IconProps) => (
 	<svg {...base(p)}><path d="M2 12h4l2 8 4-16 2 8h4l2-4" /></svg>
 );
+
+/** A saved place to return to — saved views, in the sidebar and the palette. */
+export const BookmarkIcon = (p: IconProps) => (
+	<svg {...base(p)}><path d="M19 21 12 16l-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" /></svg>
+);
+
+export const PencilIcon = (p: IconProps) => (
+	<svg {...base(p)}><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" /></svg>
+);
+
+export const TrashIcon = (p: IconProps) => (
+	<svg {...base(p)}><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6" /></svg>
+);
+
+/**
+ * A display, for theme mode "system" — the third state alongside a sun and a moon, following
+ * the OS rather than being one itself.
+ */
+export const MonitorIcon = (p: IconProps) => (
+	<svg {...base(p)}><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
+);

@@ -24,8 +24,10 @@ import { CostPage } from "./features/cost/CostPage";
 import { AiSecurityPage } from "./features/ai-security/AiSecurityPage";
 import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
 import { Topbar } from "./components/shell/Topbar";
+import { CommandPalette } from "./components/shell/CommandPalette";
+import { NameDialog } from "./components/shell/NameDialog";
 import { useHashSyncedState } from "./hooks/useHashParams";
-import { usePrefs } from "./hooks/usePrefs";
+import { usePrefs, type Theme } from "./hooks/usePrefs";
 import { TIME_RANGE_ROUTES, useTimeRange } from "./hooks/useTimeRange";
 import { useRoute, type Route } from "./hooks/useRoute";
 import { useSession, type Session } from "./hooks/useSession";
@@ -33,6 +35,19 @@ import { useZeroTrustData } from "./hooks/useZeroTrustData";
 import { useZones } from "./hooks/useZones";
 import type { RuleContext } from "./lib/rules";
 import { clearSectionSnapshots } from "./lib/sectionSnapshot";
+import { saveView } from "./lib/savedViews";
+
+const THEME_CYCLE: Theme[] = ["dark", "light", "system"];
+
+/** Default name offered in the "Save view" dialog: the page title plus its query params. */
+function defaultViewName(title: string): string {
+	const hash = window.location.hash;
+	const q = hash.indexOf("?");
+	if (q === -1) return title;
+	const params = new URLSearchParams(hash.slice(q + 1));
+	const parts = Array.from(params.entries()).map(([k, v]) => `${k}=${v}`);
+	return parts.length ? `${title} (${parts.join(", ")})` : title;
+}
 
 /** Sections backed by the shared /api/data payload rather than their own loader. */
 const DATA_ROUTES = new Set<Route>(["access", "groups", "findings"]);
@@ -64,6 +79,15 @@ export default function App() {
 	const [route, navigate] = useRoute();
 	const timeRange = useTimeRange(prefs, updatePrefs, route);
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+	const [paletteOpen, setPaletteOpen] = useState(false);
+	const [saveViewOpen, setSaveViewOpen] = useState(false);
+	// Bumped after every save so the sidebar's own copy of the list (read once, on mount) picks
+	// up a view saved from the top bar or the palette without a page reload.
+	const [savedViewsVersion, setSavedViewsVersion] = useState(0);
+
+	const onCycleTheme = useCallback(() => {
+		updatePrefs({ theme: THEME_CYCLE[(THEME_CYCLE.indexOf(prefs.theme) + 1) % THEME_CYCLE.length] });
+	}, [prefs.theme, updatePrefs]);
 
 	// The mounted section registers what reloading means for it, so the top bar's Sync can
 	// drive any section without App knowing how each one fetches. Exactly one section is
@@ -81,6 +105,15 @@ export default function App() {
 	}, [disconnect]);
 
 	const handleAuthError = handleDisconnect;
+
+	const handleConfirmSaveView = useCallback(
+		(name: string) => {
+			if (session) saveView(session.accountId, name, window.location.hash || "#/");
+			setSavedViewsVersion((v) => v + 1);
+			setSaveViewOpen(false);
+		},
+		[session],
+	);
 
 	// Which credential model this deployment uses. Resolved once, before anything renders: in
 	// server mode the worker holds the token and Cloudflare Access has already authenticated the
@@ -272,6 +305,7 @@ export default function App() {
 				version={appVersion}
 				mobileOpen={mobileMenuOpen}
 				onMobileClose={() => setMobileMenuOpen(false)}
+				savedViewsVersion={savedViewsVersion}
 			/>
 			{/* min-h-0 is load-bearing: a flex item defaults to min-height:auto, so without it this
 			    column grows to fit its content instead of being bounded by the h-dvh shell. The
@@ -281,7 +315,9 @@ export default function App() {
 				<Topbar
 					title={PAGE_TITLES[route]}
 					theme={prefs.theme}
-					onToggleTheme={() => updatePrefs({ theme: prefs.theme === "dark" ? "light" : "dark" })}
+					onCycleTheme={onCycleTheme}
+					onOpenPalette={() => setPaletteOpen(true)}
+					onSaveView={() => setSaveViewOpen(true)}
 					// Applications, Groups and Findings all read the same /api/data payload, so they
 					// share App's loader; every other section registers its own.
 					onSync={
@@ -414,6 +450,44 @@ export default function App() {
 				</main>
 			</div>
 		</div>
+		<CommandPalette
+			open={paletteOpen}
+			onOpenChange={setPaletteOpen}
+			route={route}
+			onNavigate={navigate}
+			accounts={sidebarAccounts}
+			accountId={session.accountId}
+			onSwitchAccount={(account) => {
+				connect({
+					token: session.token,
+					accountId: account.id,
+					accountName: account.name || account.id,
+					mode: session.mode,
+				});
+				zones.reset();
+				updatePrefs({ wafZone: "", cacheZone: "", aiSecZone: "" });
+			}}
+			theme={prefs.theme}
+			onSetTheme={(theme) => updatePrefs({ theme })}
+			collapsed={prefs.sidebarCollapsed}
+			onToggleCollapsed={() => updatePrefs({ sidebarCollapsed: !prefs.sidebarCollapsed })}
+			onRefresh={
+				DATA_ROUTES.has(route) ? () => load(session.token, session.accountId) : sectionRefresh?.reload
+			}
+			refreshing={DATA_ROUTES.has(route) ? data.loading : (sectionRefresh?.loading ?? false)}
+			showRefresh={DATA_ROUTES.has(route) || sectionRefresh !== null}
+			onDisconnect={handleDisconnect}
+			onSaveView={() => setSaveViewOpen(true)}
+		/>
+		{saveViewOpen && (
+			<NameDialog
+				title="Save view"
+				initialValue={defaultViewName(PAGE_TITLES[route])}
+				confirmLabel="Save"
+				onCancel={() => setSaveViewOpen(false)}
+				onConfirm={handleConfirmSaveView}
+			/>
+		)}
 		</SectionRefreshContext>
 	);
 }

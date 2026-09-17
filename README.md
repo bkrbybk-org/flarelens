@@ -1,6 +1,6 @@
 # Flarelens
 
-Ops dashboard for Cloudflare: one pane of glass for reviewing an account's **Zero Trust** configuration and telemetry, **security** posture (WAF, AI Security, PQC readiness, request forensics), **cache rules**, and **developer-platform usage** — seventeen sections served entirely from one Cloudflare Worker.
+Ops dashboard for Cloudflare: one pane of glass for reviewing an account's **Zero Trust** configuration and telemetry, **security** posture (WAF, AI Security, PQC readiness, request forensics), **cache rules**, and **developer-platform usage** — eighteen sections served entirely from one Cloudflare Worker.
 
 ## Sections
 
@@ -30,6 +30,36 @@ Sections carry deep-linkable state, e.g. `#/waf?zone=<id>&lookback=1440&tab=rule
 Findings always covers Access and Groups. WAF and Cache are zone-scoped and fetched by their own pages, so their findings fold in only once you have opened those sections — the page says so explicitly per source rather than implying a clean bill of health it has not checked.
 
 **Export:** the Access table and the Findings page export CSV (respecting the active filters and visible columns), and Findings has a print stylesheet for Save-as-PDF.
+
+### Shell
+
+**Command palette** (⌘K / Ctrl+K, or the search button in the top bar): a single ARIA combobox
+over navigation to every section (grouped as in the sidebar), switching accounts, setting the
+theme, collapsing the sidebar, refreshing the current section, saved views, disconnecting, and —
+when the typed text looks like a Ray ID (16 hex characters, optionally with a `-XXX` colo suffix)
+— tracing it. Matching is fuzzy/substring with matched characters highlighted, and recently used
+commands sort first. Both the palette and the sidebar read navigation from one place,
+[web/src/components/shell/nav.ts](web/src/components/shell/nav.ts), so a route can't be added to
+one and forgotten in the other — enforced by
+[tests/nav-groups.test.ts](tests/nav-groups.test.ts).
+
+**Saved views** are a name plus the full hash you were standing on (route, zone, range, tab —
+whatever that section put in the URL) and the account it was saved under. Save one from the
+bookmark button in the top bar or the palette's "Save current view…" command; find them again in
+the sidebar's collapsible **Saved views** group (rename and delete inline) or under "Saved views"
+in the palette. Stored in `localStorage` under `flarelens_saved_views`
+([web/src/lib/savedViews.ts](web/src/lib/savedViews.ts)), scoped per account, capped at 50 per
+account, and validated on read so a malformed entry is dropped rather than breaking the list.
+They are workspace preferences, not telemetry, so disconnecting does not clear them — only
+listing does, per account.
+
+**Theme** is dark, light, or system, cycled from the top bar's theme button (dark → light →
+system) or set directly from the palette; "system" follows `prefers-color-scheme` live.
+Existing users default to dark, not system. First paint reads the saved theme before React
+mounts via a small blocking script,
+[web/public/theme-init.js](web/public/theme-init.js) (the CSP is `script-src 'self'` with no
+inline scripts, so it has to be a same-origin file rather than an inline `<script>`), which is
+why `web/index.html` loads it in `<head>` ahead of the app bundle.
 
 ## Architecture
 
@@ -62,7 +92,13 @@ web/src/features/ai-security/matchedData.ts
 web/src/lib/expr.ts          Wirefilter expression evaluator (single source; the
                              worker imports it for attribution, the client for the URL tester)
 web/src/lib/ui.ts            Style tokens — the single definition of cards, alerts, buttons, focus rings
+web/src/lib/savedViews.ts    Saved views: read/write/validate against localStorage, scoped per account
 web/src/components/          PageShell, StatCard, EmptyState, Tabs, LoadingVeil, ProgressBar, shell
+web/src/components/shell/nav.ts
+                             NAV_GROUPS — the one source the sidebar and command palette both read
+web/src/components/shell/CommandPalette.tsx
+                             ⌘K command palette: navigation, account switch, theme, saved views, Ray ID trace
+web/public/theme-init.js     Blocking pre-mount script that sets the real theme before first paint
 ```
 
 All time-windowed sections share one range picker in the top bar, stored in minutes and clamped
@@ -435,8 +471,8 @@ get a real browser-like environment, without either leaking into the other.
 
 | Layer | Files | What it covers |
 |---|---|---|
-| Unit | `tests/{expr,rules,csv,findings,cache-analysis,waf-meta,waf-aggregate,waf-chart,hash-params,auth,chart-hover,pqc,tunnel-sankey,dns-records,ratelimit-bot}.test.ts`, `tests/ai-sec-*.test.ts` | Pure logic: wirefilter evaluation, rule rendering, findings, CSV, WAF aggregation and bucketing, hash deep-link helpers, Access JWT verification, chart hover placement, PQC verdicts, the Tunnel Map flow diagram's geometry (every column sums to the row count, no band overflows its node), the DNS Records builder (exposed-origin flag, TTL formatting, per-zone errors kept rather than dropped), the AI Security domain layer including `buildDashboard`, and Rate Limits & Bots' 404-vs-403 distinction, plan-tier inference and findings |
-| Component | `tests/components/{PqcPage,ConnectPage,AppsTable,GroupsPage,shared-ui,tabs,progress,estimated-progress,ZoneHealthPage,DnsPage,BotsPage}.test.tsx` | Actually rendered React components (jsdom + Testing Library, `tests/components/setup.ts`): page behaviour for PQC, Connect, Applications, Groups, DNS Records and Rate Limits & Bots; the shared StatCard/EmptyState and the rule that no page redefines them; the ARIA tabs contract; and the loading caption's honesty rules and estimate bookkeeping |
+| Unit | `tests/{expr,rules,csv,findings,cache-analysis,waf-meta,waf-aggregate,waf-chart,hash-params,auth,chart-hover,pqc,tunnel-sankey,dns-records,ratelimit-bot,nav-groups}.test.ts`, `tests/ai-sec-*.test.ts` | Pure logic: wirefilter evaluation, rule rendering, findings, CSV, WAF aggregation and bucketing, hash deep-link helpers, Access JWT verification, chart hover placement, PQC verdicts, the Tunnel Map flow diagram's geometry (every column sums to the row count, no band overflows its node), the DNS Records builder (exposed-origin flag, TTL formatting, per-zone errors kept rather than dropped), the AI Security domain layer including `buildDashboard`, Rate Limits & Bots' 404-vs-403 distinction, plan-tier inference and findings, and that `NAV_GROUPS` covers every `Route` from `useRoute` exactly once |
+| Component | `tests/components/{PqcPage,ConnectPage,AppsTable,GroupsPage,shared-ui,tabs,progress,estimated-progress,ZoneHealthPage,DnsPage,BotsPage,CommandPalette,savedViews,theme}.test.tsx` | Actually rendered React components (jsdom + Testing Library, `tests/components/setup.ts`): page behaviour for PQC, Connect, Applications, Groups, DNS Records and Rate Limits & Bots; the shared StatCard/EmptyState and the rule that no page redefines them; the ARIA tabs contract; the loading caption's honesty rules and estimate bookkeeping; the command palette's combobox keyboard contract, fuzzy filtering and Ray ID detection; saved views' per-account scoping, cap and malformed-entry handling against a real (and a throwing) `localStorage`; and theme cycling plus "system" following `matchMedia` live |
 | Integration | `tests/integration-ai-security.test.ts` | The AI route wired to the ported library, Cloudflare client and Cache API, with only the network mocked — including cache-key tenant isolation |
 | System | `tests/system-routes.test.ts`, `tests/{access-usage,gateway-usage,workers-analytics,workers-ai,ai-gateway,access-tunnels,request-trace,data-fanout,zone-health,dns-records,ratelimit-bot,edge-cache}.test.ts` | Every route through the real app against one mocked Cloudflare: response shapes, validation, upstream error mapping, and the cross-cutting header and `no-store` contract. `ai-gateway.test.ts` covers per-dataset degradation when a field does not resolve; `data-fanout.test.ts` pins the embedded-policy read and the concurrent tunnel fetches; `ratelimit-bot.test.ts` also carries `GET /api/bots/report`'s route tests alongside its lib unit tests |
 | Compatibility | `tests/compat-upstream-shapes.test.ts` | Upstream drift the app does not control: pagination, partial-scope tokens, unknown detection categories, non-JSON responses, and the Workers globals Node lacks |

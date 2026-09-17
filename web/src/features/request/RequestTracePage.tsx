@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { PageShell } from "../../components/PageShell";
 import { ALERT_ERROR, ALERT_WARN, CARD, INPUT, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
 import { SearchIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
 import type { CfZone } from "../../types";
+import { getHashParams } from "../../hooks/useHashParams";
 import { useRequestTrace } from "./useRequestTrace";
 import {
 	FIELD_GROUPS,
@@ -31,8 +32,12 @@ export function RequestTracePage({
 	zones: CfZone[];
 	onAuthError: () => void;
 }) {
-	const [rayInput, setRayInput] = useState("");
-	const [zoneId, setZoneId] = useState("");
+	// `#/request?ray=<id>` — the command palette's "Trace Ray ID…" and any other deep link land
+	// here. Read once at construction (the page remounts on every arrival at this route, so a
+	// lazy initial value is enough — no need for useHashSyncedState's re-adopt-on-route-change
+	// dance), rather than adopted later from an effect.
+	const [rayInput, setRayInput] = useState(() => getHashParams().get("ray")?.trim() || "");
+	const [zoneId, setZoneId] = useState(() => getHashParams().get("zone") || "");
 	const [minutes, setMinutes] = useState(1440);
 	/**
 	 * Payload-decryption key, in component state only — never stored, never sent to the Worker.
@@ -40,6 +45,14 @@ export function RequestTracePage({
 	 */
 	const [privateKey, setPrivateKey] = useState("");
 	const { result, loading, error, progress, load } = useRequestTrace(onAuthError);
+
+	const deepLinkRay = useRef(rayInput);
+	useEffect(() => {
+		if (deepLinkRay.current) load(session.token, session.accountId, deepLinkRay.current, zoneId, minutes);
+		// Deliberately mount-only: this fires the initial trace for a deep link, not on every
+		// keystroke or window change — those go through `submit` instead.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
 
 	function submit(event: FormEvent) {
 		event.preventDefault();

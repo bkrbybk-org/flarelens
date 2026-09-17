@@ -1,24 +1,18 @@
+import { useMemo, useState } from "react";
 import type { Route } from "../../hooks/useRoute";
+import { ROUTES } from "../../hooks/useRoute";
 import { FOCUS_RING, SECTION_TITLE } from "../../lib/ui";
 import type { CfAccount } from "../../types";
+import { deleteView, listViews, navigateToView, renameView, type SavedView } from "../../lib/savedViews";
+import { NameDialog } from "./NameDialog";
+import { NAV_GROUPS } from "./nav";
 import {
-	AlertIcon,
-	AppsIcon,
-	BoltIcon,
-	ChartIcon,
-	CoinIcon,
-	DatabaseIcon,
-	GlobeIcon,
-	KeyIcon,
-	LockIcon,
+	BookmarkIcon,
+	ChevronDownIcon,
 	PanelLeftIcon,
-	PulseIcon,
-	RouteIcon,
-	SearchIcon,
-	ShareIcon,
+	PencilIcon,
 	ShieldIcon,
-	SparkIcon,
-	UsersIcon,
+	TrashIcon,
 	XIcon,
 } from "../Icons";
 
@@ -40,55 +34,9 @@ interface SidebarProps {
 	version?: AppVersion;
 	mobileOpen: boolean;
 	onMobileClose: () => void;
+	/** Bumped by App whenever a view is saved elsewhere (Topbar, palette), to pull the fresh list. */
+	savedViewsVersion: number;
 }
-
-/**
- * Navigation grouped by the Cloudflare product area each section reads from.
- *
- * A flat list stopped scanning well at eight entries and more are coming; grouping keeps the
- * "where would that live" question answerable without reading every label.
- */
-const NAV_GROUPS: { label: string; items: { route: Route; label: string; icon: typeof AppsIcon }[] }[] = [
-	{
-		label: "Zero Trust",
-		items: [
-			{ route: "access", label: "Access Applications", icon: AppsIcon },
-			{ route: "groups", label: "Access Groups", icon: UsersIcon },
-			{ route: "access-usage", label: "Access Usage", icon: ChartIcon },
-			{ route: "tunnels", label: "Tunnel Map", icon: ShareIcon },
-			{ route: "gateway", label: "Gateway Usage", icon: GlobeIcon },
-		],
-	},
-	{
-		label: "Security",
-		items: [
-			{ route: "waf", label: "WAF Analytics", icon: ShieldIcon },
-			{ route: "ai-security", label: "AI Security", icon: KeyIcon },
-			{ route: "request", label: "Request Trace", icon: SearchIcon },
-			{ route: "pqc", label: "PQC Readiness", icon: LockIcon },
-			{ route: "zone-health", label: "Zone Health", icon: PulseIcon },
-			{ route: "dns", label: "DNS Records", icon: GlobeIcon },
-			{ route: "bots", label: "Rate Limits & Bots", icon: BoltIcon },
-		],
-	},
-	{
-		label: "Performance",
-		items: [{ route: "cache", label: "Cache Rules", icon: DatabaseIcon }],
-	},
-	{
-		label: "Developer Platform",
-		items: [
-			{ route: "workers", label: "Workers Analytics", icon: BoltIcon },
-			{ route: "workers-ai", label: "Workers AI", icon: SparkIcon },
-			{ route: "ai-gateway", label: "AI Gateway", icon: RouteIcon },
-			{ route: "cost", label: "Cost & Usage", icon: CoinIcon },
-		],
-	},
-	{
-		label: "Audit",
-		items: [{ route: "findings", label: "Findings", icon: AlertIcon }],
-	},
-];
 
 /** "4 Sep 2026, 20:55" — short, unambiguous, and local to whoever is reading it. */
 function formatDeployed(timestamp: string): string {
@@ -106,7 +54,15 @@ function formatDeployed(timestamp: string): string {
 
 type ContentProps = Pick<
 	SidebarProps,
-	"accountId" | "accounts" | "onSwitchAccount" | "route" | "onNavigate" | "collapsed" | "onToggleCollapsed" | "version"
+	| "accountId"
+	| "accounts"
+	| "onSwitchAccount"
+	| "route"
+	| "onNavigate"
+	| "collapsed"
+	| "onToggleCollapsed"
+	| "version"
+	| "savedViewsVersion"
 >;
 
 function SidebarContent({
@@ -118,7 +74,32 @@ function SidebarContent({
 	collapsed,
 	onToggleCollapsed,
 	version,
+	savedViewsVersion,
 }: ContentProps) {
+	// A tick rather than the list itself: the list is derived from localStorage, which this
+	// component does not own, so it is recomputed (useMemo) rather than pushed into state from
+	// an effect. Delete/rename bump the tick to pull a fresh read after their own write.
+	const [localTick, setLocalTick] = useState(0);
+	// `localTick` and `savedViewsVersion` don't appear in the computation itself — they exist only
+	// to force a re-read of localStorage, which `listViews` doesn't declare as a dependency.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	const views = useMemo(() => listViews(accountId), [accountId, savedViewsVersion, localTick]);
+	const [viewsExpanded, setViewsExpanded] = useState(true);
+	const [renaming, setRenaming] = useState<SavedView | null>(null);
+
+	function handleDelete(view: SavedView) {
+		deleteView(accountId, view.id);
+		setLocalTick((t) => t + 1);
+	}
+
+	function handleRenamed(name: string) {
+		if (renaming) {
+			renameView(accountId, renaming.id, name);
+			setLocalTick((t) => t + 1);
+		}
+		setRenaming(null);
+	}
+
 	return (
 		<div className="flex h-full flex-col">
 			<div className={`flex items-center py-5 ${collapsed ? "justify-center px-2" : "gap-2.5 px-5"}`}>
@@ -172,6 +153,77 @@ function SidebarContent({
 					</div>
 				))}
 			</nav>
+
+			{/* Hidden entirely when there are none: an empty collapsible group is a permanent
+			    fixture asking to be checked, for a feature most sessions never use. */}
+			{views.length > 0 && (
+				<div className={`border-t border-zinc-200 py-2 dark:border-zinc-800 ${collapsed ? "px-2" : "px-3"}`}>
+					{collapsed ? (
+						<div className="space-y-1">
+							{views.map((view) => (
+								<button
+									key={view.id}
+									type="button"
+									onClick={() => navigateToView(view, ROUTES)}
+									title={view.name}
+									className={`flex w-full items-center justify-center rounded-lg px-2 py-2 text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 ${FOCUS_RING}`}
+								>
+									<BookmarkIcon size={16} />
+								</button>
+							))}
+						</div>
+					) : (
+						<>
+							<button
+								type="button"
+								onClick={() => setViewsExpanded((v) => !v)}
+								aria-expanded={viewsExpanded}
+								className={`flex w-full items-center justify-between rounded-md px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 transition hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 ${FOCUS_RING}`}
+							>
+								<span>Saved views</span>
+								<ChevronDownIcon size={12} className={`transition-transform ${viewsExpanded ? "" : "-rotate-90"}`} />
+							</button>
+							{viewsExpanded && (
+								<div className="space-y-0.5">
+									{views.map((view) => (
+										<div
+											key={view.id}
+											className="group flex items-center gap-1 rounded-lg px-1 py-0.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+										>
+											<button
+												type="button"
+												onClick={() => navigateToView(view, ROUTES)}
+												className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-zinc-600 dark:text-zinc-300 ${FOCUS_RING}`}
+											>
+												<BookmarkIcon size={14} className="shrink-0" />
+												<span className="truncate">{view.name}</span>
+											</button>
+											<button
+												type="button"
+												onClick={() => setRenaming(view)}
+												aria-label={`Rename ${view.name}`}
+												title="Rename"
+												className={`shrink-0 rounded-md p-1 text-zinc-400 opacity-0 transition hover:bg-zinc-200 hover:text-zinc-600 group-hover:opacity-100 group-focus-within:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200 ${FOCUS_RING}`}
+											>
+												<PencilIcon size={13} />
+											</button>
+											<button
+												type="button"
+												onClick={() => handleDelete(view)}
+												aria-label={`Delete ${view.name}`}
+												title="Delete"
+												className={`shrink-0 rounded-md p-1 text-zinc-400 opacity-0 transition hover:bg-red-500/10 hover:text-red-600 group-hover:opacity-100 group-focus-within:opacity-100 dark:hover:text-red-400 ${FOCUS_RING}`}
+											>
+												<TrashIcon size={13} />
+											</button>
+										</div>
+									))}
+								</div>
+							)}
+						</>
+					)}
+				</div>
+			)}
 
 			<div className={`border-t border-zinc-200 py-3 dark:border-zinc-800 ${collapsed ? "px-2" : "px-4"}`}>
 				{/* The account switcher only appears when there is a choice to make; a single-account
@@ -231,6 +283,16 @@ function SidebarContent({
 					<PanelLeftIcon size={16} />
 				</button>
 			</div>
+
+			{renaming && (
+				<NameDialog
+					title="Rename view"
+					initialValue={renaming.name}
+					confirmLabel="Rename"
+					onCancel={() => setRenaming(null)}
+					onConfirm={handleRenamed}
+				/>
+			)}
 		</div>
 	);
 }
@@ -246,6 +308,7 @@ export function Sidebar({
 	version,
 	mobileOpen,
 	onMobileClose,
+	savedViewsVersion,
 }: SidebarProps) {
 	const content = (mobile: boolean) => (
 		<SidebarContent
@@ -262,6 +325,7 @@ export function Sidebar({
 			collapsed={mobile ? false : collapsed}
 			onToggleCollapsed={onToggleCollapsed}
 			version={version}
+			savedViewsVersion={savedViewsVersion}
 		/>
 	);
 
