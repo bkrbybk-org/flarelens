@@ -1,8 +1,12 @@
 import type { CfZone } from "../../types";
 import { TIME_PRESETS, type TimePresetKey } from "../../hooks/useTimeRange";
 import type { SessionMode } from "../../hooks/useSession";
-import { LogoutIcon, MenuIcon, MoonIcon, RefreshIcon, SunIcon } from "../Icons";
+import type { Theme } from "../../hooks/usePrefs";
+import { BookmarkIcon, LogoutIcon, MenuIcon, MonitorIcon, MoonIcon, RefreshIcon, SearchIcon, SunIcon } from "../Icons";
 import { BTN_ICON, BTN_PRIMARY, FOCUS_RING, SELECT } from "../../lib/ui";
+
+const THEME_CYCLE: Theme[] = ["dark", "light", "system"];
+const THEME_LABEL: Record<Theme, string> = { dark: "dark", light: "light", system: "system" };
 
 export interface ZonePickerProps {
 	zones: CfZone[];
@@ -20,8 +24,8 @@ export interface RangePickerProps {
 
 interface TopbarProps {
 	title: string;
-	theme: "dark" | "light";
-	onToggleTheme: () => void;
+	theme: Theme;
+	onCycleTheme: () => void;
 	/** Absent while no section has registered a reload — the button is hidden then anyway. */
 	onSync?: () => void;
 	syncing: boolean;
@@ -32,9 +36,25 @@ interface TopbarProps {
 	onDisconnect: () => void;
 	mode: SessionMode;
 	onMobileMenu: () => void;
+	onOpenPalette: () => void;
+	onSaveView: () => void;
 }
 
-export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync = true, zonePicker, rangePicker, onDisconnect, mode, onMobileMenu }: TopbarProps) {
+export function Topbar({
+	title,
+	theme,
+	onCycleTheme,
+	onSync,
+	syncing,
+	showSync = true,
+	zonePicker,
+	rangePicker,
+	onDisconnect,
+	mode,
+	onMobileMenu,
+	onOpenPalette,
+	onSaveView,
+}: TopbarProps) {
 	return (
 		<header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 md:px-6 dark:border-zinc-800 dark:bg-zinc-900">
 			<button
@@ -47,6 +67,26 @@ export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync 
 			</button>
 
 			<h1 className="flex-1 truncate text-base font-semibold">{title}</h1>
+
+			<button
+				type="button"
+				onClick={onOpenPalette}
+				aria-label="Open command palette"
+				title="Command palette (⌘K)"
+				className={`hidden items-center gap-2 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-500 transition hover:bg-zinc-100 sm:flex dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 ${FOCUS_RING}`}
+			>
+				<SearchIcon size={14} />
+				<span>Search</span>
+				<kbd className="rounded border border-zinc-300 px-1 font-mono text-[10px] dark:border-zinc-600">⌘K</kbd>
+			</button>
+			<button
+				type="button"
+				onClick={onOpenPalette}
+				aria-label="Open command palette"
+				className={`rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 sm:hidden dark:text-zinc-400 dark:hover:bg-zinc-800 ${FOCUS_RING}`}
+			>
+				<SearchIcon size={16} />
+			</button>
 
 			{rangePicker && (
 				<select
@@ -92,11 +132,22 @@ export function Topbar({ title, theme, onToggleTheme, onSync, syncing, showSync 
 
 			<button
 				type="button"
-				onClick={onToggleTheme}
-				aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+				onClick={onSaveView}
+				aria-label="Save current view"
+				title="Save current view"
 				className={BTN_ICON}
 			>
-				{theme === "dark" ? <SunIcon size={16} /> : <MoonIcon size={16} />}
+				<BookmarkIcon size={16} />
+			</button>
+
+			<button
+				type="button"
+				onClick={onCycleTheme}
+				aria-label={`Theme: ${THEME_LABEL[theme]}. Switch to ${THEME_LABEL[THEME_CYCLE[(THEME_CYCLE.indexOf(theme) + 1) % THEME_CYCLE.length]]} theme`}
+				title={`Theme: ${THEME_LABEL[theme]}`}
+				className={BTN_ICON}
+			>
+				{theme === "dark" ? <SunIcon size={16} /> : theme === "light" ? <MonitorIcon size={16} /> : <MoonIcon size={16} />}
 			</button>
 
 			{/* In BYOT mode this is the only control that clears the pasted token, so it cannot

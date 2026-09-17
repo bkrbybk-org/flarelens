@@ -5,9 +5,11 @@ const PREFS_KEY = "cf_zt_prefs";
 // dropped so new defaults apply, while theme/density/perPage survive.
 const PREFS_VERSION = 3;
 
+export type Theme = "dark" | "light" | "system";
+
 export interface Prefs {
 	version: number;
-	theme: "dark" | "light";
+	theme: Theme;
 	perPage: number;
 	density: "comfortable" | "compact";
 	columnVisibility: Record<string, boolean>;
@@ -68,20 +70,61 @@ function readPrefs(): Prefs {
 	}
 }
 
+function systemPrefersDark(): boolean {
+	try {
+		return window.matchMedia("(prefers-color-scheme: dark)").matches;
+	} catch {
+		return true;
+	}
+}
+
 export function usePrefs() {
 	const [prefs, setPrefs] = useState<Prefs>(readPrefs);
+	// Only read when theme is "system"; kept current by the matchMedia listener below while it
+	// stays "system", same source `theme-init.js` reads before React mounts.
+	const [systemDark, setSystemDark] = useState(systemPrefersDark);
+
+	// Re-sync immediately on switching into "system": the lazily-initialised state above was
+	// read once, on this hook's first render, and can be stale by the time theme becomes
+	// "system" again later. Adjusting state during render (rather than in the effect below) is
+	// the documented way to respond to this kind of prop/derived-value change without an extra
+	// render's lag: https://react.dev/learn/you-might-not-need-an-effect
+	const isSystem = prefs.theme === "system";
+	const [wasSystem, setWasSystem] = useState(isSystem);
+	if (isSystem !== wasSystem) {
+		setWasSystem(isSystem);
+		if (isSystem) setSystemDark(systemPrefersDark());
+	}
 
 	useEffect(() => {
 		localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
 	}, [prefs]);
 
 	useEffect(() => {
-		document.documentElement.classList.toggle("dark", prefs.theme === "dark");
+		if (prefs.theme !== "system") return;
+		let mql: MediaQueryList;
+		try {
+			mql = window.matchMedia("(prefers-color-scheme: dark)");
+		} catch {
+			return;
+		}
+		// The listener callback runs in response to an external change, which is exactly what
+		// an effect subscription is for; the state read at effect-setup time is handled above.
+		const onChange = () => setSystemDark(mql.matches);
+		mql.addEventListener("change", onChange);
+		return () => mql.removeEventListener("change", onChange);
 	}, [prefs.theme]);
+
+	const effectiveDark = prefs.theme === "system" ? systemDark : prefs.theme === "dark";
+
+	useEffect(() => {
+		document.documentElement.classList.toggle("dark", effectiveDark);
+		document.documentElement.style.colorScheme = effectiveDark ? "dark" : "light";
+	}, [effectiveDark]);
 
 	const updatePrefs = useCallback((patch: Partial<Prefs>) => {
 		setPrefs((prev) => ({ ...prev, ...patch }));
 	}, []);
 
-	return { prefs, updatePrefs };
+	return { prefs, updatePrefs, effectiveDark };
 }
