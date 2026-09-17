@@ -84,11 +84,11 @@ describe("BotsPage", () => {
 	it("shows a rate-limit scope as not checked, with its reason, rather than an empty list", async () => {
 		await renderPage(
 			emptyResult({
-				rateLimit: [{ scope: "zone", zoneId: "z1", zoneName: "example.com", status: "unknown", reason: "Not checked — missing permission: nope", rules: [] }],
+				rateLimit: [{ scope: "zone", zoneId: "z1", zoneName: "example.com", status: "unknown", reason: "Missing permission (Cloudflare: nope)", rules: [] }],
 			}),
 		);
 		expect(await screen.findByText(/not checked/)).toBeInTheDocument();
-		expect(screen.getByText(/missing permission/)).toBeInTheDocument();
+		expect(screen.getByText(/Missing permission \(Cloudflare: nope\)/)).toBeInTheDocument();
 	});
 
 	it("switches to the Bot settings tab and shows plan tier and settings badges", async () => {
@@ -109,11 +109,22 @@ describe("BotsPage", () => {
 		const user = userEvent.setup();
 		await renderPage(
 			emptyResult({
-				botManagement: [{ zoneId: "z1", zoneName: "example.com", status: "unknown", reason: "Not checked — missing permission: nope", planTier: "unknown", settings: {} }],
+				botManagement: [{ zoneId: "z1", zoneName: "example.com", status: "unknown", reason: "Missing permission (Cloudflare: nope)", planTier: "unknown", settings: {} }],
 			}),
 		);
 		await user.click(await screen.findByRole("tab", { name: "Bot settings" }));
-		expect(await screen.findByText(/Not checked/)).toBeInTheDocument();
+		expect(await screen.findByText("Not checked — Missing permission (Cloudflare: nope)")).toBeInTheDocument();
+		expect(screen.queryByText(/Not checked.*Not checked/)).toBeNull();
+	});
+
+	it("headlines bot protection as Unknown, not 0 on, when no zone could be read", async () => {
+		await renderPage(
+			emptyResult({
+				totals: { zonesChecked: 1, rateLimitRules: 0, zonesWithNoRateLimitRules: 0, botProtectionOn: 0, botProtectionOff: 0, botProtectionUnknown: 1 },
+			}),
+		);
+		expect(await screen.findByText("Unknown")).toBeInTheDocument();
+		expect(screen.queryByText("0 on")).toBeNull();
 	});
 
 	it("switches to the Findings tab and lists findings with severity", async () => {

@@ -546,6 +546,9 @@ against `window.innerHeight` in the running app found it in one step. Useful pro
 `html.scrollHeight` vs `innerHeight`, each container's `scrollHeight > clientHeight`, and the
 computed `position` of every absolutely positioned node.
 
+Behind TLS inspection the proxy fails with `self-signed certificate in certificate chain`, because
+Node does not use the system trust store; add `secure: false` to the proxy entry for the session.
+
 Never commit the proxy: it sends a live credential from a config file that is not gitignored.
 
 ## Data-honesty notes (Cache section)

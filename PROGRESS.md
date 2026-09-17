@@ -1,17 +1,18 @@
 # Flarelens — Progress
 
-Status snapshot, last reviewed **2026-09-13** against a full read of the tree, a live probe of
+Status snapshot, last reviewed **2026-09-17** against a full read of the tree, a live probe of
 the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Sixteen sections, 18 API routes, 784 tests green across 51 files, all type-checked, `tsc -b` clean, 0 lint errors (4 known warnings).
+**TL;DR** — Eighteen sections, 20 API routes, 893 tests green across 59 files, all type-checked, `tsc -b` clean, 0 lint errors (5 known warnings).
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `3a924e84`, deployed 2026-09-16. The previous versions were `fe2564bb` and
-`8bb29774` (2026-09-15). The three slowest routes were cut by
+Running version `286c5402`, deployed 2026-09-17 (DNS Records, Rate Limits & Bots, command palette,
+saved views, system theme). The previous versions were `b18efed1` (same day, superseded by UI
+fixes), `3a924e84` (2026-09-16), and `fe2564bb` and `8bb29774` (2026-09-15). The three slowest routes were cut by
 two-thirds in that deploy (`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s,
 `/api/pqc/report` 6.5s → 4.3s, measured in production) with responses verified unchanged.
 
@@ -31,12 +32,12 @@ pull request; there is no deploy job, deliberately — see the note under Recent
 
 ## Sections
 
-Sixteen sections, grouped in the sidebar by Cloudflare product area:
+Eighteen sections, grouped in the sidebar by Cloudflare product area:
 
 | Group | Routes |
 |---|---|
 | Zero Trust | `#/access`, `#/groups`, `#/access-usage`, `#/tunnels`, `#/gateway` |
-| Security | `#/waf`, `#/ai-security`, `#/request`, `#/pqc`, `#/zone-health` |
+| Security | `#/waf`, `#/ai-security`, `#/request`, `#/pqc`, `#/zone-health`, `#/dns`, `#/bots` |
 | Performance | `#/cache` |
 | Developer Platform | `#/workers`, `#/workers-ai`, `#/ai-gateway`, `#/cost` |
 | Audit | `#/findings` |
@@ -94,6 +95,8 @@ of the calling token — see the P2 entry below.
 | `POST /api/access/usage` | account | Access Usage. Upstream caps this dataset at 1 week |
 | `POST /api/request/trace` | account or zone | Request Trace — Ray ID lookup across zones, schema-driven field selection |
 | `GET /api/pqc/report` | account (optional zone) | PQC Readiness — zones, their TLS settings, and every A/AAAA/CNAME record classified per TLS leg. Underscore-prefixed validation records are excluded and counted. Edge-cached |
+| `GET /api/dns/records` | account (optional zone) | DNS Records — every record across the account's zones, with `origin-exposed` (public IP, DNS-only, proxiable) and `internal-address` (private IP, DNS-only) flags; a zone whose read fails is listed with its reason. Edge-cached |
+| `GET /api/bots/report` | account (optional zone) | Rate Limits & Bots — `http_ratelimit` entrypoint rules (account + zones; 404 is a real zero, 403 is unknown) and per-zone `bot_management` settings with inferred plan tier and findings. Edge-cached |
 | `GET /api/zone-health/report` | account (optional zone) | Zone Health — certificate expiry across edge packs, custom certificates and Origin CA (each degrading on its own permission), plus DNS hygiene: dangling tunnel and external CNAMEs, DNS-only origins, duplicates. Edge-cached |
 | `GET /api/access/tunnels` | account | Tunnel Map — joins Access apps, their policies (reusable ones resolved), tunnel ingress rules and private routes. Tunnel-side reads start without waiting for the apps. Edge-cached |
 | `POST /api/gateway/usage` | account | Gateway Usage (DNS resolver + Gateway HTTP) |
@@ -383,10 +386,30 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | # | Issue | Impact | Fix |
 |---|---|---|---|
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules. **Re-confirmed 2026-09-16** after four further deploys — the deployed values have not moved, which rules out a stale build |
+| P3 | **Bound token lacks Zone: Bot Management: Read** | Rate Limits & Bots reports every zone's bot settings as *not checked* (4 unknown), so the bot findings never fire and the plan-tier inference is untested against a real response | Add the scope to `CF_API_TOKEN`; then check the tier and the "protection off" reading against live data — both are inferred from documented fields, not a confirmed mapping |
 | P3 | **Bound token lacks SSL and Certificates: Read** | Zone Health reports edge and custom certificates as *not checked* on every zone (8 unknown checks), so certificate expiry is currently unmonitored | Add the scope to `CF_API_TOKEN`; no code change — the section starts grading on the next load |
-| P3 | 4 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx) and [RulesetTable](web/src/features/waf/RulesetTable.tsx) | None — React Compiler just skips memoizing those two components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
+| P3 | 5 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx), [PoliciesTable](web/src/features/access/PoliciesTable.tsx), [EventsTable](web/src/features/ai-security/EventsTable.tsx), [RulesetTable](web/src/features/waf/RulesetTable.tsx) and [DnsPage](web/src/features/dns/DnsPage.tsx) | None — React Compiler just skips memoizing those components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 
 ### Recently resolved
+
+- **Five features in one pass (2026-09-17, `286c5402`).** Implemented by three Sonnet agents in
+  separate worktrees, then reviewed, merged, fixed and verified against the live account:
+  - *DNS Records (`#/dns`)* — 46 records across 4 zones, no zone errors. Review caught a private
+    address graded as an exposed origin; it is now `internal-address`, matching Zone Health.
+  - *Rate Limits & Bots (`#/bots`)* — 7 rules on one zone, three zones with none, account
+    entrypoint 404 read as a real zero. Review caught three misreadings of bot settings: "Block AI
+    bots" (offered on every plan) marking a zone Enterprise, Super Bot Fight Mode set to `allow`
+    counted as on, and an Enterprise zone without `fight_mode` flagged unprotected. The live UI
+    showed two more: "Not checked" printed twice, and a "0 on" headline when all four zones were
+    unreadable, which now says "Unknown".
+  - *Command palette (⌘K)*, *saved views* (per account, localStorage) and a *system* theme mode,
+    with `web/public/theme-init.js` setting the theme before first paint (the CSP blocks inline
+    scripts). The sidebar and the palette read one nav list (`web/src/components/shell/nav.ts`),
+    and a test checks that every route appears in it exactly once.
+  - *Process note:* two of the three agents stalled on a 600s watchdog — one had already
+    committed, the other was resumed and finished. The vite dev proxy against production needs
+    `secure: false` from this network: TLS inspection breaks Node's certificate chain, while curl
+    uses the system trust store.
 
 - **Tunnel Map gained a flow diagram (2026-09-16, `3a924e84`).** The table says what each
   destination is; it cannot say that most of the estate is gated yet reaches no tunnel. Three
@@ -566,7 +589,7 @@ diff reuses `describeRule` so rule changes read as sentences rather than JSON.
 ## Conventions
 
 - **Commits:** Conventional Commits, imperative subject ≤50 chars, body only when the *why* isn't obvious.
-- **Gate:** `npm run check` (tsc project build → tests → Vite build → wrangler dry-run) must pass before commit. `npm run lint` should show 0 errors (4 known warnings are expected — see P3 above).
+- **Gate:** `npm run check` (tsc project build → tests → Vite build → wrangler dry-run) must pass before commit. `npm run lint` should show 0 errors (5 known warnings are expected — see P3 above).
 - **Verification pattern:** for anything visual or layout-related, **measure, do not reason**. Two consecutive shell-scrolling fixes were shipped on plausible CSS reasoning before the cause was found by reading `html.scrollHeight` in the running app. The harness is described under Development in [README.md](README.md).
 - **Layout invariants:** the shell is a fixed-height flex column and each section owns its scrolling. `<main>` must keep `relative` (containing block), `overflow-hidden` (clipping) and `min-h-0` (shrinkable), and every section renders inside [PageShell](web/src/components/PageShell.tsx), which owns the `h-full overflow-auto` that used to be copied into each page in two spellings. [tests/shell-layout.test.ts](tests/shell-layout.test.ts) pins all of it, including the one deliberate exception (Applications) — none of these fail loudly.
 - **Data honesty (Cache section):** never redistribute unattributed traffic with synthetic weights, never present mock data unlabeled, and let a genuinely quiet zone show zeros. See the note at the end of [README.md](README.md).

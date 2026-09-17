@@ -49,7 +49,8 @@ async function cfFetch<T = unknown>(url: string, token: string): Promise<{ statu
 /** Why an entrypoint or settings read could not be used, distinguishing "empty" from "refused". */
 function unavailableReason(status: number, message: string | undefined): string {
 	if (status === 403 || status === 401) {
-		return message ? `Not checked — missing permission: ${message}` : "Not checked — missing permission.";
+		// No "Not checked" prefix: the page already says that, and saying it twice read badly.
+		return message ? `Missing permission (Cloudflare: ${message})` : "Missing permission";
 	}
 	return message || `HTTP ${status}`;
 }

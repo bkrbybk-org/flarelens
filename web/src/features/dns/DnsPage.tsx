@@ -63,7 +63,7 @@ const COLUMNS: ColumnDef<DnsRow>[] = [
 		id: "content",
 		header: "Content",
 		accessorFn: (r) => r.content,
-		cell: ({ row }) => <span className="break-all font-mono text-xs">{row.original.content || <span className={MUTED}>—</span>}</span>,
+		cell: ({ row }) => <span className="inline-block min-w-[14rem] max-w-md break-all font-mono text-xs">{row.original.content || <span className={MUTED}>—</span>}</span>,
 	},
 	{
 		id: "proxied",

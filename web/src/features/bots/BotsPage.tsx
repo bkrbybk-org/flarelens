@@ -76,7 +76,7 @@ function BotSettingsRow({ zone }: { zone: BotManagementZone }) {
 			<tr className="border-t border-zinc-100 align-top dark:border-zinc-800">
 				<td className="py-1.5 pr-3 font-medium">{zone.zoneName}</td>
 				<td colSpan={2} className="py-1.5 pr-3">
-					<span className={ALERT_WARN}>Not checked — {zone.reason}</span>
+					<div className={ALERT_WARN}>Not checked — {zone.reason}</div>
 				</td>
 			</tr>
 		);
@@ -193,7 +193,12 @@ export function BotsPage({ session, zoneId, onAuthError }: { session: Session; z
 				/>
 				<StatCard
 					label="Bot protection"
-					value={`${totals.botProtectionOn} on`}
+					// With nothing readable, "0 on" would read as "every zone is unprotected".
+					value={
+						totals.botProtectionOn + totals.botProtectionOff === 0 && totals.botProtectionUnknown > 0
+							? "Unknown"
+							: `${totals.botProtectionOn} on`
+					}
 					hint={`${totals.botProtectionOff} off · ${totals.botProtectionUnknown} unknown`}
 					tone={totals.botProtectionOff ? "text-red-600 dark:text-red-400" : undefined}
 				/>
