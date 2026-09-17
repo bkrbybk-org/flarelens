@@ -308,7 +308,7 @@ describe("groupsFindings", () => {
 
 function ruleRow(overrides: Partial<RuleReviewRow>): RuleReviewRow {
 	return {
-		id: "rule-1", name: "Rule 1", ruleset: "Custom", rulesetId: "rs-1", type: "custom", level: "account",
+		id: "rule-1", name: "Rule 1", ruleset: "Custom", rulesetId: "rs-1", source: "account", type: "custom", level: "account",
 		configuredAction: "block", enabled: true, known: true, expression: "", total: 10,
 		actions: { block: 10 }, hosts: new Map(), paths: new Map(), times: [], lastSeen: "",
 		...overrides,

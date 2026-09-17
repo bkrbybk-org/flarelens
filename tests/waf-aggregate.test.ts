@@ -5,6 +5,7 @@ import {
 	aggregateRules,
 	aggregateRulesets,
 	countEventsByActions,
+	groupRulesByRuleset,
 	topHosts,
 } from "../web/src/lib/waf/aggregate";
 import type { FirewallEvent, RuleMetaMap } from "../web/src/lib/waf/types";
@@ -110,5 +111,43 @@ describe("summaries", () => {
 	it("countEventsByActions filters by normalized action", () => {
 		const events = [ev("r", "BLOCK", "h", 1), ev("r", "log", "h", 1)];
 		expect(countEventsByActions(events, ["block"])).toBe(1);
+	});
+});
+
+describe("groupRulesByRuleset", () => {
+	it("groups rules under their ruleset, busiest first, with unattributed rules last", () => {
+		const events = [ev("rule-a", "block", "a.com", 1), ev("rule-a", "block", "a.com", 2), ev("mystery", "log", "a.com", 3)];
+		const groups = groupRulesByRuleset(aggregateRules(events, meta));
+		expect(groups.map((g) => [g.name, g.rules.map((r) => r.id), g.total])).toEqual([
+			["Custom Rules", ["rule-a"], 2],
+			["Zone Rules", ["rule-idle"], 0],
+			["Unattributed rules", ["mystery"], 1],
+		]);
+		expect(groups[1]).toMatchObject({ type: "custom", level: "zone", disabled: 1 });
+		expect(groups[2]).toMatchObject({ key: "", type: "", level: "" });
+	});
+
+	it("keeps two rulesets with the same name apart by id", () => {
+		const base = aggregateRules([], meta).find((r) => r.id === "rule-a")!;
+		const groups = groupRulesByRuleset([
+			{ ...base, id: "x", ruleset: "default", rulesetId: "zone-1" },
+			{ ...base, id: "y", ruleset: "default", rulesetId: "zone-2" },
+		]);
+		expect(groups.map((g) => g.rules.map((r) => r.id))).toEqual([["x"], ["y"]]);
+	});
+
+	it("names the zone for zone custom rulesets, never for managed ones shared across zones", () => {
+		const base = aggregateRules([], meta).find((r) => r.id === "rule-a")!;
+		const groups = groupRulesByRuleset([
+			{ ...base, id: "x", ruleset: "default", rulesetId: "c1", type: "custom", source: "zone:a.example" },
+			{ ...base, id: "y", ruleset: "Cloudflare Managed Ruleset", rulesetId: "m1", type: "managed", source: "zone:b.example" },
+			{ ...base, id: "z", ruleset: "root", rulesetId: "c2", type: "custom", source: "account" },
+		]);
+		expect(Object.fromEntries(groups.map((g) => [g.name, g.zone]))).toEqual({ default: "a.example", "Cloudflare Managed Ruleset": "", root: "" });
+	});
+
+	it("counts action drift per group", () => {
+		const groups = groupRulesByRuleset(aggregateRules([ev("rule-a", "log", "a.com", 1)], meta));
+		expect(groups.find((g) => g.name === "Custom Rules")?.drift).toBe(1);
 	});
 });

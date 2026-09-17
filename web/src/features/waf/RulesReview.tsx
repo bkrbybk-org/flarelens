@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { EmptyState } from "../../components/EmptyState";
-import { BADGE, BADGE_NEUTRAL, BTN_SECONDARY, INPUT, SEARCH_INPUT } from "../../lib/ui";
-import { actionDrift, aggregateRules, topEntries } from "../../lib/waf/aggregate";
+import { BADGE, BADGE_NEUTRAL, BTN_SECONDARY, FOCUS_RING, INPUT, SEARCH_INPUT } from "../../lib/ui";
+import { actionDrift, aggregateRules, groupRulesByRuleset, topEntries, type RuleGroup } from "../../lib/waf/aggregate";
 import { relativeTime, titleCase } from "../../lib/waf/format";
 import type { FirewallEvent, RuleMetaMap, RuleReviewRow } from "../../lib/waf/types";
-import { SearchIcon } from "../../components/Icons";
+import { ChevronDownIcon, SearchIcon } from "../../components/Icons";
 import { ActionBadges, RuleLevelBadge, RuleTypeBadge, Sparkline } from "./bars";
 
 interface RulesReviewProps {
@@ -14,7 +14,8 @@ interface RulesReviewProps {
 	onSelectRule: (rule: { id: string; name: string; configuredAction?: string; lastSeen?: string }) => void;
 }
 
-const PAGE_SIZE = 25;
+/** Rules shown per ruleset before "Show all" — a managed ruleset can carry hundreds. */
+const GROUP_PREVIEW = 10;
 
 type StatusFilter = "" | "enabled" | "disabled" | "active" | "idle";
 
@@ -23,7 +24,8 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 	const [type, setType] = useState("");
 	const [level, setLevel] = useState("");
 	const [status, setStatus] = useState<StatusFilter>("");
-	const [page, setPage] = useState(0);
+	// Collapsed groups by key. Everything starts open: the grouping is for reading, not hiding.
+	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
 	const rows = useMemo(() => aggregateRules(events, ruleMeta), [events, ruleMeta]);
 
@@ -54,9 +56,16 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 		});
 	}, [rows, search, type, level, status]);
 
-	const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-	const clampedPage = Math.min(page, pageCount - 1);
-	const pageRows = filtered.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE);
+	const groups = useMemo(() => groupRulesByRuleset(filtered), [filtered]);
+
+	const toggleGroup = (key: string) =>
+		setCollapsed((prev) => {
+			const next = new Set(prev);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+	const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.has(g.key));
 
 	const selectCls =
 		INPUT;
@@ -85,22 +94,22 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 					<input
 						type="search"
 						value={search}
-						onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+						onChange={(e) => setSearch(e.target.value)}
 						placeholder="Search rules, expressions, hosts, paths…"
 						className={SEARCH_INPUT}
 					/>
 				</div>
-				<select value={type} onChange={(e) => { setType(e.target.value); setPage(0); }} aria-label="Filter by type" className={selectCls}>
+				<select value={type} onChange={(e) => setType(e.target.value)} aria-label="Filter by type" className={selectCls}>
 					<option value="">All types</option>
 					<option value="managed">Managed</option>
 					<option value="custom">Custom</option>
 				</select>
-				<select value={level} onChange={(e) => { setLevel(e.target.value); setPage(0); }} aria-label="Filter by level" className={selectCls}>
+				<select value={level} onChange={(e) => setLevel(e.target.value)} aria-label="Filter by level" className={selectCls}>
 					<option value="">All levels</option>
 					<option value="account">Account</option>
 					<option value="zone">Zone</option>
 				</select>
-				<select value={status} onChange={(e) => { setStatus(e.target.value as StatusFilter); setPage(0); }} aria-label="Filter by status" className={selectCls}>
+				<select value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)} aria-label="Filter by status" className={selectCls}>
 					<option value="">All statuses</option>
 					<option value="enabled">Enabled</option>
 					<option value="disabled">Disabled</option>
@@ -109,37 +118,89 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 				</select>
 			</div>
 
-			<div className="space-y-3">
-				{pageRows.length === 0 ? (
-					<EmptyState title="No matching rules" hint="Try a different search or filter." />
-				) : (
-					pageRows.map((row) => <RuleCard key={row.id} row={row} win={win} onSelect={onSelectRule} />)
-				)}
-			</div>
-
-			{pageCount > 1 && (
-				<nav className="flex items-center justify-end gap-1 text-sm" aria-label="Rules pagination">
-					<span className="mr-2 text-zinc-500 dark:text-zinc-400">{filtered.length} rules</span>
-					<button
-						type="button"
-						onClick={() => setPage((p) => Math.max(0, p - 1))}
-						disabled={clampedPage === 0}
-						className={BTN_SECONDARY}
-					>
-						Prev
-					</button>
-					<span className="px-2 text-zinc-500 dark:text-zinc-400">{clampedPage + 1} / {pageCount}</span>
-					<button
-						type="button"
-						onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-						disabled={clampedPage >= pageCount - 1}
-						className={BTN_SECONDARY}
-					>
-						Next
-					</button>
-				</nav>
+			{groups.length === 0 ? (
+				<EmptyState title="No matching rules" hint="Try a different search or filter." />
+			) : (
+				<>
+					<div className="flex items-center justify-between gap-2 text-sm">
+						<span className="text-zinc-500 dark:text-zinc-400">
+							{filtered.length.toLocaleString()} rules in {groups.length.toLocaleString()} rulesets
+						</span>
+						<button
+							type="button"
+							className={BTN_SECONDARY}
+							onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(groups.map((g) => g.key)))}
+						>
+							{allCollapsed ? "Expand all" : "Collapse all"}
+						</button>
+					</div>
+					<div className="space-y-4">
+						{groups.map((group) => (
+							<RulesetGroup
+								// A filter change can empty and refill a group; remounting resets "Show all".
+								key={`${group.key}|${search}|${type}|${level}|${status}`}
+								group={group}
+								open={!collapsed.has(group.key)}
+								onToggle={() => toggleGroup(group.key)}
+								win={win}
+								onSelect={onSelectRule}
+							/>
+						))}
+					</div>
+				</>
 			)}
 		</div>
+	);
+}
+
+function RulesetGroup({ group, open, onToggle, win, onSelect }: {
+	group: RuleGroup;
+	open: boolean;
+	onToggle: () => void;
+	win: { since: number; until: number } | null;
+	onSelect: (rule: { id: string; name: string; configuredAction?: string; lastSeen?: string }) => void;
+}) {
+	const [showAll, setShowAll] = useState(false);
+	const visible = showAll ? group.rules : group.rules.slice(0, GROUP_PREVIEW);
+	const panelId = `waf-ruleset-${group.key || "unattributed"}`;
+	return (
+		<section aria-label={group.zone ? `${group.name} (${group.zone})` : group.name}>
+			<h3>
+				<button
+					type="button"
+					onClick={onToggle}
+					aria-expanded={open}
+					aria-controls={panelId}
+					className={`flex w-full flex-wrap items-center gap-2 rounded-lg px-1 py-1.5 text-left ${FOCUS_RING}`}
+				>
+					<ChevronDownIcon size={16} className={`shrink-0 text-zinc-500 transition-transform dark:text-zinc-400 ${open ? "" : "-rotate-90"}`} />
+					<span className="font-semibold">{group.name}</span>
+					{group.zone && <span className="text-sm text-zinc-500 dark:text-zinc-400">{group.zone}</span>}
+					{group.type && <RuleTypeBadge type={group.type} />}
+					{group.level && <RuleLevelBadge level={group.level} />}
+					<span className="text-xs text-zinc-500 dark:text-zinc-400">
+						{group.rules.length.toLocaleString()} {group.rules.length === 1 ? "rule" : "rules"}
+					</span>
+					{group.disabled > 0 && <span className={BADGE_NEUTRAL}>{group.disabled} disabled</span>}
+					{group.drift > 0 && (
+						<span className={`${BADGE} bg-amber-500/10 text-amber-700 dark:text-amber-400`}>{group.drift} drift</span>
+					)}
+					<span className="ml-auto text-sm font-semibold tabular-nums">
+						{group.total.toLocaleString()} <span className="text-xs font-normal text-zinc-500 dark:text-zinc-400">events</span>
+					</span>
+				</button>
+			</h3>
+			{open && (
+				<div id={panelId} className="mt-2 space-y-3 border-l-2 border-zinc-200 pl-3 dark:border-zinc-800">
+					{visible.map((row) => <RuleCard key={row.id} row={row} win={win} onSelect={onSelect} />)}
+					{group.rules.length > GROUP_PREVIEW && (
+						<button type="button" className={BTN_SECONDARY} onClick={() => setShowAll((v) => !v)}>
+							{showAll ? "Show fewer" : `Show all ${group.rules.length.toLocaleString()} rules`}
+						</button>
+					)}
+				</div>
+			)}
+		</section>
 	);
 }
 

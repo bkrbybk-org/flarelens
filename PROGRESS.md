@@ -4,15 +4,15 @@ Status snapshot, last reviewed **2026-09-17** against a full read of the tree, a
 the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Eighteen sections, 20 API routes, 893 tests green across 59 files, all type-checked, `tsc -b` clean, 0 lint errors (5 known warnings).
+**TL;DR** — Eighteen sections, 20 API routes, 901 tests green across 60 files, all type-checked, `tsc -b` clean, 0 lint errors (5 known warnings).
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `286c5402`, deployed 2026-09-17 (DNS Records, Rate Limits & Bots, command palette,
-saved views, system theme). The previous versions were `b18efed1` (same day, superseded by UI
-fixes), `3a924e84` (2026-09-16), and `fe2564bb` and `8bb29774` (2026-09-15). The three slowest routes were cut by
+Running version `6394e637`, deployed 2026-09-17 (WAF Rules Review grouped by ruleset). The previous
+versions were `286c5402` (same day: DNS Records, Rate Limits & Bots, command palette, saved views,
+system theme), `b18efed1` (same day, superseded by UI fixes), `3a924e84` (2026-09-16), and `fe2564bb` and `8bb29774` (2026-09-15). The three slowest routes were cut by
 two-thirds in that deploy (`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s,
 `/api/pqc/report` 6.5s → 4.3s, measured in production) with responses verified unchanged.
 
@@ -391,6 +391,14 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | P3 | 5 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx), [PoliciesTable](web/src/features/access/PoliciesTable.tsx), [EventsTable](web/src/features/ai-security/EventsTable.tsx), [RulesetTable](web/src/features/waf/RulesetTable.tsx) and [DnsPage](web/src/features/dns/DnsPage.tsx) | None — React Compiler just skips memoizing those components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 
 ### Recently resolved
+
+- **WAF Rules Review grouped by ruleset (2026-09-17, `6394e637`).** A flat list of 1,208 rules,
+  25 per page, did not show which ruleset a rule belongs to until each card was read. Rules are now
+  grouped by ruleset id (collapsible, busiest first, 10 rules shown before "Show all"). On the
+  live account that is 28 rulesets. Grouping by name would have merged rulesets from different zones: five
+  zone custom rulesets are all called `default`, so zone custom groups now show their zone.
+  Managed groups do not: one managed ruleset id is deployed to many zones, and the metadata keeps
+  only one of them. 59 events on 3 rules not in the metadata are grouped last as *Unattributed*.
 
 - **Five features in one pass (2026-09-17, `286c5402`).** Implemented by three Sonnet agents in
   separate worktrees, then reviewed, merged, fixed and verified against the live account:

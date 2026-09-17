@@ -142,6 +142,7 @@ export function aggregateRules(events: FirewallEvent[], ruleMeta: RuleMetaMap): 
 				name: meta?.name || id,
 				ruleset: meta?.ruleset || meta?.rulesetName || "",
 				rulesetId: meta?.rulesetId || "",
+				source: meta?.source || "",
 				type: ruleType(meta),
 				level: ruleLevel(meta),
 				configuredAction: meta?.action || "",
@@ -189,6 +190,62 @@ export function aggregateRules(events: FirewallEvent[], ruleMeta: RuleMetaMap): 
 	}
 
 	return Array.from(rows.values()).sort((a, b) => b.total - a.total);
+}
+
+export interface RuleGroup {
+	/** rulesetId, else the ruleset label; "" for rules the metadata does not know. */
+	key: string;
+	name: string;
+	/**
+	 * Zone the ruleset belongs to, for zone custom rulesets only — every zone's entrypoint is
+	 * called "default" or "zone", so the name alone does not say which. Empty for managed
+	 * rulesets: one managed ruleset id is deployed to many zones, and naming one would be wrong.
+	 */
+	zone: string;
+	type: string;
+	level: string;
+	rules: RuleReviewRow[];
+	total: number;
+	disabled: number;
+	drift: number;
+}
+
+/**
+ * Rules grouped under the ruleset that owns them, busiest ruleset first.
+ *
+ * Keyed on the ruleset id rather than its name: two zones' custom rulesets are both called
+ * "default", and folding them together would put one zone's rules under the other's. Rules the
+ * metadata does not know — an event whose rule id resolved to nothing — collect in one group
+ * last, rather than each posing as a ruleset of its own. Rule order inside a group is kept.
+ */
+export function groupRulesByRuleset(rows: RuleReviewRow[]): RuleGroup[] {
+	const groups = new Map<string, RuleGroup>();
+	for (const row of rows) {
+		const key = row.rulesetId || row.ruleset;
+		let group = groups.get(key);
+		if (!group) {
+			group = {
+				key,
+				name: row.ruleset || row.rulesetId || "Unattributed rules",
+				zone: key && row.type === "custom" && row.source.startsWith("zone:") ? row.source.slice("zone:".length) : "",
+				type: key ? row.type : "",
+				level: key ? row.level : "",
+				rules: [],
+				total: 0,
+				disabled: 0,
+				drift: 0,
+			};
+			groups.set(key, group);
+		}
+		group.rules.push(row);
+		group.total += row.total;
+		if (!row.enabled) group.disabled += 1;
+		if (actionDrift(row)) group.drift += 1;
+	}
+	return Array.from(groups.values()).sort((a, b) => {
+		if (!a.key !== !b.key) return a.key ? -1 : 1;
+		return b.total - a.total || a.name.localeCompare(b.name);
+	});
 }
 
 export function topEntries(map: Map<string, number>, limit: number): [string, number][] {

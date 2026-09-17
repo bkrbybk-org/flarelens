@@ -57,6 +57,8 @@ export interface RuleReviewRow {
 	name: string;
 	ruleset: string;
 	rulesetId: string;
+	/** "account", "zone" or "zone:<name>", from the scope the ruleset was read under. */
+	source: string;
 	type: string;
 	level: string;
 	configuredAction: string;
