@@ -23,6 +23,8 @@ export interface Prefs {
 	cacheZone: string;
 	/** Zone scope for the AI Security section; empty means every zone the token can see. */
 	aiSecZone: string;
+	/** Zone scope for Rate Limits & Bots; empty means account-wide. */
+	botsZone: string;
 	/** Sidebar collapsed to icons only. Persisted: it is a workspace preference, not view state. */
 	sidebarCollapsed: boolean;
 	/** Shared analytics window in minutes; see hooks/useTimeRange.ts. */
@@ -47,6 +49,7 @@ const DEFAULT_PREFS: Prefs = {
 	wafZone: "",
 	cacheZone: "",
 	aiSecZone: "",
+	botsZone: "",
 	sidebarCollapsed: false,
 	rangeMinutes: 1440,
 	costRates: { requestsPerMillion: 0, subrequestsPerMillion: 0, neuron: 0 },

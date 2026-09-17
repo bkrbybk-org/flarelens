@@ -78,6 +78,7 @@ const GATED_ROUTES: { name: string; path: string; init?: RequestInit }[] = [
 	{ name: "GET /api/zones", path: `/api/zones?account_id=${ALLOWED_ACCOUNT}` },
 	{ name: "GET /api/data", path: `/api/data?account_id=${ALLOWED_ACCOUNT}` },
 	{ name: "GET /api/waf/rulesets", path: `/api/waf/rulesets?account_id=${ALLOWED_ACCOUNT}` },
+	{ name: "GET /api/bots/report", path: `/api/bots/report?account_id=${ALLOWED_ACCOUNT}` },
 	{
 		name: "POST /api/waf/events",
 		path: "/api/waf/events",
@@ -135,6 +136,7 @@ const SCOPED_ROUTES: { name: string; request: (account: string, zone: string) =>
 	{ name: "GET /api/pqc/report", request: (a) => ({ path: `/api/pqc/report?account_id=${a}` }) },
 	{ name: "GET /api/zone-health/report", request: (a) => ({ path: `/api/zone-health/report?account_id=${a}` }) },
 	{ name: "GET /api/dns/records", request: (a) => ({ path: `/api/dns/records?account_id=${a}` }) },
+	{ name: "GET /api/bots/report", request: (a) => ({ path: `/api/bots/report?account_id=${a}` }) },
 	{ name: "GET /api/workers/scripts", request: (a) => ({ path: `/api/workers/scripts?account_id=${a}` }) },
 	{ name: "POST /api/waf/events", request: (a) => ({ path: "/api/waf/events", init: post({ accountId: a }) }) },
 	{ name: "POST /api/access/usage", request: (a) => ({ path: "/api/access/usage", init: post({ accountId: a, ...RANGE }) }) },

@@ -65,6 +65,17 @@ const OPTIONAL_PERMISSIONS = [
 	},
 	{ label: "SSL and Certificates: Read", description: "Certificate expiry in Zone Health." },
 	{ label: "Zone: DNS: Read", description: "Every DNS record across the account's zones, in DNS Records and PQC Readiness." },
+	{
+		label: "Zone: Bot Management: Read",
+		description: "Bot management settings (Bot Fight Mode / Super Bot Fight Mode / Enterprise Bot Management) in Rate Limits & Bots.",
+	},
+	// Rate-limit rules live on the http_ratelimit phase entrypoint ruleset, read the same way as
+	// WAF's custom-firewall entrypoint. This is this app's understanding of which scope gates
+	// that read, not a Cloudflare-confirmed mapping — unverified against a real account.
+	{
+		label: "Account WAF: Read / Zone WAF: Read",
+		description: "Rate-limit rules in Rate Limits & Bots — read under the same WAF scopes as WAF Analytics (unverified against a live account).",
+	},
 ] as const;
 
 function StatusBadge({ status }: { status: CheckStatus }) {

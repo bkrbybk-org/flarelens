@@ -52,6 +52,7 @@ describe("refresh", () => {
 			"AccessUsagePage.tsx",
 			"AiGatewayPage.tsx",
 			"AiSecurityPage.tsx",
+			"BotsPage.tsx",
 			"CachePage.tsx",
 			"CostPage.tsx",
 			"DnsPage.tsx",
