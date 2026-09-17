@@ -47,6 +47,20 @@ describe("TTL formatting", () => {
 });
 
 describe("buildDnsRecordsReport", () => {
+	it("flags a DNS-only private address as internal-address, not origin-exposed", () => {
+		const result = buildDnsRecordsReport([
+			{
+				zone: { id: "z1", name: "example.com" },
+				records: [
+					{ id: "r1", type: "A", name: "in.example.com", content: "10.0.0.5", proxied: false, proxiable: true, ttl: 1 },
+					{ id: "r2", type: "AAAA", name: "in6.example.com", content: "fd00::1", proxied: false, proxiable: true, ttl: 1 },
+				],
+			},
+		]);
+		expect(result.rows.map((r) => r.flags)).toEqual([["internal-address"], ["internal-address"]]);
+		expect(result.summary.exposedOriginCount).toBe(0);
+	});
+
 	it("flags a DNS-only, proxiable A record as origin-exposed", () => {
 		const raws: DnsZoneRaw[] = [
 			{ zone: ZONE_A, records: [rec({ id: "r1", type: "A", proxied: false, proxiable: true, content: "203.0.113.10" })] },

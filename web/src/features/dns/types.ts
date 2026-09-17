@@ -1,6 +1,6 @@
 /** Mirrors the shapes in src/lib/dns-records.ts. Redeclared per side, as the other sections do. */
 
-export type DnsRowFlag = "origin-exposed";
+export type DnsRowFlag = "origin-exposed" | "internal-address";
 
 export interface DnsRow {
 	zoneId: string;

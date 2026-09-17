@@ -25,7 +25,14 @@ export interface CfDnsRecordRaw {
 	modified_on?: string;
 }
 
-export type DnsRowFlag = "origin-exposed";
+import { isPrivateAddress } from "./zone-health";
+
+/**
+ * `origin-exposed`: a public origin address published DNS-only.
+ * `internal-address`: a private address published DNS-only — a leak of internal topology rather
+ * than of an origin, graded lower, matching Zone Health's reading of the same record.
+ */
+export type DnsRowFlag = "origin-exposed" | "internal-address";
 
 export interface DnsRow {
 	zoneId: string;
@@ -98,7 +105,7 @@ function computeFlags(record: CfDnsRecordRaw): DnsRowFlag[] {
 	const flags: DnsRowFlag[] = [];
 	const type = (record.type || "").toUpperCase();
 	if (PROXIABLE_TYPES.has(type) && record.proxiable === true && record.proxied === false && record.content) {
-		flags.push("origin-exposed");
+		flags.push(isPrivateAddress(record.content) ? "internal-address" : "origin-exposed");
 	}
 	return flags;
 }

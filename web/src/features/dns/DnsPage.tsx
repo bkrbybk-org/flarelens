@@ -29,17 +29,26 @@ function ProxyBadge({ proxied }: { proxied: boolean }) {
 	);
 }
 
+const FLAG_BADGES: Record<DnsRow["flags"][number], { label: string; className: string; title: string }> = {
+	"origin-exposed": {
+		label: "origin exposed",
+		className: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+		title: "DNS-only, but this record could be proxied — the origin's real address is published.",
+	},
+	"internal-address": {
+		label: "internal address",
+		className: BADGE_NEUTRAL,
+		title: "DNS-only record publishing a private address — leaks internal topology, not an origin.",
+	},
+};
+
 function FlagBadges({ flags }: { flags: DnsRow["flags"] }) {
 	if (flags.length === 0) return <span className={MUTED}>—</span>;
 	return (
 		<span className="flex flex-wrap gap-1">
 			{flags.map((flag) => (
-				<span
-					key={flag}
-					className={`${BADGE} bg-amber-500/10 text-amber-700 dark:text-amber-400`}
-					title="DNS-only, but this record could be proxied — the origin's real address is published."
-				>
-					origin exposed
+				<span key={flag} className={`${BADGE} ${FLAG_BADGES[flag].className}`} title={FLAG_BADGES[flag].title}>
+					{FLAG_BADGES[flag].label}
 				</span>
 			))}
 		</span>
