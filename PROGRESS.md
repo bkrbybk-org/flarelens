@@ -4,13 +4,14 @@ Status snapshot, last reviewed **2026-09-17** against a full read of the tree, a
 the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Eighteen sections, 20 API routes, 920 tests green across 63 files, all type-checked, `tsc -b` clean, 0 lint errors (5 known warnings).
+**TL;DR** — Eighteen sections, 20 API routes, 930 tests green across 64 files, all type-checked, `tsc -b` clean, 0 lint errors (5 known warnings).
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `5eaae590`, deployed 2026-09-17 (audit fixes). The previous versions were
+Running version `4cdb50c5`, deployed 2026-09-18 (WAF evaluation order). The previous versions were
+`53721ea5` (same day, before display fixes), `5eaae590` (2026-09-17: audit fixes),
 `0f744ea2` (same day: Tunnel Map connector details), `fe0829a7` (same day, same feature before a small UI fix), `6394e637` (same day: WAF Rules Review grouped by ruleset), `286c5402` (same day: DNS Records, Rate Limits & Bots, command palette, saved views,
 system theme), `b18efed1` (same day, superseded by UI fixes), `3a924e84` (2026-09-16), and `fe2564bb` and `8bb29774` (2026-09-15). The three slowest routes were cut by
 two-thirds in that deploy (`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s,
@@ -391,6 +392,24 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | P3 | 5 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx), [PoliciesTable](web/src/features/access/PoliciesTable.tsx), [EventsTable](web/src/features/ai-security/EventsTable.tsx), [RulesetTable](web/src/features/waf/RulesetTable.tsx) and [DnsPage](web/src/features/dns/DnsPage.tsx) | None — React Compiler just skips memoizing those components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
 
 ### Recently resolved
+
+- **WAF evaluation order (2026-09-18, `4cdb50c5`).** Rules Review can now list rules in the
+  order Cloudflare evaluates them: custom rules → rate limiting → managed rules; the account
+  entrypoint before each zone's; each list top-down; an `execute` rule expands into the ruleset
+  it runs. To support this, the WAF metadata now records each rule's position, the ruleset an
+  `execute` rule runs, and where each ruleset is deployed (live: all 2,322 rules have a position,
+  14 deployments). Live findings: **one zone disables its Cloudflare Managed Ruleset
+  deployment, so 852 managed rules never run in that zone**. Cloudflare Exposed Credentials Check
+  and Managed Free are deployed nowhere. No rule on the account blocks every request.
+  Fixed on the way: account custom rulesets were labelled "Managed". The entry recorded for a
+  ruleset from the rule that deploys it assumed managed, and overwrote the ruleset's own entry
+  whenever the deploying rule was read later (7 rulesets on this account). The real entry now
+  always takes precedence, in either read order. The first deploy (`53721ea5`) had two
+  misleading displays, fixed before release: "852 rules never run" gave no zone, and each
+  deployment row showed its ruleset's events summed across every zone, even when that zone had
+  the deployment disabled.
+  Known limits, stated on the page: managed-rule overrides are not applied; "never runs" is only
+  claimed behind a disabled deployment or a rule whose expression is literally `true`.
 
 - **Audit pass: bugs, security, debt (2026-09-17, `5eaae590`).** Fixes:
   - *CSV formula injection.* Exports include text other people control: WAF request paths,

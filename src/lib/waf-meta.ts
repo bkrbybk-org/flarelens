@@ -22,6 +22,28 @@ export interface RuleMetaEntry {
 	enabled?: boolean;
 	expression?: string;
 	isRuleset?: boolean;
+	/** Zero-based index of the rule within its ruleset — its place in evaluation order. */
+	position?: number;
+	/** For an `execute` rule: the id of the ruleset it runs. */
+	executes?: string;
+	/**
+	 * For a ruleset run by an `execute` rule: where it is deployed. Rules inside it run at that
+	 * execute rule's position in the entrypoint, in their own order.
+	 */
+	deployment?: RulesetDeployment;
+	/**
+	 * Set on a ruleset entry known only from the execute rule that deploys it, before (or
+	 * without) the ruleset itself being read. The real entry replaces it.
+	 */
+	placeholder?: boolean;
+}
+
+export interface RulesetDeployment {
+	entrypointId: string;
+	position: number;
+	enabled: boolean;
+	/** Which requests the deployment applies to; "true" is every request. */
+	expression: string;
 }
 
 export type RuleMetaMap = Record<string, RuleMetaEntry>;
@@ -110,7 +132,10 @@ type RulesetContext = ReturnType<typeof rulesetContext>;
 
 function addRulesetEntry(meta: RuleMetaMap, ruleset: CfRuleset, context: RulesetContext) {
 	if (!ruleset.id) return;
+	// Where it is deployed may have been learned first, from the execute rule; keep it.
+	const deployment = meta[ruleset.id]?.deployment;
 	meta[ruleset.id] = {
+		deployment,
 		name: context.parentRuleset || ruleset.id,
 		source: context.source,
 		type: context.type,
@@ -123,7 +148,7 @@ function addRulesetEntry(meta: RuleMetaMap, ruleset: CfRuleset, context: Ruleset
 	};
 }
 
-function addRuleEntry(meta: RuleMetaMap, rule: CfRule, context: RulesetContext) {
+function addRuleEntry(meta: RuleMetaMap, rule: CfRule, context: RulesetContext, position: number) {
 	const name = rule.description || rule.name || context.parentRuleset || rule.ref || rule.id || "";
 	const entry: RuleMetaEntry = {
 		name,
@@ -139,27 +164,47 @@ function addRuleEntry(meta: RuleMetaMap, rule: CfRule, context: RulesetContext) 
 		action: rule.action || "",
 		enabled: rule.enabled !== false,
 		expression: typeof rule.expression === "string" ? rule.expression.slice(0, 500) : "",
+		position,
+		executes: rule.action === "execute" ? rule.action_parameters?.id : undefined,
 	};
 	if (rule.id) meta[rule.id] = entry;
 	if (rule.ref) meta[rule.ref] = entry;
 }
 
-function addManagedExecuteEntry(meta: RuleMetaMap, rule: CfRule, context: RulesetContext) {
-	const managedRulesetId = rule.action_parameters?.id;
-	if (!managedRulesetId) return;
-	const managedRulesetName =
-		rule.description || rule.action_parameters?.overrides?.ruleset?.description || managedRulesetId;
-	meta[managedRulesetId] = {
-		name: managedRulesetName,
+function addExecuteTargetEntry(meta: RuleMetaMap, rule: CfRule, context: RulesetContext, position: number) {
+	const targetId = rule.action_parameters?.id;
+	if (!targetId || !context.rulesetId) return;
+	const deployment: RulesetDeployment = {
+		entrypointId: context.rulesetId,
+		position,
+		enabled: rule.enabled !== false,
+		expression: typeof rule.expression === "string" ? rule.expression.slice(0, 500) : "",
+	};
+	const existing = meta[targetId];
+	// The ruleset's own entry, once read, is the authority on its name and kind — an execute
+	// rule only says where it runs. Overwriting it here used to relabel account custom rulesets
+	// as managed, whenever the deploying rule happened to be read after the ruleset itself.
+	if (existing && !existing.placeholder) {
+		meta[targetId] = { ...existing, deployment };
+		return;
+	}
+	const name = rule.description || rule.action_parameters?.overrides?.ruleset?.description || targetId;
+	// An account root in the custom-rules phase can only deploy custom rulesets; the managed
+	// phase deploys managed ones.
+	const type = context.phase === "http_request_firewall_managed" ? MANAGED_RULESET_KIND : "custom";
+	meta[targetId] = {
+		name,
 		source: context.source,
-		type: MANAGED_RULESET_KIND,
+		type,
 		level: context.level,
 		phase: context.phase,
-		ruleset: managedRulesetName,
-		rulesetName: managedRulesetName,
-		rulesetId: managedRulesetId,
-		kind: MANAGED_RULESET_KIND,
+		ruleset: name,
+		rulesetName: name,
+		rulesetId: targetId,
+		kind: type,
 		isRuleset: true,
+		placeholder: true,
+		deployment,
 	};
 }
 
@@ -167,10 +212,10 @@ export function collectRulesetMeta(meta: RuleMetaMap, ruleset: CfRuleset | null,
 	if (!ruleset) return;
 	const context = rulesetContext(ruleset, source);
 	addRulesetEntry(meta, ruleset, context);
-	for (const rule of ruleset.rules || []) {
-		addRuleEntry(meta, rule, context);
-		addManagedExecuteEntry(meta, rule, context);
-	}
+	(ruleset.rules || []).forEach((rule, position) => {
+		addRuleEntry(meta, rule, context, position);
+		if (rule.action === "execute") addExecuteTargetEntry(meta, rule, context, position);
+	});
 }
 
 // Rulesets referenced by execute-action rules (managed deployments) need their

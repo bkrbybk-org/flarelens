@@ -6,6 +6,7 @@ import { relativeTime, titleCase } from "../../lib/waf/format";
 import type { FirewallEvent, RuleMetaMap, RuleReviewRow } from "../../lib/waf/types";
 import { ChevronDownIcon, SearchIcon } from "../../components/Icons";
 import { ActionBadges, RuleLevelBadge, RuleTypeBadge, Sparkline } from "./bars";
+import { EvaluationOrder } from "./EvaluationOrder";
 
 interface RulesReviewProps {
 	events: FirewallEvent[];
@@ -24,6 +25,7 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 	const [type, setType] = useState("");
 	const [level, setLevel] = useState("");
 	const [status, setStatus] = useState<StatusFilter>("");
+	const [view, setView] = useState<"ruleset" | "order">("ruleset");
 	// Collapsed groups by key. Everything starts open: the grouping is for reading, not hiding.
 	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
@@ -36,9 +38,9 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 		drift: rows.filter((r) => actionDrift(r)).length,
 	}), [rows]);
 
-	const filtered = useMemo(() => {
+	const matches = useMemo(() => {
 		const q = search.trim().toLowerCase();
-		return rows.filter((row) => {
+		return (row: RuleReviewRow) => {
 			if (type && row.type !== type) return false;
 			if (level && row.level !== level) return false;
 			if (status === "enabled" && !row.enabled) return false;
@@ -53,8 +55,10 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 				[...row.paths.keys()].join(" "),
 			].join(" ").toLowerCase();
 			return haystack.includes(q);
-		});
-	}, [rows, search, type, level, status]);
+		};
+	}, [search, type, level, status]);
+
+	const filtered = useMemo(() => rows.filter(matches), [rows, matches]);
 
 	const groups = useMemo(() => groupRulesByRuleset(filtered), [filtered]);
 
@@ -118,11 +122,24 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 				</select>
 			</div>
 
-			{groups.length === 0 ? (
-				<EmptyState title="No matching rules" hint="Try a different search or filter." />
-			) : (
-				<>
-					<div className="flex items-center justify-between gap-2 text-sm">
+			<div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+				<div role="group" aria-label="Arrange rules" className="inline-flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">
+					{([["ruleset", "By ruleset"], ["order", "Evaluation order"]] as const).map(([id, label]) => (
+						<button
+							key={id}
+							type="button"
+							aria-pressed={view === id}
+							onClick={() => setView(id)}
+							className={`rounded-md px-3 py-1 text-xs font-medium ${FOCUS_RING} ${
+								view === id ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "text-zinc-600 dark:text-zinc-300"
+							}`}
+						>
+							{label}
+						</button>
+					))}
+				</div>
+				{view === "ruleset" && groups.length > 0 && (
+					<div className="flex items-center gap-2">
 						<span className="text-zinc-500 dark:text-zinc-400">
 							{filtered.length.toLocaleString()} rules in {groups.length.toLocaleString()} rulesets
 						</span>
@@ -134,20 +151,26 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 							{allCollapsed ? "Expand all" : "Collapse all"}
 						</button>
 					</div>
-					<div className="space-y-4">
-						{groups.map((group) => (
-							<RulesetGroup
-								// A filter change can empty and refill a group; remounting resets "Show all".
-								key={`${group.key}|${search}|${type}|${level}|${status}`}
-								group={group}
-								open={!collapsed.has(group.key)}
-								onToggle={() => toggleGroup(group.key)}
-								win={win}
-								onSelect={onSelectRule}
-							/>
-						))}
-					</div>
-				</>
+				)}
+			</div>
+			{view === "order" ? (
+				<EvaluationOrder ruleMeta={ruleMeta} rows={rows} visible={matches} onSelect={onSelectRule} />
+			) : groups.length === 0 ? (
+				<EmptyState title="No matching rules" hint="Try a different search or filter." />
+			) : (
+				<div className="space-y-4">
+					{groups.map((group) => (
+						<RulesetGroup
+							// A filter change can empty and refill a group; remounting resets "Show all".
+							key={`${group.key}|${search}|${type}|${level}|${status}`}
+							group={group}
+							open={!collapsed.has(group.key)}
+							onToggle={() => toggleGroup(group.key)}
+							win={win}
+							onSelect={onSelectRule}
+						/>
+					))}
+				</div>
 			)}
 		</div>
 	);

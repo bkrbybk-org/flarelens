@@ -24,6 +24,10 @@ export interface RuleMetaEntry {
 	enabled?: boolean;
 	expression?: string;
 	isRuleset?: boolean;
+	position?: number;
+	executes?: string;
+	deployment?: { entrypointId: string; position: number; enabled: boolean; expression: string };
+	placeholder?: boolean;
 }
 
 export type RuleMetaMap = Record<string, RuleMetaEntry>;
@@ -59,6 +63,11 @@ export interface RuleReviewRow {
 	rulesetId: string;
 	/** "account", "zone" or "zone:<name>", from the scope the ruleset was read under. */
 	source: string;
+	phase: string;
+	/** Index within its ruleset; undefined for a rule the metadata does not know. */
+	position?: number;
+	/** For an execute rule, the ruleset it runs. */
+	executes?: string;
 	type: string;
 	level: string;
 	configuredAction: string;

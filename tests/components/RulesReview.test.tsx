@@ -57,4 +57,19 @@ describe("RulesReview grouped by ruleset", () => {
 		await user.selectOptions(screen.getByLabelText("Filter by status"), "disabled");
 		expect(screen.getAllByRole("region").map((s) => s.getAttribute("aria-label"))).toEqual(["Custom B"]);
 	});
+
+	it("switches to evaluation order: entrypoint first, then the executed ruleset's rules in position", async () => {
+		const user = userEvent.setup();
+		const ordered: RuleMetaMap = {
+			"z-ep": { name: "default", source: "zone", type: "custom", level: "zone", phase: "http_request_firewall_custom", ruleset: "default", rulesetId: "z-ep", kind: "zone", isRuleset: true },
+			second: { ...rule("second", "z-ep", "default"), position: 1, phase: "http_request_firewall_custom", source: "zone" },
+			first: { ...rule("first", "z-ep", "default"), position: 0, phase: "http_request_firewall_custom", source: "zone", expression: "true" },
+		};
+		render(<RulesReview events={[]} ruleMeta={ordered} window={null} onSelectRule={vi.fn()} />);
+		await user.click(screen.getByRole("button", { name: "Evaluation order" }));
+		const stage = screen.getByRole("region", { name: "Custom rules — Zone" });
+		const lines = within(stage).getAllByRole("button").map((b) => b.textContent);
+		expect(lines[0]).toMatch(/^#1Rule first/);
+		expect(lines[1]).toMatch(/^#2Rule second.*Never runs/);
+	});
 });

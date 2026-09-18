@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { collectRulesetsForScope, type RuleMetaMap, type RulesetScope } from "../src/lib/waf-meta";
+import { collectRulesetMeta, collectRulesetsForScope, type RuleMetaMap, type RulesetScope } from "../src/lib/waf-meta";
 
 // Minimal fixture: one ruleset per scope, both containing rule id "rule-x"
 // under different names, plus an empty entrypoint/detail response so
@@ -177,5 +177,50 @@ describe("managed execute targets and the custom firewall entrypoint", () => {
 		expect(meta["deploy-rule"].name).toBe("zone deployment");
 		expect(meta["managed-rs"].name).toBe("Cloudflare Managed Ruleset");
 		expect(meta["child-1"]).toBeUndefined();
+	});
+});
+
+describe("evaluation-order metadata", () => {
+	const root = {
+		id: "root-1",
+		name: "root",
+		kind: "root",
+		phase: "http_request_firewall_custom",
+		rules: [
+			{ id: "exec-1", description: "Deploy Sensitive Paths", action: "execute", expression: "true", enabled: true, action_parameters: { id: "custom-rs" } },
+			{ id: "blk-1", description: "Block bad ASN", action: "block", expression: "ip.src.asnum eq 1", enabled: true },
+		],
+	};
+	const custom = {
+		id: "custom-rs",
+		name: "[Account-Level] Sensitive Paths",
+		kind: "custom",
+		phase: "http_request_firewall_custom",
+		rules: [
+			{ id: "c-0", description: "First", action: "block", enabled: true },
+			{ id: "c-1", description: "Second", action: "log", enabled: true },
+		],
+	};
+
+	it("records each rule's position and what an execute rule runs", () => {
+		const meta: RuleMetaMap = {};
+		collectRulesetMeta(meta, root, "account");
+		collectRulesetMeta(meta, custom, "account");
+		expect([meta["exec-1"].position, meta["blk-1"].position, meta["c-1"].position]).toEqual([0, 1, 1]);
+		expect(meta["exec-1"].executes).toBe("custom-rs");
+		expect(meta["blk-1"].executes).toBeUndefined();
+		expect(meta["custom-rs"].deployment).toEqual({ entrypointId: "root-1", position: 0, enabled: true, expression: "true" });
+	});
+
+	it.each([
+		["deploying rule read first", [root, custom]],
+		["ruleset read first", [custom, root]],
+	])("keeps an account custom ruleset labelled custom, %s", (_label, order) => {
+		const meta: RuleMetaMap = {};
+		for (const ruleset of order) collectRulesetMeta(meta, ruleset, "account");
+		const entry = meta["custom-rs"];
+		expect(entry).toMatchObject({ name: "[Account-Level] Sensitive Paths", type: "custom", kind: "custom", isRuleset: true });
+		expect(entry.placeholder).toBeUndefined();
+		expect(entry.deployment?.entrypointId).toBe("root-1");
 	});
 });
