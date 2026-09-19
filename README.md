@@ -64,7 +64,14 @@ why `web/index.html` loads it in `<head>` ahead of the app bundle.
 ## Architecture
 
 ```
-src/index.ts                 Hono worker: every /api route, security headers, asset serving
+src/index.ts                 Hono worker entrypoint: creates the app, security-header middleware,
+                             calls every routes/*.ts register*Routes() in order, asset fallback
+src/env.ts                   Env bindings interface, App = Hono<{ Bindings: Env }> type
+src/http.ts                  Route helpers shared by routes/*.ts: validHexId, cache headers,
+                             filterAllowedAccounts, SECURITY_HEADERS
+src/cf-types.ts              Cloudflare API shapes shared by more than one route module
+src/routes/                  One module per /api area, each exporting register<Area>Routes(app);
+                             see the file for the full list (core, access, waf, ai-security, …)
 src/lib/auth.ts              Credential resolution: Access JWT verification, account/zone allowlist
 src/lib/waf-meta.ts          Ruleset metadata flattening (managed/custom, entrypoints)
 src/lib/cache-analysis.ts    GraphQL analytics, last-match attribution, insights, grade
@@ -82,7 +89,8 @@ src/lib/dns-records.ts       DNS Records: account-wide flattening, exposed-origi
 src/lib/ratelimit-bot.ts     Rate Limits & Bots: rate-limit rule review, bot management settings
 web/src/features/tunnels/sankey.ts
                              Flow-diagram layout for the Tunnel Map (pure geometry, unit-tested)
-src/lib/cf-rest.ts           Shared Cloudflare REST plumbing: base URL, paginated list read, bounded fan-out
+src/lib/cf-rest.ts           Shared Cloudflare REST plumbing: base URL, authHeaders, fetchCloudflare(All),
+                             paginated list read, bounded fan-out
 src/lib/edge-cache.ts        60s per-credential Cache API layer for configuration reads
 src/lib/ai-sec/              AI Security: zone fan-out, schema probing, domain aggregation
 web/                         Vite + React 19 + Tailwind 4 + TanStack Table SPA
