@@ -4,13 +4,15 @@ Status snapshot, last reviewed **2026-09-17** against a full read of the tree, a
 the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Eighteen sections, 20 API routes, 930 tests green across 64 files, all type-checked, `tsc -b` clean, 0 lint errors (5 known warnings).
+**TL;DR** — Twenty-one sections, 24 API routes, 1,109 tests green across 74 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `4cdb50c5`, deployed 2026-09-18 (WAF evaluation order). The previous versions were
+Running version `c9403a43`, deployed 2026-09-19 (route split, Findings everywhere, executive report,
+Gateway Policies, Page & API Shield, cloudflared version check, connector metrics, dependency
+upgrades). The previous versions were `4cdb50c5` (2026-09-18: WAF evaluation order),
 `53721ea5` (same day, before display fixes), `5eaae590` (2026-09-17: audit fixes),
 `0f744ea2` (same day: Tunnel Map connector details), `fe0829a7` (same day, same feature before a small UI fix), `6394e637` (same day: WAF Rules Review grouped by ruleset), `286c5402` (same day: DNS Records, Rate Limits & Bots, command palette, saved views,
 system theme), `b18efed1` (same day, superseded by UI fixes), `3a924e84` (2026-09-16), and `fe2564bb` and `8bb29774` (2026-09-15). The three slowest routes were cut by
@@ -389,9 +391,52 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules. **Re-confirmed 2026-09-16** after four further deploys — the deployed values have not moved, which rules out a stale build |
 | P3 | **Bound token lacks Zone: Bot Management: Read** | Rate Limits & Bots reports every zone's bot settings as *not checked* (4 unknown), so the bot findings never fire and the plan-tier inference is untested against a real response | Add the scope to `CF_API_TOKEN`; then check the tier and the "protection off" reading against live data — both are inferred from documented fields, not a confirmed mapping |
 | P3 | **Bound token lacks SSL and Certificates: Read** | Zone Health reports edge and custom certificates as *not checked* on every zone (8 unknown checks), so certificate expiry is currently unmonitored | Add the scope to `CF_API_TOKEN`; no code change — the section starts grading on the next load |
-| P3 | 5 ESLint warnings: `react-hooks/incompatible-library` on TanStack `useReactTable` in [AppsTable](web/src/features/access/AppsTable.tsx), [PoliciesTable](web/src/features/access/PoliciesTable.tsx), [EventsTable](web/src/features/ai-security/EventsTable.tsx), [RulesetTable](web/src/features/waf/RulesetTable.tsx) and [DnsPage](web/src/features/dns/DnsPage.tsx) | None — React Compiler just skips memoizing those components | **Leave alone.** Expected for TanStack Table; not a code smell to "fix" |
+| P3 | **Bound token lacks API Gateway: Read** | Page & API Shield reports API Shield as not checked on every zone | Add the scope; then verify the API Shield half against live data — it is built from Cloudflare's API docs only |
+| P3 | **`/api/waf/rulesets` takes ~20s uncached** | WAF Analytics' first load is slow; it fetches every ruleset's detail per zone and has no edge cache | Put it behind the same 60s per-credential edge cache as the other configuration routes |
+| P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **Ten items in one pass (2026-09-19, `c9403a43`).** Built by Sonnet agents in separate worktrees:
+  the refactor first on its own, then five in parallel. Each diff was reviewed, merged,
+  checked in the gate and verified against the live account.
+  - *Route split (#16):* `src/index.ts` 1,624 → 65 lines. The routes moved into 16 files under
+    `src/routes/`, with shared helpers in `src/http.ts` and shared types in `src/env.ts` and
+    `src/cf-types.ts`. All 21 routes are unchanged and registered in the same order. *One REST
+    client (#17):* `fetchCloudflare`/`fetchCloudflareAll` moved into `src/lib/cf-rest.ts`.
+    *DNS URL key (#18):* the DNS page's zone filter now uses its own key, `dns_zone`.
+  - *Upgrades (#19):* TanStack Table 9, which also removed all 5 known lint warnings, and Vitest 5.
+    **TypeScript 7 was skipped:** it is the Go-native compiler, and `typescript-eslint` 8.70
+    (latest) requires TypeScript `<6.1.0`.
+  - *Findings covers every section (#1):* Tunnels, Zone Health, PQC, DNS, Rate Limits & Bots, WAF
+    evaluation order, Gateway Policies and Page & API Shield. Each source shows whether it was
+    checked (with a count), is loading, could not be checked (with the reason), or has not been
+    opened. Live: 11 high / 35 medium / 69 low. *Executive report (#5):* a self-contained HTML
+    download; every interpolated value is escaped.
+  - *cloudflared version check (#8):* latest release from GitHub, cached 1h — the app's first call
+    to a service outside Cloudflare. Live: **one connector runs 2025.8.1, 13 months behind**; the
+    rest run 2026.6.x, about 3 months behind 2026.9.1. *Connector metrics (#7):* the endpoints to
+    read come from the `TUNNEL_METRICS` secret, never from a request. Before fetching, the tunnel
+    must belong to the account. The fetch uses https only, gives up after 5s, treats a redirect as
+    an error, caps the body at 2 MB, and returns only parsed numbers. **Not verified live**: no
+    metrics endpoint is published yet (the route correctly answers 404 "not configured").
+  - *Gateway Policies (#11):* the account's 33 Gateway rules in enforcement order (DNS resolver →
+    DNS → network → HTTP, by precedence), following Cloudflare's order-of-enforcement docs. 14
+    findings, including 2 HTTP allow rules with no identity condition and 1 that passes untrusted
+    certificates through.
+  - *Page & API Shield (#12):* Page Shield is on for 1 of 4 zones (7 scripts, 4 connections, none
+    flagged malicious). **API Shield is not checked on any zone:** the token lacks "API Gateway:
+    Read", so the page says so instead of showing zeros. It is built from the API docs and has
+    not been verified live.
+  - *Found in review and fixed:* **a 403 logged the operator out.** Every loader treated 403 as a
+    dead session, and routes pass Cloudflare's 403 through, so opening a section the token could
+    not read disconnected the user. On Findings, any one of its sources could do it. Now only a
+    401 ends the session (`isSessionError`), and a test requires every session-ending call to be
+    inside that check; the test fails when a loader is changed back. The Cache loader already
+    ended the session on 401 only, which is how the inconsistency showed. Also rejected
+    `localhost.` / `*.localhost` as metrics targets.
+  - *Noticed, not fixed:* an uncached `/api/waf/rulesets` takes about 20s on this account. It
+    fetches every ruleset's detail for every zone and is not edge-cached.
 
 - **WAF evaluation order (2026-09-18, `4cdb50c5`).** Rules Review can now list rules in the
   order Cloudflare evaluates them: custom rules → rate limiting → managed rules; the account
@@ -654,7 +699,7 @@ diff reuses `describeRule` so rule changes read as sentences rather than JSON.
 ## Conventions
 
 - **Commits:** Conventional Commits, imperative subject ≤50 chars, body only when the *why* isn't obvious.
-- **Gate:** `npm run check` (tsc project build → tests → Vite build → wrangler dry-run) must pass before commit. `npm run lint` should show 0 errors (5 known warnings are expected — see P3 above).
+- **Gate:** `npm run check` (tsc project build → tests → Vite build → wrangler dry-run) must pass before commit. `npm run lint` should show 0 errors and 0 warnings (the 5 TanStack warnings went away with Table 9).
 - **Verification pattern:** for anything visual or layout-related, **measure, do not reason**. Two consecutive shell-scrolling fixes were shipped on plausible CSS reasoning before the cause was found by reading `html.scrollHeight` in the running app. The harness is described under Development in [README.md](README.md).
 - **Layout invariants:** the shell is a fixed-height flex column and each section owns its scrolling. `<main>` must keep `relative` (containing block), `overflow-hidden` (clipping) and `min-h-0` (shrinkable), and every section renders inside [PageShell](web/src/components/PageShell.tsx), which owns the `h-full overflow-auto` that used to be copied into each page in two spellings. [tests/shell-layout.test.ts](tests/shell-layout.test.ts) pins all of it, including the one deliberate exception (Applications) — none of these fail loudly.
 - **Data honesty (Cache section):** never redistribute unattributed traffic with synthetic weights, never present mock data unlabeled, and let a genuinely quiet zone show zeros. See the note at the end of [README.md](README.md).
