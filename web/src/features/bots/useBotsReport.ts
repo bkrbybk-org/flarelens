@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, fetchBotsReport } from "../../api/client";
+import {fetchBotsReport, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { RatelimitBotResult } from "./types";
 
@@ -35,7 +35,7 @@ export function useBotsReport(onAuthError: () => void) {
 				setState({ result, loading: false, error: null, cachedAt });
 			} catch (err) {
 				if (requestId !== requestIdRef.current) return;
-				if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+				if (isSessionError(err)) {
 					onAuthErrorRef.current();
 					return;
 				}

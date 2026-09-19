@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, fetchAiSecurity } from "../../api/client";
+import {fetchAiSecurity, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { AiSecResult } from "../../lib/ai-sec/types";
 
@@ -49,7 +49,7 @@ export function useAiSecurityData(onAuthError: () => void) {
 				setState({ result, loading: false, error: null, loaded: true });
 			} catch (err) {
 				if (requestId !== requestIdRef.current) return;
-				if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+				if (isSessionError(err)) {
 					onAuthErrorRef.current();
 					return;
 				}

@@ -9,7 +9,7 @@ import { buildReportHtml, downloadHtml, type SourceCoverage } from "../../lib/re
 import {
 	accessFindings, cacheFindings, countBySeverity, groupsFindings, sortFindings, wafFindings, type Finding, type FindingSource, type Severity,
 } from "../../lib/findings";
-import { botsFindings, dnsRecordsFindings, pqcFindings, tunnelsFindings, wafEvaluationFindings, zoneHealthFindings } from "../../lib/findings-sources";
+import { botsFindings, dnsRecordsFindings, gatewayPoliciesFindings, pqcFindings, shieldsFindings, tunnelsFindings, wafEvaluationFindings, zoneHealthFindings } from "../../lib/findings-sources";
 import { useCacheSnapshot, useWafSnapshot } from "../../lib/sectionSnapshot";
 import { aggregateRules } from "../../lib/waf/aggregate";
 import { useFindingsSources } from "./useFindingsSources";
@@ -50,6 +50,8 @@ const SOURCE_LABELS: Record<FindingSource, string> = {
 	pqc: "PQC",
 	dns: "DNS Records",
 	bots: "Rate Limits & Bots",
+	"gateway-policies": "Gateway Policies",
+	shields: "Page & API Shield",
 };
 
 function exportFindingsCsv(findings: Finding[]) {
@@ -97,6 +99,8 @@ export function FindingsPage({ session, apps, groups, reusableMap, loading, erro
 		if (sources.pqc.status === "ok") all.push(...pqcFindings(sources.pqc.result));
 		if (sources.dns.status === "ok") all.push(...dnsRecordsFindings(sources.dns.result));
 		if (sources.bots.status === "ok") all.push(...botsFindings(sources.bots.result));
+		if (sources.gatewayPolicies.status === "ok") all.push(...gatewayPoliciesFindings(sources.gatewayPolicies.result));
+		if (sources.shields.status === "ok") all.push(...shieldsFindings(sources.shields.result));
 		return sortFindings(all);
 	}, [apps, groups, reusableMap, wafSnapshot, cacheSnapshot, sources]);
 
@@ -128,6 +132,8 @@ export function FindingsPage({ session, apps, groups, reusableMap, loading, erro
 			{ source: "pqc", state: sources.pqc },
 			{ source: "dns", state: sources.dns },
 			{ source: "bots", state: sources.bots },
+			{ source: "gateway-policies", state: sources.gatewayPolicies },
+			{ source: "shields", state: sources.shields },
 		];
 		for (const { source, state } of dynamic) {
 			if (state.status === "ok") rows.push({ source, label: SOURCE_LABELS[source], status: "checked", count: countFor(source) });

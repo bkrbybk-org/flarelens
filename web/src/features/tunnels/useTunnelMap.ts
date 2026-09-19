@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, fetchTunnelMap } from "../../api/client";
+import {fetchTunnelMap, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { TunnelMapResult } from "./types";
 
@@ -34,7 +34,7 @@ export function useTunnelMap(onAuthError: () => void) {
 				setState({ result, loading: false, error: null, cachedAt });
 			} catch (err) {
 				if (requestId !== requestIdRef.current) return;
-				if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+				if (isSessionError(err)) {
 					onAuthErrorRef.current();
 					return;
 				}

@@ -16,10 +16,12 @@ vi.mock("../../web/src/api/client", async (importOriginal) => {
 		fetchPqcReport: vi.fn(),
 		fetchDnsRecords: vi.fn(),
 		fetchBotsReport: vi.fn(),
+		fetchGatewayPoliciesReport: vi.fn(),
+		fetchShieldsReport: vi.fn(),
 	};
 });
 
-import { ApiError, fetchBotsReport, fetchDnsRecords, fetchPqcReport, fetchTunnelMap, fetchZoneHealthReport } from "../../web/src/api/client";
+import { ApiError, fetchBotsReport, fetchDnsRecords, fetchGatewayPoliciesReport, fetchPqcReport, fetchShieldsReport, fetchTunnelMap, fetchZoneHealthReport } from "../../web/src/api/client";
 
 const mocks = {
 	tunnels: vi.mocked(fetchTunnelMap),
@@ -27,7 +29,12 @@ const mocks = {
 	pqc: vi.mocked(fetchPqcReport),
 	dns: vi.mocked(fetchDnsRecords),
 	bots: vi.mocked(fetchBotsReport),
+	gatewayPolicies: vi.mocked(fetchGatewayPoliciesReport),
+	shields: vi.mocked(fetchShieldsReport),
 };
+
+const EMPTY_GATEWAY = { rules: [], stages: [], findings: [], totals: { rules: 0, enabled: 0, disabled: 0, byType: {} } };
+const EMPTY_SHIELDS = { zones: [], findings: [], totals: {} };
 
 const session: Session = { token: "tok", accountId: "acc1", accountName: "Acme", mode: "byot" };
 
@@ -64,6 +71,8 @@ describe("FindingsPage per-source status", () => {
 		mocks.pqc.mockReset();
 		mocks.dns.mockReset();
 		mocks.bots.mockReset();
+		mocks.gatewayPolicies.mockReset().mockResolvedValue({ result: EMPTY_GATEWAY, cachedAt: null } as never);
+		mocks.shields.mockReset().mockResolvedValue({ result: EMPTY_SHIELDS, cachedAt: null } as never);
 	});
 	afterEach(() => {
 		vi.restoreAllMocks();
@@ -104,7 +113,7 @@ describe("FindingsPage per-source status", () => {
 		expect(screen.getAllByText(/not checked/i).length).toBeGreaterThan(0);
 	});
 
-	it("reports a 403 as a named permission gap and escalates to the auth handler", async () => {
+	it("reports a 403 as a named permission gap without ending the session", async () => {
 		const onAuthError = vi.fn();
 		mocks.tunnels.mockResolvedValue({ result: EMPTY_TUNNELS, cachedAt: null });
 		mocks.zoneHealth.mockRejectedValue(new ApiError("Forbidden", 403));
@@ -115,7 +124,21 @@ describe("FindingsPage per-source status", () => {
 		renderPage(onAuthError);
 
 		await waitFor(() => expect(screen.getByText(/Permission missing/)).toBeInTheDocument());
-		expect(onAuthError).toHaveBeenCalled();
+		// One source the token cannot read must not log the operator out of all the others.
+		expect(onAuthError).not.toHaveBeenCalled();
+	});
+
+	it("ends the session on a 401", async () => {
+		const onAuthError = vi.fn();
+		mocks.tunnels.mockResolvedValue({ result: EMPTY_TUNNELS, cachedAt: null });
+		mocks.zoneHealth.mockRejectedValue(new ApiError("Authorization token is missing or invalid", 401));
+		mocks.pqc.mockResolvedValue({ result: EMPTY_PQC, cachedAt: null });
+		mocks.dns.mockResolvedValue({ result: EMPTY_DNS, cachedAt: null });
+		mocks.bots.mockResolvedValue({ result: EMPTY_BOTS, cachedAt: null });
+
+		renderPage(onAuthError);
+
+		await waitFor(() => expect(onAuthError).toHaveBeenCalledTimes(1));
 	});
 
 	it("shows WAF and Cache as not opened until their own pages have published a snapshot", async () => {

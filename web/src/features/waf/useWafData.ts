@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, fetchWafEvents, fetchWafRulesets } from "../../api/client";
+import {fetchWafEvents, fetchWafRulesets, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { FirewallEvent, RuleMetaMap, WafDiagnostics } from "../../lib/waf/types";
 
@@ -58,7 +58,7 @@ export function useWafData(onAuthError: () => void) {
 			});
 		} catch (err) {
 			if (requestId !== requestIdRef.current) return;
-			if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+			if (isSessionError(err)) {
 				onAuthErrorRef.current();
 				return;
 			}

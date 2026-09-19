@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, fetchAccessUsage } from "../../api/client";
+import {fetchAccessUsage, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { AccessGranularity, AccessUsageResult } from "./types";
 
@@ -32,7 +32,7 @@ export function useAccessUsage(onAuthError: () => void) {
 				setState({ result, loading: false, error: null });
 			} catch (err) {
 				if (requestId !== requestIdRef.current) return;
-				if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+				if (isSessionError(err)) {
 					onAuthErrorRef.current();
 					return;
 				}

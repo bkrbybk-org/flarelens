@@ -56,8 +56,11 @@ export function validateMetricsUrl(raw: string): { ok: true; url: URL } | { ok: 
 	}
 	if (url.protocol !== "https:") return { ok: false, reason: "must use https:" };
 	if (url.username || url.password) return { ok: false, reason: "must not contain credentials" };
-	const host = url.hostname.toLowerCase();
-	if (host === "localhost" || host === "127.0.0.1" || host === "::1") return { ok: false, reason: "must not target localhost" };
+	// A trailing dot is the same name to a resolver, and every *.localhost resolves to loopback.
+	const host = url.hostname.toLowerCase().replace(/\.$/, "");
+	if (host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "::1") {
+		return { ok: false, reason: "must not target localhost" };
+	}
 	if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return { ok: false, reason: "must not target an IP literal" };
 	if (!url.pathname.endsWith("/metrics")) return { ok: false, reason: "path must end with /metrics" };
 	return { ok: true, url };

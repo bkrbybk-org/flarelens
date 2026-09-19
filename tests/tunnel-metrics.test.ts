@@ -25,6 +25,11 @@ describe("validateMetricsUrl", () => {
 
 	it("rejects localhost", () => {
 		expect(validateMetricsUrl("https://localhost/metrics").ok).toBe(false);
+		expect(validateMetricsUrl("https://localhost./metrics").ok).toBe(false);
+		expect(validateMetricsUrl("https://metrics.localhost/metrics").ok).toBe(false);
+		// URL normalises decimal and bracketed forms to literals, which the literal check catches.
+		expect(validateMetricsUrl("https://2130706433/metrics").ok).toBe(false);
+		expect(validateMetricsUrl("https://[::1]/metrics").ok).toBe(false);
 	});
 
 	it("rejects a path that does not end with /metrics", () => {

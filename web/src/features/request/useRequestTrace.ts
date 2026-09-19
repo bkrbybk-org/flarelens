@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, traceRequest } from "../../api/client";
+import {traceRequest, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { RequestTraceResult } from "./types";
 
@@ -37,7 +37,7 @@ export function useRequestTrace(onAuthError: () => void) {
 				setState({ result, loading: false, error: null });
 			} catch (err) {
 				if (requestId !== requestIdRef.current) return;
-				if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+				if (isSessionError(err)) {
 					onAuthErrorRef.current();
 					return;
 				}

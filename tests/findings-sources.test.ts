@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { gatewayPoliciesFindings, shieldsFindings } from "../web/src/lib/findings-sources";
 import {
 	botsFindings, dnsRecordsFindings, pqcFindings, tunnelsFindings, wafEvaluationFindings, zoneHealthFindings,
 } from "../web/src/lib/findings-sources";
@@ -325,5 +326,31 @@ describe("wafEvaluationFindings", () => {
 		};
 		const rows = aggregateRules([], meta);
 		expect(wafEvaluationFindings(meta, rows)).toEqual([]);
+	});
+});
+
+describe("gatewayPoliciesFindings / shieldsFindings", () => {
+	it("maps Gateway findings, folding info into low and naming the rule", () => {
+		const out = gatewayPoliciesFindings({
+			rules: [], stages: [], totals: { rules: 0, enabled: 0, disabled: 0, byType: { dns: 0, http: 0, l4: 0, dns_resolver: 0 } },
+			findings: [
+				{ severity: "medium", ruleId: "r1", ruleName: "Allow SaaS", filterType: "http", title: "Allow rule with no identity condition", detail: "d" },
+				{ severity: "info", ruleId: null, ruleName: null, filterType: "l4", title: "No network rules", detail: "d" },
+			],
+		} as never);
+		expect(out.map((f) => [f.severity, f.title, f.source, f.href])).toEqual([
+			["medium", "Allow SaaS: Allow rule with no identity condition", "gateway-policies", "#/gateway-policies"],
+			["low", "No network rules", "gateway-policies", "#/gateway-policies"],
+		]);
+	});
+
+	it("maps Shields findings per zone with a deep link to that zone", () => {
+		const out = shieldsFindings({
+			zones: [], totals: {} as never,
+			findings: [{ severity: "high", zoneId: "z1", zoneName: "example.com", source: "page-shield", title: "Malicious script", detail: "d" }],
+		} as never);
+		expect(out).toEqual([
+			{ id: "shields:z1:page-shield:0", severity: "high", title: "example.com: Malicious script", detail: "d", source: "shields", href: "#/shields?sh_zone=z1" },
+		]);
 	});
 });

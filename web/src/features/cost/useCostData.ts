@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, fetchWorkerMetrics, fetchWorkersAiUsage } from "../../api/client";
+import {fetchWorkerMetrics, fetchWorkersAiUsage, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { WorkerMetricsResult } from "../workers/types";
 import type { WorkersAiResult } from "../workers-ai/types";
@@ -41,7 +41,7 @@ export function useCostData(onAuthError: () => void) {
 				setState({ workers, ai, loading: false, error: null });
 			} catch (err) {
 				if (requestId !== requestIdRef.current) return;
-				if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+				if (isSessionError(err)) {
 					onAuthErrorRef.current();
 					return;
 				}

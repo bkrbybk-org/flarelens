@@ -8,6 +8,19 @@ export class ApiError extends Error {
 }
 
 /**
+ * Whether a failed request means the session itself is no longer valid, so the app should go
+ * back to the connect screen.
+ *
+ * Only a 401 means that: the worker refused the credential or the Access session. A 403 is a
+ * permission answer about one piece of data — the token lacks an optional scope, or Cloudflare
+ * refused one read — and routes pass Cloudflare's 403 through. Treating it as a dead session
+ * used to log the operator out for opening a section their token could not read.
+ */
+export function isSessionError(err: unknown): boolean {
+	return err instanceof ApiError && err.status === 401;
+}
+
+/**
  * In server mode the worker holds the credential and Cloudflare Access authenticates the
  * operator, so the browser has no token to send. Omit the header entirely rather than sending
  * an empty or placeholder Bearer, which the worker would treat as a caller-supplied token.

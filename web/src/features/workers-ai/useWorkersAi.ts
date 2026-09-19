@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, fetchWorkersAiUsage } from "../../api/client";
+import {fetchWorkersAiUsage, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { AiGranularity, WorkersAiResult } from "./types";
 
@@ -32,7 +32,7 @@ export function useWorkersAi(onAuthError: () => void) {
 				setState({ result, loading: false, error: null });
 			} catch (err) {
 				if (requestId !== requestIdRef.current) return;
-				if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+				if (isSessionError(err)) {
 					onAuthErrorRef.current();
 					return;
 				}

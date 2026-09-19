@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, fetchWorkerMetrics, fetchWorkerScripts } from "../../api/client";
+import {fetchWorkerMetrics, fetchWorkerScripts, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { Granularity, WorkerMetricsResult } from "./types";
 
@@ -40,7 +40,7 @@ export function useWorkersData(onAuthError: () => void) {
 				setState({ result, scripts, loading: false, error: null });
 			} catch (err) {
 				if (requestId !== requestIdRef.current) return;
-				if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+				if (isSessionError(err)) {
 					onAuthErrorRef.current();
 					return;
 				}

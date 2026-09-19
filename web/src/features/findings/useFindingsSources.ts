@@ -11,12 +11,14 @@
 // directly inside this hook's own effect body, which react-hooks/set-state-in-effect (rightly)
 // flags as a cascading-render risk.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, fetchBotsReport, fetchDnsRecords, fetchPqcReport, fetchTunnelMap, fetchZoneHealthReport } from "../../api/client";
+import { ApiError, fetchBotsReport, fetchDnsRecords, fetchGatewayPoliciesReport, fetchPqcReport, fetchShieldsReport, fetchTunnelMap, fetchZoneHealthReport, isSessionError } from "../../api/client";
 import type { TunnelMapResult } from "../tunnels/types";
 import type { ZoneHealthResult } from "../zone-health/types";
 import type { PqcResult } from "../pqc/types";
 import type { DnsRecordsResult } from "../dns/types";
 import type { RatelimitBotResult } from "../bots/types";
+import type { GwReport } from "../gateway-policies/types";
+import type { ShieldsResult } from "../shields/types";
 
 export type SourceState<T> =
 	| { status: "loading" }
@@ -29,6 +31,8 @@ export interface FindingsSourcesState {
 	pqc: SourceState<PqcResult>;
 	dns: SourceState<DnsRecordsResult>;
 	bots: SourceState<RatelimitBotResult>;
+	gatewayPolicies: SourceState<GwReport>;
+	shields: SourceState<ShieldsResult>;
 }
 
 const LOADING_ALL: FindingsSourcesState = {
@@ -37,6 +41,8 @@ const LOADING_ALL: FindingsSourcesState = {
 	pqc: { status: "loading" },
 	dns: { status: "loading" },
 	bots: { status: "loading" },
+	gatewayPolicies: { status: "loading" },
+	shields: { status: "loading" },
 };
 
 /** What a reader should be told about a failed fetch — named permission gap when it is one. */
@@ -75,7 +81,7 @@ export function useFindingsSources(onAuthError: () => void) {
 		}
 
 		function escalateIfAuth(err: unknown) {
-			if (!authEscalated && err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+			if (!authEscalated && isSessionError(err)) {
 				authEscalated = true;
 				onAuthErrorRef.current();
 			}
@@ -119,6 +125,20 @@ export function useFindingsSources(onAuthError: () => void) {
 			.catch((err) => {
 				escalateIfAuth(err);
 				set("bots", { status: "error", reason: reasonForError(err) });
+			});
+
+		fetchGatewayPoliciesReport<GwReport>(token, accountId)
+			.then(({ result }) => set("gatewayPolicies", { status: "ok", result }))
+			.catch((err) => {
+				escalateIfAuth(err);
+				set("gatewayPolicies", { status: "error", reason: reasonForError(err) });
+			});
+
+		fetchShieldsReport<ShieldsResult>(token, accountId)
+			.then(({ result }) => set("shields", { status: "ok", result }))
+			.catch((err) => {
+				escalateIfAuth(err);
+				set("shields", { status: "error", reason: reasonForError(err) });
 			});
 	}, []);
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, fetchZeroTrustData } from "../api/client";
+import {fetchZeroTrustData, isSessionError } from "../api/client";
 import type { CfPolicy, ZeroTrustData } from "../types";
 import { useEstimatedProgress } from "./useEstimatedProgress";
 
@@ -29,7 +29,7 @@ export function useZeroTrustData(onAuthError: () => void) {
 			success = true;
 			setState({ data, loading: false, error: null });
 		} catch (err) {
-			if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+			if (isSessionError(err)) {
 				onAuthErrorRef.current();
 				return;
 			}

@@ -74,7 +74,7 @@ const OPTIONAL_PERMISSIONS = [
 	// that read, not a Cloudflare-confirmed mapping — unverified against a real account.
 	{
 		label: "Account WAF: Read / Zone WAF: Read",
-		description: "Rate-limit rules in Rate Limits & Bots — read under the same WAF scopes as WAF Analytics (unverified against a live account).",
+		description: "Rate-limit rules in Rate Limits & Bots — read under the same WAF scopes as WAF Analytics.",
 	},
 	{
 		label: "Zero Trust: Read",
