@@ -28,6 +28,21 @@ export interface TunnelSummary {
 	connectors: TunnelConnector[];
 	connectorsError?: string;
 	health: { level: "warn" | "info"; message: string }[];
+	/** Whether a metrics target is configured server-side for this tunnel — never the URL itself. */
+	hasMetricsTarget?: boolean;
+}
+
+/** The latest cloudflared GitHub release, or why it could not be determined. */
+export type LatestCloudflared = { version: string; publishedAt: string } | { error: string };
+
+export interface TunnelMetrics {
+	processCpuSecondsTotal?: number;
+	processResidentMemoryBytes?: number;
+	processStartTimeSeconds?: number;
+	haConnections?: number;
+	totalRequests?: number;
+	requestErrors?: number;
+	concurrentRequests?: number;
 }
 
 export type OriginKind = "tunnel" | "worker" | "cloudflare" | "private" | "unknown";
@@ -60,6 +75,7 @@ export interface TunnelMapResult {
 	rows: MappingRow[];
 	privateRoutes: PrivateRoute[];
 	errors: { source: string; message: string }[];
+	latestCloudflared?: LatestCloudflared;
 }
 
 /** Text for the CSV export and the search haystack — the chain as it reads on screen. */

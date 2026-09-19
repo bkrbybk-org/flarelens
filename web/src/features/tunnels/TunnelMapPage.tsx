@@ -12,6 +12,7 @@ import { useTunnelMap } from "./useTunnelMap";
 import { TunnelSankey } from "./TunnelSankey";
 import { TunnelDrawer } from "./TunnelDrawer";
 import { appTypeLabel, chainText, originKindLabel, statusTone, type MappingRow, type OriginKind } from "./types";
+import { compareCloudflaredVersions } from "./cloudflared-version";
 
 
 function DecisionChip({ decision }: { decision: string }) {
@@ -269,7 +270,14 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 
 			<div className="grid gap-4 lg:grid-cols-2">
 				<section className={CARD}>
-					<h2 className={`mb-3 ${SECTION_TITLE}`}>Tunnels</h2>
+					<h2 className={`mb-3 ${SECTION_TITLE}`}>
+						Tunnels
+						{result?.latestCloudflared && "version" in result.latestCloudflared && (
+							<span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">
+								latest cloudflared: {result.latestCloudflared.version}
+							</span>
+						)}
+					</h2>
 					{(result?.tunnels.length ?? 0) === 0 ? (
 						<p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">None returned.</p>
 					) : (
@@ -290,6 +298,13 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 												</span>
 											)}
 											{tunnel.colos.length > 0 && <span className="text-zinc-500 dark:text-zinc-400">{tunnel.colos.join(", ").toUpperCase()}</span>}
+											{result?.latestCloudflared &&
+												"version" in result.latestCloudflared &&
+												tunnel.connectors.some((c) => compareCloudflaredVersions(c.version, (result.latestCloudflared as { version: string }).version) === -1) && (
+													<span className="text-amber-600 dark:text-amber-400" title={`A connector on this tunnel is behind the latest cloudflared release (${result.latestCloudflared.version}).`}>
+														outdated
+													</span>
+												)}
 											{tunnel.health.some((n) => n.level === "warn") && (
 												<span className="text-amber-600 dark:text-amber-400">
 													{tunnel.health.filter((n) => n.level === "warn").length} warning
@@ -330,9 +345,13 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 			</div>
 			{openTunnel && (
 				<TunnelDrawer
+					key={openTunnel.id}
 					tunnel={openTunnel}
 					rows={result?.rows ?? []}
 					privateRoutes={result?.privateRoutes ?? []}
+					latestCloudflared={result?.latestCloudflared}
+					token={session.token}
+					accountId={session.accountId}
 					onClose={() => setOpenTunnelId(null)}
 				/>
 			)}

@@ -1,9 +1,20 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { XIcon } from "../../components/Icons";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
-import { ALERT_WARN, BADGE, BADGE_NEUTRAL, MUTED } from "../../lib/ui";
+import { ApiError } from "../../api/client";
+import { fetchTunnelMetrics } from "../../api/client";
+import { ALERT_WARN, BADGE, BADGE_NEUTRAL, BTN_SECONDARY, MUTED } from "../../lib/ui";
 import { relativeTime } from "../../lib/waf/format";
-import { statusTone, type MappingRow, type PrivateRoute, type TunnelConnector, type TunnelSummary } from "./types";
+import {
+	statusTone,
+	type LatestCloudflared,
+	type MappingRow,
+	type PrivateRoute,
+	type TunnelConnector,
+	type TunnelMetrics,
+	type TunnelSummary,
+} from "./types";
+import { compareCloudflaredVersions } from "./cloudflared-version";
 
 /** `cloudflared` opens four edge connections per process. Mirrors the worker's constant. */
 const EXPECTED_CONNECTIONS = 4;
@@ -25,7 +36,18 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 	);
 }
 
-function ConnectorCard({ connector, skew }: { connector: TunnelConnector; skew: boolean }) {
+function LatestBadge({ version, latest }: { version: string; latest?: LatestCloudflared }) {
+	if (!latest || "error" in latest) return null;
+	const cmp = compareCloudflaredVersions(version, latest.version);
+	if (cmp === null || cmp >= 0) return null;
+	return (
+		<span className="text-[11px] text-zinc-500 dark:text-zinc-400" title={`Latest cloudflared release: ${latest.version}`}>
+			(latest: {latest.version})
+		</span>
+	);
+}
+
+function ConnectorCard({ connector, skew, latest }: { connector: TunnelConnector; skew: boolean; latest?: LatestCloudflared }) {
 	const live = connector.connections.filter((c) => !c.pendingReconnect).length;
 	const short = live < EXPECTED_CONNECTIONS;
 	return (
@@ -35,6 +57,7 @@ function ConnectorCard({ connector, skew }: { connector: TunnelConnector; skew: 
 				<span className={`${BADGE} ${skew ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : BADGE_NEUTRAL}`} title={skew ? "Differs from another connector on this tunnel" : undefined}>
 					cloudflared {connector.version}
 				</span>
+				<LatestBadge version={connector.version} latest={latest} />
 				<span className={BADGE_NEUTRAL}>{connector.arch}</span>
 				<span className={`ml-auto text-xs font-medium ${short ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
 					{live}/{EXPECTED_CONNECTIONS} connections
@@ -72,15 +95,136 @@ function ConnectorCard({ connector, skew }: { connector: TunnelConnector; skew: 
 	);
 }
 
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes.toFixed(0)} B`;
+	const units = ["KiB", "MiB", "GiB"];
+	let value = bytes / 1024;
+	let i = 0;
+	while (value >= 1024 && i < units.length - 1) {
+		value /= 1024;
+		i++;
+	}
+	return `${value.toFixed(1)} ${units[i]}`;
+}
+
+function formatDuration(seconds: number): string {
+	if (seconds < 60) return `${seconds.toFixed(0)}s`;
+	const minutes = seconds / 60;
+	if (minutes < 60) return `${minutes.toFixed(0)}m`;
+	const hours = minutes / 60;
+	if (hours < 24) return `${hours.toFixed(1)}h`;
+	return `${(hours / 24).toFixed(1)}d`;
+}
+
+type MetricsState =
+	| { status: "idle" }
+	| { status: "loading" }
+	| { status: "error"; message: string }
+	| { status: "loaded"; metrics: TunnelMetrics; fetchedAt: string };
+
+/**
+ * Connector CPU/memory/HA metrics. Cloudflare's API never reports these — they only exist on the
+ * `cloudflared` process's own Prometheus endpoint, which an operator may optionally publish and
+ * point this deployment at via the `TUNNEL_METRICS` secret (see README). `hasMetricsTarget` tells
+ * the client only whether a target is configured, never the URL itself.
+ */
+function MetricsSection({ tunnelId, hasMetricsTarget, token, accountId }: { tunnelId: string; hasMetricsTarget?: boolean; token: string; accountId: string }) {
+	const [state, setState] = useState<MetricsState>({ status: "idle" });
+
+	if (!hasMetricsTarget) {
+		return (
+			<p className={`mt-2 text-[11px] ${MUTED}`}>
+				CPU and memory are not reported by Cloudflare's API. cloudflared exposes them only on its own
+				Prometheus metrics endpoint. This tunnel has no metrics target configured — see the README's
+				"Connector metrics" setup section to publish one.
+			</p>
+		);
+	}
+
+	async function load() {
+		setState({ status: "loading" });
+		try {
+			const result = await fetchTunnelMetrics<{ metrics: TunnelMetrics; fetchedAt: string }>(token, accountId, tunnelId);
+			setState({ status: "loaded", metrics: result.metrics, fetchedAt: result.fetchedAt });
+		} catch (err) {
+			setState({ status: "error", message: err instanceof ApiError ? err.message : "Failed to load metrics." });
+		}
+	}
+
+	return (
+		<div className="mt-2">
+			{state.status !== "loaded" && (
+				<button type="button" onClick={load} disabled={state.status === "loading"} className={BTN_SECONDARY}>
+					{state.status === "loading" ? "Loading…" : "Load metrics"}
+				</button>
+			)}
+			{state.status === "error" && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{state.message}</p>}
+			{state.status === "loaded" && (
+				<div className="mt-1 space-y-1.5 text-xs">
+					<div className="flex justify-between gap-3">
+						<dt className={MUTED}>Memory (RSS)</dt>
+						<dd>{state.metrics.processResidentMemoryBytes !== undefined ? formatBytes(state.metrics.processResidentMemoryBytes) : "—"}</dd>
+					</div>
+					<div className="flex justify-between gap-3">
+						<dt className={MUTED} title="Cumulative CPU time divided by process uptime — an average, not an instantaneous reading.">
+							CPU (average since start)
+						</dt>
+						<dd>
+							{state.metrics.processCpuSecondsTotal !== undefined && state.metrics.processStartTimeSeconds !== undefined
+								? (() => {
+										// As-of the fetch, not a live clock: this is a snapshot, not a ticking value.
+										const uptime = new Date(state.fetchedAt).getTime() / 1000 - state.metrics.processStartTimeSeconds!;
+										return uptime > 0 ? `${((state.metrics.processCpuSecondsTotal! / uptime) * 100).toFixed(1)}%` : "—";
+									})()
+								: state.metrics.processCpuSecondsTotal !== undefined
+									? `${state.metrics.processCpuSecondsTotal.toFixed(0)}s CPU time (no start time)`
+									: "—"}
+						</dd>
+					</div>
+					<div className="flex justify-between gap-3">
+						<dt className={MUTED}>HA connections</dt>
+						<dd>{state.metrics.haConnections ?? "—"}</dd>
+					</div>
+					<div className="flex justify-between gap-3">
+						<dt className={MUTED}>Requests / errors</dt>
+						<dd>
+							{state.metrics.totalRequests ?? "—"} / {state.metrics.requestErrors ?? "—"}
+						</dd>
+					</div>
+					<div className="flex justify-between gap-3">
+						<dt className={MUTED}>Concurrent requests</dt>
+						<dd>{state.metrics.concurrentRequests ?? "—"}</dd>
+					</div>
+					<div className="flex justify-between gap-3">
+						<dt className={MUTED}>Process uptime</dt>
+						<dd>
+							{state.metrics.processStartTimeSeconds !== undefined
+								? formatDuration(new Date(state.fetchedAt).getTime() / 1000 - state.metrics.processStartTimeSeconds)
+								: "—"}
+						</dd>
+					</div>
+					<p className={`pt-1 text-[11px] ${MUTED}`}>Fetched {relativeTime(state.fetchedAt)}.</p>
+					<button type="button" onClick={load} className={`${BTN_SECONDARY} mt-1`}>
+						Reload metrics
+					</button>
+				</div>
+			)}
+		</div>
+	);
+}
+
 interface TunnelDrawerProps {
 	tunnel: TunnelSummary;
 	rows: MappingRow[];
 	privateRoutes: PrivateRoute[];
+	latestCloudflared?: LatestCloudflared;
+	token: string;
+	accountId: string;
 	onClose: () => void;
 }
 
 /** Everything the API says about one tunnel: its connectors, their edge connections, and what it serves. */
-export function TunnelDrawer({ tunnel, rows, privateRoutes, onClose }: TunnelDrawerProps) {
+export function TunnelDrawer({ tunnel, rows, privateRoutes, latestCloudflared, token, accountId, onClose }: TunnelDrawerProps) {
 	const panelRef = useRef<HTMLDivElement>(null);
 	useFocusTrap(panelRef, true, onClose);
 
@@ -151,14 +295,11 @@ export function TunnelDrawer({ tunnel, rows, privateRoutes, onClose }: TunnelDra
 						) : (
 							<ul className="space-y-2">
 								{tunnel.connectors.map((c) => (
-									<ConnectorCard key={c.id} connector={c} skew={versions.size > 1} />
+									<ConnectorCard key={c.id} connector={c} skew={versions.size > 1} latest={latestCloudflared} />
 								))}
 							</ul>
 						)}
-						<p className={`mt-2 text-[11px] ${MUTED}`}>
-							CPU and memory are not reported by Cloudflare's API. cloudflared exposes them only on its own
-							metrics endpoint on the connector host (<code>127.0.0.1:20241/metrics</code> by default).
-						</p>
+						<MetricsSection tunnelId={tunnel.id} hasMetricsTarget={tunnel.hasMetricsTarget} token={token} accountId={accountId} />
 					</section>
 
 					<section>

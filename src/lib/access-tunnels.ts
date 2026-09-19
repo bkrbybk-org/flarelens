@@ -119,6 +119,12 @@ export interface TunnelSummary {
 	/** Connectors could not be read; `connectors` is then empty for that reason, not because none run. */
 	connectorsError?: string;
 	health: TunnelHealthNote[];
+	/**
+	 * Whether a `TUNNEL_METRICS` target is configured for this tunnel — never the URL itself.
+	 * Set by the route after `fetchTunnelMap` resolves (config is deploy-time, not part of the
+	 * Cloudflare read), so it is optional here.
+	 */
+	hasMetricsTarget?: boolean;
 }
 
 function toConnector(raw: CfConnector): TunnelConnector {
@@ -224,6 +230,8 @@ export interface TunnelMapResult {
 	privateRoutes: PrivateRoute[];
 	/** Per-source failures, so a partial map states what is missing rather than looking complete. */
 	errors: { source: string; message: string }[];
+	/** The latest cloudflared GitHub release, for version comparison. Set by the route, not this fetch. */
+	latestCloudflared?: { version: string; publishedAt: string } | { error: string };
 }
 
 /** Cloudflare writes a tunnel's final catch-all rule with no hostname. */
