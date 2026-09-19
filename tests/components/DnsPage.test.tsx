@@ -117,4 +117,22 @@ describe("DnsPage", () => {
 		await renderPage(result({ rows: [] }));
 		expect(await screen.findByText("No DNS records found")).toBeInTheDocument();
 	});
+
+	it("selects the zone filter from a #/dns?dns_zone=<id> deep link", async () => {
+		// Own key, not "zone": App.tsx uses "zone" for the account-wide zone-scoped routes
+		// (waf/cache/ai-security/bots), and this page's zone filter must not collide with that.
+		window.location.hash = "#/dns?dns_zone=z2";
+		await renderPage(
+			result({
+				rows: [
+					row({ id: "r1", zoneId: "z1", zoneName: "example.com", name: "api.example.com" }),
+					row({ id: "r2", zoneId: "z2", zoneName: "other.example", name: "www.other.example" }),
+				],
+			}),
+		);
+		await screen.findByText("www.other.example");
+		const select = (await screen.findByLabelText("Filter by zone")) as HTMLSelectElement;
+		expect(select.value).toBe("z2");
+		expect(screen.queryByText("api.example.com")).not.toBeInTheDocument();
+	});
 });

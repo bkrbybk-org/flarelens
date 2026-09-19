@@ -115,7 +115,10 @@ export function DnsPage({ session, onAuthError }: { session: Session; onAuthErro
 	}, [session.token, session.accountId, reloadKey, load]);
 
 	useHashSyncedState("type", typeFilter, setTypeFilter, "dns");
-	useHashSyncedState("zone", zoneFilter, setZoneFilter, "dns");
+	// Own key rather than "zone": that name is also used by App.tsx's account-wide zone-scope
+	// param on other routes (waf/cache/ai-security/bots), and this page's use is an unrelated
+	// row filter, not a zone selection that should drive the rest of the app.
+	useHashSyncedState("dns_zone", zoneFilter, setZoneFilter, "dns");
 
 	const rows = useMemo(() => result?.rows ?? [], [result]);
 
