@@ -11,6 +11,16 @@ export interface Env extends AuthEnv {
 	 * reading them under a shared credential collapses the Cloudflare audit trail to one identity.
 	 */
 	AI_REQUIRES_BYOT?: string;
+	/**
+	 * JSON array of `{ tunnelId, connectorId?, url }` — the only source of metrics targets.
+	 * Deploy-time only (`wrangler secret put`): a request can never name its own URL. See
+	 * src/lib/tunnel-metrics.ts.
+	 */
+	TUNNEL_METRICS?: string;
+	/** Access service token sent as `CF-Access-Client-Id` when fetching a configured metrics URL. */
+	METRICS_ACCESS_CLIENT_ID?: string;
+	/** Access service token secret, sent as `CF-Access-Client-Secret`. */
+	METRICS_ACCESS_CLIENT_SECRET?: string;
 }
 
 export type App = Hono<{ Bindings: Env }>;

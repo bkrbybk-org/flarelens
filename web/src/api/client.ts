@@ -16,7 +16,7 @@ export function authHeaders(token: string, extra?: Record<string, string>): Reco
 	return token ? { Authorization: `Bearer ${token}`, ...extra } : { ...extra };
 }
 
-async function apiFetch<T>(path: string, token: string): Promise<T> {
+export async function apiFetch<T>(path: string, token: string): Promise<T> {
 	const response = await fetch(path, {
 		headers: authHeaders(token),
 	});
@@ -221,6 +221,11 @@ export function fetchAiGatewayUsage<T>(
 
 export function fetchTunnelMap<T>(token: string, accountId: string, opts?: { fresh?: boolean }): Promise<CachedResult<T>> {
 	return apiFetchCached<T>(`/api/access/tunnels?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
+}
+
+/** On-demand connector metrics read — not cached, so a plain (non-cached) fetch. */
+export function fetchTunnelMetrics<T>(token: string, accountId: string, tunnelId: string): Promise<T> {
+	return apiFetch<T>(`/api/tunnels/${encodeURIComponent(tunnelId)}/metrics?account_id=${encodeURIComponent(accountId)}`, token);
 }
 
 export function fetchPqcReport<T>(token: string, accountId: string, opts?: { fresh?: boolean }): Promise<CachedResult<T>> {

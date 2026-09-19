@@ -133,6 +133,7 @@ const SCOPED_ROUTES: { name: string; request: (account: string, zone: string) =>
 	{ name: "GET /api/data", request: (a) => ({ path: `/api/data?account_id=${a}` }) },
 	{ name: "GET /api/waf/rulesets", request: (a) => ({ path: `/api/waf/rulesets?account_id=${a}` }) },
 	{ name: "GET /api/access/tunnels", request: (a) => ({ path: `/api/access/tunnels?account_id=${a}` }) },
+	{ name: "GET /api/tunnels/:tunnelId/metrics", request: (a) => ({ path: `/api/tunnels/11111111-1111-1111-1111-111111111111/metrics?account_id=${a}` }) },
 	{ name: "GET /api/pqc/report", request: (a) => ({ path: `/api/pqc/report?account_id=${a}` }) },
 	{ name: "GET /api/zone-health/report", request: (a) => ({ path: `/api/zone-health/report?account_id=${a}` }) },
 	{ name: "GET /api/dns/records", request: (a) => ({ path: `/api/dns/records?account_id=${a}` }) },
