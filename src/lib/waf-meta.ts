@@ -3,7 +3,8 @@
 // entrypoint) into a rule-id/ref keyed metadata map the frontend correlates
 // firewall events against.
 
-const CF_API_BASE = "https://api.cloudflare.com/client/v4";
+import { CF_API_BASE } from "./cf-rest";
+
 const MANAGED_RULESET_KIND = "managed";
 const CUSTOM_FIREWALL_PHASE = "http_request_firewall_custom";
 

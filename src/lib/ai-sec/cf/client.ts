@@ -1,7 +1,7 @@
 import { CfApiError, type AiSecEnv, type GraphQLError, type Zone } from './types';
+import { CF_API_BASE as REST_BASE } from '../../cf-rest';
 
-const GRAPHQL_ENDPOINT = 'https://api.cloudflare.com/client/v4/graphql';
-const REST_BASE = 'https://api.cloudflare.com/client/v4';
+const GRAPHQL_ENDPOINT = `${REST_BASE}/graphql`;
 
 function authHeaders(env: AiSecEnv): HeadersInit {
 	if (!env.CF_API_TOKEN) {

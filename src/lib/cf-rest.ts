@@ -54,6 +54,53 @@ export async function restList<T>(path: string, token: string): Promise<RestList
 	}
 }
 
+export interface CfListResponse<T> {
+	success: boolean;
+	errors?: { code?: number; message: string }[];
+	result?: T[];
+	result_info?: { page?: number; per_page?: number; total_pages?: number; total_count?: number };
+}
+
+/** One page of a Cloudflare list/read endpoint. Kept distinct from {@link restList} (whose error
+ * shape is a single string) because several routes still branch on `data.success` themselves. */
+export async function fetchCloudflare<T>(path: string, token: string): Promise<{ status: number; data: CfListResponse<T> }> {
+	const response = await fetch(`${CF_API_BASE}${path}`, { headers: authHeaders(token) });
+
+	const status = response.status;
+	let data: CfListResponse<T>;
+	try {
+		data = await response.json();
+	} catch {
+		data = { success: false, errors: [{ message: "Failed to parse Cloudflare API response" }] };
+	}
+	return { status, data };
+}
+
+/** Fetch every page of a list endpoint and concatenate results, in {@link fetchCloudflare}'s
+ * `{status, result, errors}` shape (distinct from {@link restList}'s `RestListResult`). */
+export async function fetchCloudflareAll<T>(
+	path: string,
+	token: string,
+): Promise<{ status: number; result: T[]; errors?: { message: string }[] }> {
+	const sep = path.includes("?") ? "&" : "?";
+	const all: T[] = [];
+	let page = 1;
+
+	while (true) {
+		const { status, data } = await fetchCloudflare<T>(`${path}${sep}per_page=${PER_PAGE}&page=${page}`, token);
+		if (status !== 200 || !data.success) {
+			return { status, result: [], errors: data.errors };
+		}
+		all.push(...(data.result || []));
+
+		const totalPages = data.result_info?.total_pages ?? 1;
+		if (page >= totalPages || (data.result || []).length === 0) {
+			return { status: 200, result: all };
+		}
+		page++;
+	}
+}
+
 /** Run tasks with bounded concurrency; Workers allow ~6 simultaneous connections per host. */
 export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
 	const results: R[] = new Array(items.length);

@@ -5,8 +5,8 @@
  * whose source was not available — the wire shapes here match what that deployment returns, so
  * a record from either backend renders identically.
  */
+import { CF_API_BASE as REST_BASE } from "./cf-rest";
 
-const REST_BASE = "https://api.cloudflare.com/client/v4";
 const GRAPHQL_ENDPOINT = `${REST_BASE}/graphql`;
 
 /** Matches the upstream dashboard: hourly buckets, or daily for long ranges. */

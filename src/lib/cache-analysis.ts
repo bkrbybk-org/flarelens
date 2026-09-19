@@ -28,8 +28,7 @@ import {
 	type GqlGroup,
 	type GqlResponse,
 } from "./cache-cf-types";
-
-const CF_API = "https://api.cloudflare.com/client/v4";
+import { CF_API_BASE as CF_API } from "./cf-rest";
 
 export type CacheCredentials = { token: string; zoneId: string };
 
