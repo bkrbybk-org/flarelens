@@ -6,6 +6,7 @@ import {
 	ChartIcon,
 	CoinIcon,
 	DatabaseIcon,
+	FilterIcon,
 	GlobeIcon,
 	KeyIcon,
 	LockIcon,
@@ -35,6 +36,7 @@ export const NAV_GROUPS: { label: string; items: { route: Route; label: string; 
 			{ route: "access-usage", label: "Access Usage", icon: ChartIcon },
 			{ route: "tunnels", label: "Tunnel Map", icon: ShareIcon },
 			{ route: "gateway", label: "Gateway Usage", icon: GlobeIcon },
+			{ route: "gateway-policies", label: "Gateway Policies", icon: FilterIcon },
 		],
 	},
 	{

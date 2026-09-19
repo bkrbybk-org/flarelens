@@ -76,6 +76,10 @@ const OPTIONAL_PERMISSIONS = [
 		label: "Account WAF: Read / Zone WAF: Read",
 		description: "Rate-limit rules in Rate Limits & Bots — read under the same WAF scopes as WAF Analytics (unverified against a live account).",
 	},
+	{
+		label: "Zero Trust: Read",
+		description: "The account's Gateway rules (DNS, DNS resolver, network and HTTP policies) in Gateway Policies.",
+	},
 ] as const;
 
 function StatusBadge({ status }: { status: CheckStatus }) {
