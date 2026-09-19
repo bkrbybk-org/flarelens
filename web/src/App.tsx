@@ -23,6 +23,7 @@ import { BotsPage } from "./features/bots/BotsPage";
 import { RequestTracePage } from "./features/request/RequestTracePage";
 import { CostPage } from "./features/cost/CostPage";
 import { AiSecurityPage } from "./features/ai-security/AiSecurityPage";
+import { ShieldsPage } from "./features/shields/ShieldsPage";
 import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
 import { Topbar } from "./components/shell/Topbar";
 import { CommandPalette } from "./components/shell/CommandPalette";
@@ -73,6 +74,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	bots: "Rate Limits & Bots",
 	cost: "Cost & Usage",
 	findings: "Findings",
+	shields: "Page & API Shield",
 };
 
 export default function App() {
@@ -427,6 +429,7 @@ export default function App() {
 					{route === "zone-health" && <ZoneHealthPage session={session} onAuthError={handleDisconnect} />}
 					{route === "dns" && <DnsPage session={session} onAuthError={handleDisconnect} />}
 					{route === "bots" && <BotsPage session={session} zoneId={prefs.botsZone} onAuthError={handleDisconnect} />}
+					{route === "shields" && <ShieldsPage session={session} onAuthError={handleDisconnect} />}
 					{route === "cost" && (
 						<CostPage
 							session={session}

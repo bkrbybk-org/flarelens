@@ -239,6 +239,17 @@ export function fetchGatewayPoliciesReport<T>(token: string, accountId: string, 
 	return apiFetchCached<T>(`/api/gateway/policies?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
 }
 
+export function fetchShieldsReport<T>(
+	token: string,
+	accountId: string,
+	zoneId?: string,
+	opts?: { fresh?: boolean },
+): Promise<CachedResult<T>> {
+	const params = new URLSearchParams({ account_id: accountId });
+	if (zoneId) params.set("zone_id", zoneId);
+	return apiFetchCached<T>(`/api/shields/report?${params.toString()}`, token, opts?.fresh);
+}
+
 export function fetchBotsReport<T>(
 	token: string,
 	accountId: string,

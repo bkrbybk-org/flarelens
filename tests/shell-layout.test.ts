@@ -68,6 +68,7 @@ describe("app shell height chain", () => {
 			"features/access/GroupsPage.tsx",
 			"features/zone-health/ZoneHealthPage.tsx",
 			"features/dns/DnsPage.tsx",
+			"features/shields/ShieldsPage.tsx",
 			"features/bots/BotsPage.tsx",
 		];
 		for (const page of pages) {
