@@ -235,6 +235,17 @@ export function fetchDnsRecords<T>(token: string, accountId: string, opts?: { fr
 	return apiFetchCached<T>(`/api/dns/records?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
 }
 
+export function fetchShieldsReport<T>(
+	token: string,
+	accountId: string,
+	zoneId?: string,
+	opts?: { fresh?: boolean },
+): Promise<CachedResult<T>> {
+	const params = new URLSearchParams({ account_id: accountId });
+	if (zoneId) params.set("zone_id", zoneId);
+	return apiFetchCached<T>(`/api/shields/report?${params.toString()}`, token, opts?.fresh);
+}
+
 export function fetchBotsReport<T>(
 	token: string,
 	accountId: string,

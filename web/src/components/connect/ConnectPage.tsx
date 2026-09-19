@@ -76,6 +76,17 @@ const OPTIONAL_PERMISSIONS = [
 		label: "Account WAF: Read / Zone WAF: Read",
 		description: "Rate-limit rules in Rate Limits & Bots — read under the same WAF scopes as WAF Analytics (unverified against a live account).",
 	},
+	{
+		label: "Client-side Security: Read",
+		description: "Page Shield status, scripts, connections and policies in Page & API Shield — formerly named \"Page Shield: Read\" in Cloudflare's own docs.",
+	},
+	// Every /api_gateway/* read returned "Authentication error" against the account this was built
+	// on, with only the scopes above granted — API Shield could not be verified live. Built from
+	// Cloudflare's documented API resources instead: https://developers.cloudflare.com/api/resources/api_gateway/
+	{
+		label: "API Gateway: Read",
+		description: "Saved and discovered endpoints, schema validation settings, uploaded schemas and session identifier configuration in Page & API Shield — unverified against a live account.",
+	},
 ] as const;
 
 function StatusBadge({ status }: { status: CheckStatus }) {

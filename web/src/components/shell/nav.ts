@@ -47,6 +47,7 @@ export const NAV_GROUPS: { label: string; items: { route: Route; label: string; 
 			{ route: "zone-health", label: "Zone Health", icon: PulseIcon },
 			{ route: "dns", label: "DNS Records", icon: GlobeIcon },
 			{ route: "bots", label: "Rate Limits & Bots", icon: BoltIcon },
+			{ route: "shields", label: "Page & API Shield", icon: ShieldIcon },
 		],
 	},
 	{

@@ -17,6 +17,7 @@ import { registerBotsRoutes } from "./routes/bots";
 import { registerAccessUsageRoutes } from "./routes/access-usage";
 import { registerWorkersRoutes } from "./routes/workers";
 import { registerCacheRoutes } from "./routes/cache";
+import { registerShieldsRoutes } from "./routes/shields";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -52,6 +53,7 @@ registerBotsRoutes(app);
 registerAccessUsageRoutes(app);
 registerWorkersRoutes(app);
 registerCacheRoutes(app);
+registerShieldsRoutes(app);
 
 // Static assets fallback
 app.all("*", async (c) => {
