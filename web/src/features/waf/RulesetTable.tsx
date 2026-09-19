@@ -2,12 +2,17 @@ import { Fragment, useMemo, useState } from "react";
 import { EmptyRow } from "../../components/EmptyState";
 import { BTN_SECONDARY, FOCUS_ROW } from "../../lib/ui";
 import {
+	columnFilteringFeature,
+	columnVisibilityFeature,
+	createFilteredRowModel,
+	createPaginatedRowModel,
+	createSortedRowModel,
 	flexRender,
-	getCoreRowModel,
-	getFilteredRowModel,
-	getPaginationRowModel,
-	getSortedRowModel,
-	useReactTable,
+	globalFilteringFeature,
+	rowPaginationFeature,
+	rowSortingFeature,
+	tableFeatures,
+	useTable,
 	type ColumnDef,
 	type ColumnFiltersState,
 	type SortingState,
@@ -24,6 +29,17 @@ import { actionDrift, actionSummary, topChildHost, topHosts, topEntries } from "
 import { relativeTime, titleCase } from "../../lib/waf/format";
 import type { RulesetRow } from "../../lib/waf/types";
 import { ActionBadges, ActionMixBar, RuleLevelBadge, RuleTypeBadge, ShareBar, Sparkline } from "./bars";
+
+const features = tableFeatures({
+	columnFilteringFeature,
+	globalFilteringFeature,
+	rowSortingFeature,
+	columnVisibilityFeature,
+	rowPaginationFeature,
+	filteredRowModel: createFilteredRowModel(),
+	sortedRowModel: createSortedRowModel(),
+	paginatedRowModel: createPaginatedRowModel(),
+});
 
 const PAGE_SIZE = 25;
 
@@ -64,7 +80,7 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
 	const [pageIndex, setPageIndex] = useState(0);
 
-	const columns = useMemo<ColumnDef<RulesetRow>[]>(() => [
+	const columns = useMemo<ColumnDef<typeof features, RulesetRow>[]>(() => [
 		{
 			id: "ruleName",
 			accessorFn: (row) => row.ruleName,
@@ -124,7 +140,8 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 		},
 	], [win]);
 
-	const table = useReactTable({
+	const table = useTable({
+		features,
 		data: rows,
 		columns,
 		state: { sorting, columnFilters, globalFilter: globalSearch, pagination: { pageIndex, pageSize: PAGE_SIZE } },
@@ -144,10 +161,6 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 			].join(" ").toLowerCase();
 			return haystack.includes(String(filterValue).toLowerCase());
 		},
-		getCoreRowModel: getCoreRowModel(),
-		getSortedRowModel: getSortedRowModel(),
-		getFilteredRowModel: getFilteredRowModel(),
-		getPaginationRowModel: getPaginationRowModel(),
 		autoResetPageIndex: true,
 	});
 

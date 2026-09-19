@@ -2,16 +2,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyRow } from "../../components/EmptyState";
 import { BTN_SECONDARY, FOCUS_ROW, SEARCH_INPUT } from "../../lib/ui";
 import {
+	columnFilteringFeature,
+	columnOrderingFeature,
+	columnVisibilityFeature,
+	createFilteredRowModel,
+	createPaginatedRowModel,
+	createSortedRowModel,
 	flexRender,
-	getCoreRowModel,
-	getFilteredRowModel,
-	getPaginationRowModel,
-	getSortedRowModel,
-	useReactTable,
+	globalFilteringFeature,
+	rowPaginationFeature,
+	rowSortingFeature,
+	tableFeatures,
+	useTable,
 	type ColumnDef,
 	type ColumnFiltersState,
 	type SortingState,
-	type VisibilityState,
+	type ColumnVisibilityState,
 } from "@tanstack/react-table";
 import type { CfPolicy } from "../../types";
 import { downloadCsv, toCsv } from "../../lib/csv";
@@ -38,6 +44,18 @@ import { SkeletonRows } from "./SkeletonRows";
  * columns. Those stay in the expandable detail row instead.
  */
 
+const features = tableFeatures({
+	columnFilteringFeature,
+	globalFilteringFeature,
+	rowSortingFeature,
+	columnVisibilityFeature,
+	columnOrderingFeature,
+	rowPaginationFeature,
+	filteredRowModel: createFilteredRowModel(),
+	sortedRowModel: createSortedRowModel(),
+	paginatedRowModel: createPaginatedRowModel(),
+});
+
 interface PolicyRow {
 	policy: CfPolicy;
 	/** Applications attaching this policy by reference. */
@@ -49,9 +67,9 @@ interface PoliciesTableProps {
 	usedBy: Map<string, string[]>;
 	loading: boolean;
 	ctx: RuleContext;
-	columnVisibility: VisibilityState;
+	columnVisibility: ColumnVisibilityState;
 	columnOrder: string[];
-	onPrefsChange: (patch: { policyColumnVisibility?: VisibilityState; policyColumnOrder?: string[] }) => void;
+	onPrefsChange: (patch: { policyColumnVisibility?: ColumnVisibilityState; policyColumnOrder?: string[] }) => void;
 }
 
 const COLUMNS = ["name", "decision", "rules", "attached", "updated_at", "created_at", "id"] as const;
@@ -179,8 +197,8 @@ export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility
 	const columnsMenuRef = useRef<HTMLDivElement>(null);
 
 	// Saved prefs win; anything the operator has never touched falls back to the defaults above.
-	const effectiveVisibility = useMemo<VisibilityState>(() => {
-		const visibility: VisibilityState = {};
+	const effectiveVisibility = useMemo<ColumnVisibilityState>(() => {
+		const visibility: ColumnVisibilityState = {};
 		for (const key of COLUMNS) visibility[key] = columnVisibility[key] ?? DEFAULT_VISIBLE.includes(key);
 		return visibility;
 	}, [columnVisibility]);
@@ -195,7 +213,7 @@ export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility
 		[policies, usedBy],
 	);
 
-	const columns = useMemo<ColumnDef<PolicyRow>[]>(
+	const columns = useMemo<ColumnDef<typeof features, PolicyRow>[]>(
 		() =>
 			COLUMNS.map((key) => ({
 				id: key,
@@ -207,7 +225,8 @@ export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility
 		[],
 	);
 
-	const table = useReactTable({
+	const table = useTable({
+		features,
 		data,
 		columns,
 		state: {
@@ -224,16 +243,16 @@ export function PoliciesTable({ policies, usedBy, loading, ctx, columnVisibility
 		globalFilterFn: (row, _columnId, filterValue) =>
 			JSON.stringify(row.original.policy).toLowerCase().includes(String(filterValue).toLowerCase()) ||
 			row.original.attachedTo.join(" ").toLowerCase().includes(String(filterValue).toLowerCase()),
-		getCoreRowModel: getCoreRowModel(),
-		getSortedRowModel: getSortedRowModel(),
-		getFilteredRowModel: getFilteredRowModel(),
-		getPaginationRowModel: getPaginationRowModel(),
 		autoResetPageIndex: false,
 	});
 
-	useEffect(() => {
+	// Reset to page 1 whenever the search, filters, or underlying data change. Done during
+	// render (not in an effect) so it applies before paint instead of causing an extra render.
+	const [resetTracker, setResetTracker] = useState({ globalFilter, columnFilters, policies });
+	if (resetTracker.globalFilter !== globalFilter || resetTracker.columnFilters !== columnFilters || resetTracker.policies !== policies) {
+		setResetTracker({ globalFilter, columnFilters, policies });
 		setPageIndex(0);
-	}, [globalFilter, columnFilters, policies]);
+	}
 
 	const distinctValues = useMemo(() => {
 		const map: Record<string, string[]> = {};

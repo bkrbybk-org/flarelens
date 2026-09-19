@@ -2,11 +2,15 @@ import { Fragment, useMemo, useState } from "react";
 import { EmptyNote } from "../../components/EmptyState";
 import { ALERT_WARN, BTN_SECONDARY, CARD, FOCUS_RING, SECTION_TITLE } from "../../lib/ui";
 import {
+	columnFilteringFeature,
+	columnVisibilityFeature,
+	createFilteredRowModel,
+	createSortedRowModel,
 	flexRender,
-	getCoreRowModel,
-	getFilteredRowModel,
-	getSortedRowModel,
-	useReactTable,
+	globalFilteringFeature,
+	rowSortingFeature,
+	tableFeatures,
+	useTable,
 	type ColumnDef,
 	type SortingState,
 } from "@tanstack/react-table";
@@ -26,6 +30,15 @@ import { DecryptKeyPanel, PromptPayload } from "./PromptPayload";
  * The row drawer stays: the twelve columns are what you scan, and the drawer is what you read
  * once a row looks worth reading.
  */
+
+const features = tableFeatures({
+	columnFilteringFeature,
+	globalFilteringFeature,
+	rowSortingFeature,
+	columnVisibilityFeature,
+	filteredRowModel: createFilteredRowModel(),
+	sortedRowModel: createSortedRowModel(),
+});
 
 const SEVERITY_ORDER: Record<Severity | "none", number> = { critical: 4, high: 3, medium: 2, low: 1, none: 0 };
 
@@ -93,7 +106,7 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 	const [copied, setCopied] = useState(false);
 	const [openRay, setOpenRay] = useState<string | null>(null);
 
-	const columns = useMemo<ColumnDef<RawEvent>[]>(
+	const columns = useMemo<ColumnDef<typeof features, RawEvent>[]>(
 		() => [
 			{
 				id: "datetime",
@@ -150,15 +163,13 @@ export function EventsTable({ events, truncated }: { events: RawEvent[]; truncat
 		[],
 	);
 
-	const table = useReactTable({
+	const table = useTable({
+		features,
 		data: events,
 		columns,
 		state: { sorting, globalFilter: search },
 		onSortingChange: setSorting,
 		onGlobalFilterChange: setSearch,
-		getCoreRowModel: getCoreRowModel(),
-		getSortedRowModel: getSortedRowModel(),
-		getFilteredRowModel: getFilteredRowModel(),
 	});
 
 	const rows = table.getRowModel().rows;

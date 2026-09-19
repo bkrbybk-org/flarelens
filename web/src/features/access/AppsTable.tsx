@@ -2,16 +2,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyRow, EmptyState } from "../../components/EmptyState";
 import { BTN_SECONDARY, FOCUS_RING, FOCUS_ROW, SEARCH_INPUT } from "../../lib/ui";
 import {
+	columnFilteringFeature,
+	columnOrderingFeature,
+	columnVisibilityFeature,
+	createFilteredRowModel,
+	createPaginatedRowModel,
+	createSortedRowModel,
 	flexRender,
-	getCoreRowModel,
-	getFilteredRowModel,
-	getPaginationRowModel,
-	getSortedRowModel,
-	useReactTable,
+	globalFilteringFeature,
+	rowPaginationFeature,
+	rowSortingFeature,
+	tableFeatures,
+	useTable,
 	type ColumnDef,
 	type ColumnFiltersState,
 	type SortingState,
-	type VisibilityState,
+	type ColumnVisibilityState,
 } from "@tanstack/react-table";
 import type { CfApp, CfPolicy } from "../../types";
 import { downloadCsv, toCsv } from "../../lib/csv";
@@ -27,6 +33,18 @@ import {
 import { DecisionBadge, ErrorBadge, PolicyChip, Tag } from "./PolicyChip";
 import { SkeletonCards, SkeletonRows } from "./SkeletonRows";
 
+const features = tableFeatures({
+	columnFilteringFeature,
+	globalFilteringFeature,
+	rowSortingFeature,
+	columnVisibilityFeature,
+	columnOrderingFeature,
+	rowPaginationFeature,
+	filteredRowModel: createFilteredRowModel(),
+	sortedRowModel: createSortedRowModel(),
+	paginatedRowModel: createPaginatedRowModel(),
+});
+
 // Order matters: drives default column order when the user has not saved one
 const DEFAULT_VISIBLE = ["name", "destinations", "tags", "allowed_idps", "policies", "logins_7d", "updated_at", "type", "session_duration"];
 const HIDDEN_KEYS = new Set(["policies_error"]);
@@ -39,12 +57,12 @@ interface AppsTableProps {
 	onSelect: (app: CfApp) => void;
 	perPage: number;
 	density: "comfortable" | "compact";
-	columnVisibility: VisibilityState;
+	columnVisibility: ColumnVisibilityState;
 	columnOrder: string[];
 	onPrefsChange: (patch: {
 		perPage?: number;
 		density?: "comfortable" | "compact";
-		columnVisibility?: VisibilityState;
+		columnVisibility?: ColumnVisibilityState;
 		columnOrder?: string[];
 	}) => void;
 }
@@ -229,7 +247,7 @@ export function AppsTable({
 		return keys;
 	}, [apps]);
 
-	const columns = useMemo<ColumnDef<CfApp>[]>(
+	const columns = useMemo<ColumnDef<typeof features, CfApp>[]>(
 		() =>
 			allKeys.map((key) => ({
 				id: key,
@@ -243,8 +261,8 @@ export function AppsTable({
 	);
 
 	// Effective visibility: stored prefs win; otherwise defaults.
-	const effectiveVisibility = useMemo<VisibilityState>(() => {
-		const vis: VisibilityState = {};
+	const effectiveVisibility = useMemo<ColumnVisibilityState>(() => {
+		const vis: ColumnVisibilityState = {};
 		for (const key of allKeys) {
 			vis[key] = columnVisibility[key] ?? DEFAULT_VISIBLE.includes(key);
 		}
@@ -264,7 +282,8 @@ export function AppsTable({
 
 	const [pageIndex, setPageIndex] = useState(0);
 
-	const table = useReactTable({
+	const table = useTable({
+		features,
 		data: apps,
 		columns,
 		state: {
@@ -287,16 +306,16 @@ export function AppsTable({
 		},
 		globalFilterFn: (row, _columnId, filterValue) =>
 			JSON.stringify(row.original).toLowerCase().includes(String(filterValue).toLowerCase()),
-		getCoreRowModel: getCoreRowModel(),
-		getSortedRowModel: getSortedRowModel(),
-		getFilteredRowModel: getFilteredRowModel(),
-		getPaginationRowModel: getPaginationRowModel(),
 		autoResetPageIndex: false,
 	});
 
-	useEffect(() => {
+	// Reset to page 1 whenever the search, filters, or underlying data change. Done during
+	// render (not in an effect) so it applies before paint instead of causing an extra render.
+	const [resetTracker, setResetTracker] = useState({ globalFilter, columnFilters, apps });
+	if (resetTracker.globalFilter !== globalFilter || resetTracker.columnFilters !== columnFilters || resetTracker.apps !== apps) {
+		setResetTracker({ globalFilter, columnFilters, apps });
 		setPageIndex(0);
-	}, [globalFilter, columnFilters, apps]);
+	}
 
 	// Distinct facet values per column for the filter popover
 	const distinctValues = useMemo(() => {
