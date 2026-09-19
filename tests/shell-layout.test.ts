@@ -58,6 +58,7 @@ describe("app shell height chain", () => {
 			"features/cost/CostPage.tsx",
 			"features/findings/FindingsPage.tsx",
 			"features/gateway/GatewayPage.tsx",
+			"features/gateway-policies/GatewayPoliciesPage.tsx",
 			"features/pqc/PqcPage.tsx",
 			"features/request/RequestTracePage.tsx",
 			"features/tunnels/TunnelMapPage.tsx",

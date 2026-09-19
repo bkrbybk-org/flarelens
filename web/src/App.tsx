@@ -14,6 +14,7 @@ import { AccessUsagePage } from "./features/access-usage/AccessUsagePage";
 import { WorkersAiPage } from "./features/workers-ai/WorkersAiPage";
 import { AiGatewayPage } from "./features/ai-gateway/AiGatewayPage";
 import { GatewayPage } from "./features/gateway/GatewayPage";
+import { GatewayPoliciesPage } from "./features/gateway-policies/GatewayPoliciesPage";
 import { TunnelMapPage } from "./features/tunnels/TunnelMapPage";
 import { PqcPage } from "./features/pqc/PqcPage";
 import { ZoneHealthPage } from "./features/zone-health/ZoneHealthPage";
@@ -65,6 +66,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	request: "Request Trace",
 	tunnels: "Tunnel Map",
 	gateway: "Gateway Usage",
+	"gateway-policies": "Gateway Policies",
 	pqc: "PQC Readiness",
 	"zone-health": "Zone Health",
 	dns: "DNS Records",
@@ -420,6 +422,7 @@ export default function App() {
 					{route === "request" && <RequestTracePage session={session} zones={zones.zones} onAuthError={handleDisconnect} />}
 					{route === "tunnels" && <TunnelMapPage session={session} onAuthError={handleDisconnect} />}
 					{route === "gateway" && <GatewayPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
+					{route === "gateway-policies" && <GatewayPoliciesPage session={session} onAuthError={handleDisconnect} />}
 					{route === "pqc" && <PqcPage session={session} onAuthError={handleDisconnect} />}
 					{route === "zone-health" && <ZoneHealthPage session={session} onAuthError={handleDisconnect} />}
 					{route === "dns" && <DnsPage session={session} onAuthError={handleDisconnect} />}
