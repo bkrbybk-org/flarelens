@@ -438,7 +438,7 @@ export default function App() {
 					)}
 					{route === "findings" && (
 						<FindingsPage
-							accountId={session.accountId}
+							session={session}
 							apps={data.data?.apps || []}
 							groups={data.data?.groups || []}
 							reusableMap={data.reusableMap}
@@ -448,6 +448,7 @@ export default function App() {
 							onNavigate={(href) => {
 								window.location.hash = href.replace(/^#/, "");
 							}}
+							onAuthError={handleDisconnect}
 						/>
 					)}
 				</main>

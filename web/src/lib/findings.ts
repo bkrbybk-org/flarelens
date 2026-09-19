@@ -8,7 +8,7 @@ import type { RuleReviewRow } from "./waf/types";
 import type { CacheAnalysis } from "../features/cache/types";
 
 export type Severity = "high" | "medium" | "low";
-export type FindingSource = "access" | "groups" | "waf" | "cache";
+export type FindingSource = "access" | "groups" | "waf" | "cache" | "tunnels" | "zone-health" | "pqc" | "dns" | "bots";
 
 export interface Finding {
 	id: string;
@@ -20,7 +20,9 @@ export interface Finding {
 }
 
 const SEVERITY_ORDER: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
-const SOURCE_ORDER: Record<FindingSource, number> = { access: 0, groups: 1, waf: 2, cache: 3 };
+const SOURCE_ORDER: Record<FindingSource, number> = {
+	access: 0, groups: 1, tunnels: 2, waf: 3, cache: 4, "zone-health": 5, pqc: 6, dns: 7, bots: 8,
+};
 
 export function sortFindings(findings: Finding[]): Finding[] {
 	return [...findings].sort(
