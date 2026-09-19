@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+	columnVisibilityFeature,
+	createSortedRowModel,
 	flexRender,
-	getCoreRowModel,
-	getSortedRowModel,
-	useReactTable,
+	rowSortingFeature,
+	tableFeatures,
+	useTable,
 	type ColumnDef,
 	type SortingState,
 } from "@tanstack/react-table";
@@ -55,7 +57,13 @@ function FlagBadges({ flags }: { flags: DnsRow["flags"] }) {
 	);
 }
 
-const COLUMNS: ColumnDef<DnsRow>[] = [
+const features = tableFeatures({
+	rowSortingFeature,
+	columnVisibilityFeature,
+	sortedRowModel: createSortedRowModel(),
+});
+
+const COLUMNS: ColumnDef<typeof features, DnsRow>[] = [
 	{ id: "zoneName", header: "Zone", accessorFn: (r) => r.zoneName },
 	{ id: "type", header: "Type", accessorFn: (r) => r.type },
 	{ id: "name", header: "Name", accessorFn: (r) => r.name, cell: ({ row }) => <span className="font-mono text-xs">{row.original.name}</span> },
@@ -136,13 +144,12 @@ export function DnsPage({ session, onAuthError }: { session: Session; onAuthErro
 		});
 	}, [rows, search, typeFilter, zoneFilter]);
 
-	const table = useReactTable({
+	const table = useTable({
+		features,
 		data: filteredRows,
 		columns: COLUMNS,
 		state: { sorting },
 		onSortingChange: setSorting,
-		getCoreRowModel: getCoreRowModel(),
-		getSortedRowModel: getSortedRowModel(),
 	});
 	const tableRows = table.getRowModel().rows;
 
