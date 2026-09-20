@@ -51,16 +51,7 @@ function swaggerUiHtml(): string {
 <div id="swagger-ui"></div>
 <script src="/docs/swagger-ui-bundle.js"></script>
 <script src="/docs/swagger-ui-standalone-preset.js"></script>
-<script>
-  window.onload = function () {
-    window.ui = SwaggerUIBundle({
-      url: "/api/openapi.json",
-      dom_id: "#swagger-ui",
-      presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
-      layout: "StandaloneLayout",
-    });
-  };
-</script>
+<script src="/docs/init.js"></script>
 </body>
 </html>`;
 }

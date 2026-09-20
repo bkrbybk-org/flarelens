@@ -4,13 +4,14 @@ Status snapshot, last reviewed **2026-09-17** against a full read of the tree, a
 the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-one sections, 24 API routes, 1,109 tests green across 74 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings.
+**TL;DR** — Twenty-one sections, 26 API routes (including the OpenAPI document and Swagger UI), 1,127 tests green across 76 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `c9403a43`, deployed 2026-09-19 (route split, Findings everywhere, executive report,
+Running version `70c69cb1`, deployed 2026-09-20 (OpenAPI document and Swagger UI). The previous
+version was `c9403a43`, deployed 2026-09-19 (route split, Findings everywhere, executive report,
 Gateway Policies, Page & API Shield, cloudflared version check, connector metrics, dependency
 upgrades). The previous versions were `4cdb50c5` (2026-09-18: WAF evaluation order),
 `53721ea5` (same day, before display fixes), `5eaae590` (2026-09-17: audit fixes),
@@ -396,6 +397,23 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **The API documents itself (2026-09-20, `70c69cb1`).** `GET /api/openapi.json` serves an
+  OpenAPI 3.1 document for all 24 endpoints — both credential modes, the success/error envelopes,
+  the id parameters, the edge-cache headers and `X-Flarelens-Fresh`, and each route's real error
+  statuses — and `GET /docs` serves Swagger UI for it. Both sit behind the same auth as every
+  other route, so Access already gates them; `/health` is the one path documented as unsecured.
+  Swagger UI is self-hosted (the CSP allows scripts from `'self'` only, so a CDN copy could not
+  run) and copied out of `swagger-ui-dist` at build time rather than committed. `/docs` is the
+  only path that relaxes the CSP, and only `style-src`, for the inline styles Swagger UI injects.
+  A drift test compares the document against Hono's own route table in both directions, so a new
+  route cannot ship undocumented — checked by deleting a path and watching it fail.
+  *Found in review:* the first build put the Swagger bootstrap in an inline `<script>`, which the
+  page's own `script-src 'self'` blocked — the page rendered blank while every header test passed.
+  The bootstrap is now `/docs/init.js`, and a test rejects any inline script in that page.
+  *Also:* the guard keeping credential reads inside `src/lib/auth.ts` exempts the document module
+  for the header *name* it has to print, but the test now also asserts that module never touches a
+  request at all.
 
 - **Ten items in one pass (2026-09-19, `c9403a43`).** Built by Sonnet agents in separate worktrees:
   the refactor first on its own, then five in parallel. Each diff was reviewed, merged,

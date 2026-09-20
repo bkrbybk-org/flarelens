@@ -127,6 +127,15 @@ describe("GET /docs", () => {
 		expect(res.headers.get("Content-Type") || "").toContain("text/html");
 	});
 
+	it("loads its bootstrap from a file, never inline — the page's own CSP would block it", async () => {
+		// script-src stays 'self' on /docs, so an inline <script> renders a blank page. Headers
+		// alone did not catch that; the page must carry no executable inline script at all.
+		const html = await (await app.request("/docs", { headers: TOKEN_HEADERS }, BYOT_ENV, ctx())).text();
+		const inlineScripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)];
+		expect(inlineScripts.map((m) => m[1].trim()).filter(Boolean)).toEqual([]);
+		expect(html).toContain('<script src="/docs/init.js">');
+	});
+
 	it("relaxes style-src for 'unsafe-inline' but never script-src", async () => {
 		const res = await app.request("/docs", { headers: TOKEN_HEADERS }, BYOT_ENV, ctx());
 		const csp = res.headers.get("Content-Security-Policy") || "";

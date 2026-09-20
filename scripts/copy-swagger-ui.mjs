@@ -24,4 +24,8 @@ for (const file of FILES) {
 	copyFileSync(src, join(DEST_DIR, file));
 }
 
-console.log(`copy-swagger-ui: copied ${FILES.length} files to web/public/docs/`);
+// The page's own bootstrap. It lives in web/src so it is reviewed like source, and is copied
+// here because everything /docs loads must come from the same gitignored directory.
+copyFileSync(join(ROOT, "web", "src", "docs-init.js"), join(DEST_DIR, "init.js"));
+
+console.log(`copy-swagger-ui: copied ${FILES.length + 1} files to web/public/docs/`);

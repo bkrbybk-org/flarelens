@@ -87,6 +87,8 @@ are copied from the `swagger-ui-dist` devDependency into `web/public/docs/` by
 not committed to git (`web/public/docs/` is gitignored) or loaded from a CDN, which the CSP
 would refuse anyway.
 
+The page's bootstrap is `web/src/docs-init.js`, copied to `/docs/init.js` at build time with the vendor bundles. It is a file rather than an inline `<script>` on purpose: `/docs` relaxes `style-src` only, so an inline bootstrap is blocked and the page renders blank — [tests/openapi.test.ts](tests/openapi.test.ts) fails if one comes back.
+
 ## Architecture
 
 ```
