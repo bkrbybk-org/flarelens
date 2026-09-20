@@ -9,6 +9,7 @@ import { NAV_GROUPS } from "./nav";
 import {
 	BookmarkIcon,
 	ChevronDownIcon,
+	ExternalLinkIcon,
 	PanelLeftIcon,
 	PencilIcon,
 	ShieldIcon,
@@ -265,6 +266,23 @@ function SidebarContent({
 				) : (
 					!collapsed && <div className="text-[11px] text-zinc-500 dark:text-zinc-400">Version unavailable</div>
 				)}
+			</div>
+
+			{/* API docs link. Plain <a>, not a Route: /docs is a Worker-served page outside the SPA's
+			    own routing, so it opens in a new tab rather than replacing the app. */}
+			<div className={`border-t border-zinc-200 py-2 dark:border-zinc-800 ${collapsed ? "px-2" : "px-3"}`}>
+				<a
+					href="/docs"
+					target="_blank"
+					rel="noopener noreferrer"
+					title={collapsed ? "API docs" : undefined}
+					className={`flex w-full items-center rounded-lg text-sm text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 ${
+						collapsed ? "justify-center px-2 py-2" : "gap-3 px-3 py-2"
+					} ${FOCUS_RING}`}
+				>
+					<ExternalLinkIcon size={17} />
+					{!collapsed && <span className="flex-1 text-left">API docs</span>}
+				</a>
 			</div>
 
 			{/* Bottom rail, like the Cloudflare dashboard's own sidebar: the control that changes

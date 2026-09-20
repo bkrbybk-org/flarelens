@@ -94,6 +94,10 @@ const GATED_ROUTES: { name: string; path: string; init?: RequestInit }[] = [
 		path: "/api/ai-security/analyze",
 		init: { method: "POST", body: JSON.stringify({ accountId: ALLOWED_ACCOUNT }) },
 	},
+	// Neither takes an account_id — nothing to scope — so they belong here rather than among the
+	// SCOPED_ROUTES below, but they still go through the same resolveAuth gate as everything else.
+	{ name: "GET /api/openapi.json", path: "/api/openapi.json" },
+	{ name: "GET /docs", path: "/docs" },
 ];
 
 describe("every /api route is gated", () => {

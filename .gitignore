@@ -21,3 +21,6 @@ worker-configuration.d.ts
 web/dist/
 .tsbuild/
 *.tsbuildinfo
+
+# Swagger UI assets copied from node_modules by scripts/copy-swagger-ui.mjs at build time
+web/public/docs/
