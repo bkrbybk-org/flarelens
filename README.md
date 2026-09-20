@@ -89,6 +89,16 @@ would refuse anyway.
 
 The page's bootstrap is `web/src/docs-init.js`, copied to `/docs/init.js` at build time with the vendor bundles. It is a file rather than an inline `<script>` on purpose: `/docs` relaxes `style-src` only, so an inline bootstrap is blocked and the page renders blank — [tests/openapi.test.ts](tests/openapi.test.ts) fails if one comes back.
 
+The document is **OpenAPI 3.0.3**, not 3.1, and names an absolute server URL taken from the
+request. Both are deliberate: Cloudflare API Shield's schema validation
+([docs](https://developers.cloudflare.com/api-shield/security/schema-validation/)) relies on OAS
+3.0 and rejects 3.1, and it refuses a relative server URL with
+`failed to construct endpoint URLs: server URL: host not present`. So this document can be
+uploaded there as-is to validate the app's own API. Nothing here needs a 3.1 construct — a fixed
+value is written as a one-value `enum` rather than `const` — and
+[tests/openapi.test.ts](tests/openapi.test.ts) fails if one creeps back in, if a parameter loses
+its schema, or if an external `$ref` appears.
+
 ## Architecture
 
 ```

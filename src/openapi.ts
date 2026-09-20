@@ -26,7 +26,7 @@ const errorEnvelope: Schema = {
 	type: "object",
 	required: ["success", "errors"],
 	properties: {
-		success: { const: false },
+		success: { type: "boolean", enum: [false] },
 		errors: {
 			type: "array",
 			items: {
@@ -43,7 +43,7 @@ function successEnvelope(resultSchema: Schema, extra: Record<string, Schema> = {
 		type: "object",
 		required: ["success", "result"],
 		properties: {
-			success: { const: true },
+			success: { type: "boolean", enum: [true] },
 			result: resultSchema,
 			...extra,
 		},
@@ -121,11 +121,25 @@ function okJson(schema: Schema, headers?: Schema): Schema {
 export interface OpenApiOptions {
 	/** Version string, preferring the running deployment's CF_VERSION_METADATA when present. */
 	version: string;
+	/**
+	 * Absolute origin this deployment answers on, e.g. `https://flarelens.example.com`, taken
+	 * from the request that asked for the document.
+	 *
+	 * Not a relative `/`: that is legal OpenAPI and Swagger UI resolves it fine, but tools that
+	 * consume the document away from the server cannot. Cloudflare API Shield refuses a schema
+	 * whose server URL has no host — `failed to construct endpoint URLs: server URL: host not
+	 * present` — which is how this surfaced.
+	 */
+	serverUrl: string;
 }
 
-export function buildOpenApiDocument({ version }: OpenApiOptions): Record<string, unknown> {
+export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Record<string, unknown> {
 	return {
-		openapi: "3.1.0",
+		// 3.0.3, not 3.1: Cloudflare API Shield's schema validation states plainly that it relies
+		// on OAS v3.0 and does not support v3.1, and this document is meant to be uploadable
+		// there. Nothing here needs a 3.1-only construct — `const` is written as a one-value
+		// `enum`, which 3.0 understands and every tool renders the same way.
+		openapi: "3.0.3",
 		info: {
 			title: "Flarelens API",
 			version,
@@ -153,7 +167,7 @@ export function buildOpenApiDocument({ version }: OpenApiOptions): Record<string
 					"quota against the connected account.",
 			].join("\n"),
 		},
-		servers: [{ url: "/" }],
+		servers: [{ url: serverUrl, description: "This deployment." }],
 		security: [{ accessSession: [] }, { cloudflareToken: [] }],
 		tags: [
 			{ name: "Core", description: "Bootstrap: health, accounts, deployment config, zones." },
@@ -183,7 +197,7 @@ export function buildOpenApiDocument({ version }: OpenApiOptions): Record<string
 					description: "Unauthenticated. Used by uptime checks; carries no account data.",
 					security: [],
 					responses: {
-						200: okJson({ type: "object", properties: { status: { const: "ok" } } }),
+						200: okJson({ type: "object", properties: { status: { type: "string", enum: ["ok"] } } }),
 					},
 				},
 			},
@@ -554,7 +568,7 @@ export function buildOpenApiDocument({ version }: OpenApiOptions): Record<string
 						200: okJson({
 							type: "object",
 							properties: {
-								success: { const: true },
+								success: { type: "boolean", enum: [true] },
 								result: { type: "array", items: genericObject },
 								diagnostics: {
 									type: "object",

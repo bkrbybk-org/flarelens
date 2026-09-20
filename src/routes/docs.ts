@@ -63,7 +63,10 @@ export function registerDocsRoutes(app: App): void {
 			return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
 		}
 		const version = c.env.CF_VERSION_METADATA?.id || FALLBACK_VERSION;
-		return c.json(buildOpenApiDocument({ version }));
+		// The origin the caller reached, so the document is usable by tools that never see this
+		// server themselves (API Shield, Postman, a client generator).
+		const serverUrl = new URL(c.req.url).origin;
+		return c.json(buildOpenApiDocument({ version, serverUrl }));
 	});
 
 	app.get("/docs", async (c) => {

@@ -10,7 +10,8 @@ mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates opera
 no longer asks for a token. Every section has now been exercised against real account data
 through an Access service token, AI Gateway included — its field names are resolved from the
 schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `70c69cb1`, deployed 2026-09-20 (OpenAPI document and Swagger UI). The previous
+Running version `9c377681`, deployed 2026-09-20 (OpenAPI document and Swagger UI; `70c69cb1` was
+the same feature before the API Shield compatibility fix). The previous
 version was `c9403a43`, deployed 2026-09-19 (route split, Findings everywhere, executive report,
 Gateway Policies, Page & API Shield, cloudflared version check, connector metrics, dependency
 upgrades). The previous versions were `4cdb50c5` (2026-09-18: WAF evaluation order),
@@ -414,6 +415,13 @@ into that project only, so the node project's Workers-shaped globals stay untouc
   *Also:* the guard keeping credential reads inside `src/lib/auth.ts` exempts the document module
   for the header *name* it has to print, but the test now also asserts that module never touches a
   request at all.
+  *Follow-up the same day:* uploading the document to Cloudflare API Shield failed with
+  `failed to construct endpoint URLs: server URL: host not present` — the document declared a
+  relative server (`/`). It now names the absolute origin of the request that asked for it. The
+  same check turned up a second blocker: API Shield relies on **OAS 3.0 and rejects 3.1**, which
+  the document declared. It is now 3.0.3, with fixed values written as one-value `enum`s instead
+  of `const`, and tests pin the version, the absolute server, the absence of 3.1-only constructs
+  and external `$ref`s.
 
 - **Ten items in one pass (2026-09-19, `c9403a43`).** Built by Sonnet agents in separate worktrees:
   the refactor first on its own, then five in parallel. Each diff was reviewed, merged,

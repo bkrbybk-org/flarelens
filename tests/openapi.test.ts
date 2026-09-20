@@ -38,7 +38,7 @@ function key(r: { method: string; path: string }): string {
 
 describe("the OpenAPI document tracks the app's real routes", () => {
 	it("documents every route the app serves, and serves every route it documents", () => {
-		const spec = buildOpenApiDocument({ version: "test" });
+		const spec = buildOpenApiDocument({ version: "test", serverUrl: "https://flarelens.example.com" });
 		const live = new Set(liveRoutes().map(key));
 		const documented = new Set(specRoutes(spec).map(key));
 		expect([...documented].sort()).toEqual([...live].sort());
@@ -47,7 +47,7 @@ describe("the OpenAPI document tracks the app's real routes", () => {
 	it("fails if a route silently stops being documented", () => {
 		// Same comparison as above, but simulating a spec that lost a path — proves the test
 		// above would actually catch that, not just pass by construction.
-		const spec = buildOpenApiDocument({ version: "test" }) as { paths: Record<string, unknown> };
+		const spec = buildOpenApiDocument({ version: "test", serverUrl: "https://flarelens.example.com" }) as { paths: Record<string, unknown> };
 		delete spec.paths["/api/zones"];
 		const live = new Set(liveRoutes().map(key));
 		const documented = new Set(specRoutes(spec as never).map(key));
@@ -55,7 +55,7 @@ describe("the OpenAPI document tracks the app's real routes", () => {
 	});
 
 	it("marks every path as secured except /health", () => {
-		const spec = buildOpenApiDocument({ version: "test" }) as {
+		const spec = buildOpenApiDocument({ version: "test", serverUrl: "https://flarelens.example.com" }) as {
 			security: unknown[];
 			paths: Record<string, Record<string, { security?: unknown[] }>>;
 		};
@@ -69,10 +69,21 @@ describe("the OpenAPI document tracks the app's real routes", () => {
 		expect(unsecured).toEqual(["GET /health"]);
 	});
 
-	it("parses as JSON, declares openapi 3.1.x, and resolves every $ref", () => {
-		const spec = buildOpenApiDocument({ version: "test" });
+	it("names an absolute server URL, so tools away from this server can use it", async () => {
+		// API Shield refuses a relative one: "server URL: host not present".
+		const res = await app.request("/api/openapi.json", { headers: TOKEN_HEADERS }, BYOT_ENV, ctx());
+		const servers = (await res.json() as { servers: { url: string }[] }).servers;
+		expect(servers).toHaveLength(1);
+		const url = new URL(servers[0].url);
+		expect(url.protocol).toBe("http:");
+		expect(url.host).toBeTruthy();
+		expect(servers[0].url).not.toMatch(/\/$/);
+	});
+
+	it("parses as JSON, declares openapi 3.0.x, and resolves every $ref", () => {
+		const spec = buildOpenApiDocument({ version: "test", serverUrl: "https://flarelens.example.com" });
 		const roundTripped = JSON.parse(JSON.stringify(spec)) as { openapi: string };
-		expect(roundTripped.openapi).toMatch(/^3\.1\.\d+$/);
+		expect(roundTripped.openapi).toMatch(/^3\.0\.\d+$/);
 
 		const refs = new Set<string>();
 		const walk = (node: unknown) => {
@@ -110,7 +121,7 @@ describe("GET /api/openapi.json", () => {
 		const res = await app.request("/api/openapi.json", { headers: TOKEN_HEADERS }, BYOT_ENV, ctx());
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as { openapi: string };
-		expect(body.openapi).toMatch(/^3\.1\./);
+		expect(body.openapi).toMatch(/^3\.0\./);
 	});
 });
 
@@ -156,5 +167,73 @@ describe("the /docs CSP exception is scoped to /docs alone", () => {
 		const res = await app.request("/api/openapi.json", { headers: TOKEN_HEADERS }, BYOT_ENV, ctx());
 		const csp = res.headers.get("Content-Security-Policy") || "";
 		expect(csp).not.toContain("'unsafe-inline'");
+	});
+});
+
+/**
+ * Cloudflare API Shield's schema validation accepts this document, so it has to stay inside what
+ * that validator supports: OAS 3.0 only (3.1 is explicitly unsupported), an absolute server URL,
+ * a `schema` on every parameter, and a `type` on every schema object.
+ * https://developers.cloudflare.com/api-shield/security/schema-validation/
+ */
+describe("stays uploadable to Cloudflare API Shield", () => {
+	const spec = JSON.parse(JSON.stringify(buildOpenApiDocument({ version: "v1", serverUrl: "https://flarelens.example.com" }))) as Record<string, unknown>;
+
+	function walk(node: unknown, path: string, visit: (node: Record<string, unknown>, path: string) => void): void {
+		if (Array.isArray(node)) {
+			node.forEach((child, i) => walk(child, `${path}[${i}]`, visit));
+			return;
+		}
+		if (!node || typeof node !== "object") return;
+		const record = node as Record<string, unknown>;
+		visit(record, path);
+		for (const [key, value] of Object.entries(record)) walk(value, `${path}/${key}`, visit);
+	}
+
+	it("declares OAS 3.0 and an absolute server URL", () => {
+		expect((spec as unknown as { openapi: string }).openapi).toMatch(/^3\.0\.\d+$/);
+		const servers = (spec as unknown as { servers: { url: string }[] }).servers;
+		expect(new URL(servers[0].url).host).toBeTruthy();
+	});
+
+	it("uses no 3.1-only construct", () => {
+		const offenders: string[] = [];
+		walk(spec, "", (node, path) => {
+			// `const` and a list-valued `type` are JSON Schema 2020-12, which arrived with 3.1.
+			if ("const" in node) offenders.push(`${path} uses const`);
+			if (Array.isArray(node.type)) offenders.push(`${path} uses a type array`);
+			if ("$schema" in node) offenders.push(`${path} sets $schema`);
+		});
+		expect(offenders).toEqual([]);
+	});
+
+	it("gives every parameter a schema and every schema a type", () => {
+		const offenders: string[] = [];
+		for (const [path, operations] of Object.entries(spec as unknown as Record<string, Record<string, { parameters?: { name: string; schema?: unknown }[] }>>)) {
+			if (path !== "paths") continue;
+			for (const [route, methods] of Object.entries(operations)) {
+				for (const [method, operation] of Object.entries(methods as unknown as Record<string, { parameters?: { name: string; schema?: unknown }[] }>)) {
+					for (const parameter of operation.parameters ?? []) {
+						if (!parameter.schema) offenders.push(`${method} ${route} parameter ${parameter.name}`);
+					}
+				}
+			}
+		}
+		walk((spec as unknown as { components: unknown }).components, "components", (node, path) => {
+			if (!path.includes("/schemas/")) return;
+			const looksLikeSchema = "properties" in node || "items" in node;
+			const composed = "$ref" in node || "allOf" in node || "oneOf" in node || "anyOf" in node;
+			if (looksLikeSchema && !("type" in node) && !composed) offenders.push(`${path} has no type`);
+		});
+		expect(offenders).toEqual([]);
+	});
+
+	it("keeps external references out — API Shield resolves none", () => {
+		const offenders: string[] = [];
+		walk(spec, "", (node, path) => {
+			const ref = node.$ref;
+			if (typeof ref === "string" && !ref.startsWith("#/")) offenders.push(`${path} -> ${ref}`);
+		});
+		expect(offenders).toEqual([]);
 	});
 });
