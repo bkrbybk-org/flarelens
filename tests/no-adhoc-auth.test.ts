@@ -16,6 +16,14 @@ import { describe, expect, it } from "vitest";
 
 const SOURCE_ROOT = join(import.meta.dirname, "..", "src");
 const AUTH_MODULE = join("src", "lib", "auth.ts");
+/**
+ * The OpenAPI document names `Cf-Access-Jwt-Assertion` as an apiKey security scheme's `name`
+ * field — required for the scheme to be accurate — which is documentation, not a read: nothing
+ * in src/openapi.ts inspects a request's headers. The rule this guards (only auth.ts may look at
+ * the assertion, and only after verifying it) is about trusting the header off-path, which does
+ * not apply to a static string describing it.
+ */
+const DOC_MODULE = join("src", "openapi.ts");
 
 /** Direct reads of the caller's Authorization header, outside the auth module. */
 const ADHOC_AUTH_BUDGET: Record<string, number> = {};
@@ -49,7 +57,7 @@ describe("credential resolution stays centralised", () => {
 		// A route trusting the header's presence would accept a spoofed one off-path.
 		for (const file of sourceFiles(SOURCE_ROOT)) {
 			const relative = file.slice(file.indexOf("src"));
-			if (relative === AUTH_MODULE) continue;
+			if (relative === AUTH_MODULE || relative === DOC_MODULE) continue;
 			const source = readFileSync(file, "utf8");
 			expect(source, `${relative} must not read Access headers directly`).not.toMatch(
 				/Cf-Access-Jwt-Assertion|Cf-Access-Authenticated-User-Email/i,
