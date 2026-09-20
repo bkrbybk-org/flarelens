@@ -2,7 +2,10 @@ import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 
 export default tseslint.config(
-	{ ignores: ["web/dist/", "dist/", ".wrangler/", ".tsbuild/", "node_modules/", "worker-configuration.d.ts"] },
+	// web/public/docs/ holds the Swagger UI bundles copied in by `npm run build` (gitignored,
+	// vendor code) — linting them after a build produced thousands of errors, and CI, which
+	// builds before it lints, failed on them.
+	{ ignores: ["web/dist/", "web/public/docs/", "dist/", ".wrangler/", ".tsbuild/", "node_modules/", "worker-configuration.d.ts"] },
 	...tseslint.configs.recommended,
 	{
 		files: ["web/src/**/*.{ts,tsx}"],
