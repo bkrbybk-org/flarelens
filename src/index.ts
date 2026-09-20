@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import type { Env } from "./env";
-import { SECURITY_HEADERS } from "./http";
+import { securityHeadersFor } from "./http";
 import { registerCoreRoutes } from "./routes/core";
+import { registerDocsRoutes } from "./routes/docs";
 import { registerAccessRoutes } from "./routes/access";
 import { registerAiSecurityRoutes } from "./routes/ai-security";
 import { registerWafRoutes } from "./routes/waf";
@@ -27,7 +28,7 @@ const app = new Hono<{ Bindings: Env }>();
 app.use("*", async (c, next) => {
 	await next();
 	const res = new Response(c.res.body, c.res);
-	for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+	for (const [key, value] of Object.entries(securityHeadersFor(c.req.path))) {
 		res.headers.set(key, value);
 	}
 	if (c.req.path.startsWith("/api/")) {
@@ -56,6 +57,7 @@ registerAccessUsageRoutes(app);
 registerWorkersRoutes(app);
 registerCacheRoutes(app);
 registerShieldsRoutes(app);
+registerDocsRoutes(app);
 
 // Static assets fallback
 app.all("*", async (c) => {

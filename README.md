@@ -63,6 +63,30 @@ mounts via a small blocking script,
 inline scripts, so it has to be a same-origin file rather than an inline `<script>`), which is
 why `web/index.html` loads it in `<head>` ahead of the app bundle.
 
+## API
+
+The Worker's 24 `/api/*` endpoints are documented as an OpenAPI 3.1 spec at
+[`GET /api/openapi.json`](src/openapi.ts), with a self-hosted Swagger UI at
+[`GET /docs`](src/routes/docs.ts) (linked from the sidebar footer, opens in a new tab). Both
+routes go through the same [`resolveAuth`](src/lib/auth.ts) as everything else, so both modes work:
+browse `/docs` inside an active Cloudflare Access session, or fetch `/api/openapi.json` directly
+with `Authorization: Bearer <your Cloudflare API token>`. `/docs`'s "Try it out" sends real
+requests against the connected Cloudflare account and spends real Cloudflare API quota — it is not
+a sandbox.
+
+`/docs` is the one path with a relaxed CSP: Swagger UI injects inline `<style>` tags it does not
+let you route around, so [`src/http.ts`](src/http.ts)'s `securityHeadersFor` adds `'unsafe-inline'`
+to `style-src` — never `script-src` — only for paths on its small, explicit
+`CSP_UNSAFE_INLINE_STYLE_PATHS` list. Every other path keeps the strict `'self'`-only policy.
+[`tests/openapi.test.ts`](tests/openapi.test.ts) pins the exception to `/docs` alone and fails the
+build if the spec and the app's real route table (Hono's own `app.routes`) drift apart.
+
+Swagger UI's assets (`swagger-ui.css`, `swagger-ui-bundle.js`, `swagger-ui-standalone-preset.js`)
+are copied from the `swagger-ui-dist` devDependency into `web/public/docs/` by
+[`scripts/copy-swagger-ui.mjs`](scripts/copy-swagger-ui.mjs), wired into `npm run build` — they are
+not committed to git (`web/public/docs/` is gitignored) or loaded from a CDN, which the CSP
+would refuse anyway.
+
 ## Architecture
 
 ```
@@ -70,10 +94,14 @@ src/index.ts                 Hono worker entrypoint: creates the app, security-h
                              calls every routes/*.ts register*Routes() in order, asset fallback
 src/env.ts                   Env bindings interface, App = Hono<{ Bindings: Env }> type
 src/http.ts                  Route helpers shared by routes/*.ts: validHexId, cache headers,
-                             filterAllowedAccounts, SECURITY_HEADERS
+                             filterAllowedAccounts, SECURITY_HEADERS, securityHeadersFor (the
+                             /docs CSP exception)
+src/openapi.ts                OpenAPI 3.1 document builder for GET /api/openapi.json
 src/cf-types.ts              Cloudflare API shapes shared by more than one route module
 src/routes/                  One module per /api area, each exporting register<Area>Routes(app);
-                             see the file for the full list (core, access, waf, ai-security, …)
+                             see the file for the full list (core, access, waf, ai-security, …);
+                             docs.ts serves the OpenAPI document and the Swagger UI page
+scripts/copy-swagger-ui.mjs  Copies Swagger UI's dist assets into web/public/docs/ at build time
 src/lib/auth.ts              Credential resolution: Access JWT verification, account/zone allowlist
 src/lib/waf-meta.ts          Ruleset metadata flattening (managed/custom, entrypoints)
 src/lib/cache-analysis.ts    GraphQL analytics, last-match attribution, insights, grade
@@ -563,9 +591,9 @@ get a real browser-like environment, without either leaking into the other.
 | Layer | Files | What it covers |
 |---|---|---|
 | Unit | `tests/{expr,rules,csv,findings,findings-sources,report,cache-analysis,waf-meta,waf-aggregate,waf-chart,hash-params,auth,chart-hover,pqc,tunnel-sankey,dns-records,ratelimit-bot,nav-groups,waf-evaluation,cloudflared-version,tunnel-metrics}.test.ts`, `tests/ai-sec-*.test.ts` | Pure logic: wirefilter evaluation, rule rendering, findings, CSV, WAF aggregation and bucketing, hash deep-link helpers, Access JWT verification, chart hover placement, PQC verdicts, the Tunnel Map flow diagram's geometry (every column sums to the row count, no band overflows its node), the DNS Records builder (exposed-origin flag, TTL formatting, per-zone errors kept rather than dropped), the AI Security domain layer including `buildDashboard`, Rate Limits & Bots' 404-vs-403 distinction, plan-tier inference and findings, and that `NAV_GROUPS` covers every `Route` from `useRoute` exactly once. `findings-sources.test.ts` covers every Tunnels/Zone Health/PQC/DNS Records/Bots mapper plus the WAF evaluation-order grouping (one finding per disabled deployment, not per rule) and that an unavailable or unknown check never becomes a finding; `report.test.ts` covers `buildReportHtml`'s escaping (`<script>`, quotes, `&`), its severity totals, its coverage table and its "what was not checked" list; plus the numeric `YYYY.M.P` cloudflared version compare, the GitHub-release fetch's degrade-on-failure behaviour, and `TUNNEL_METRICS` config validation with the strict Prometheus text-format parser |
-| Component | `tests/components/{PqcPage,ConnectPage,AppsTable,GroupsPage,shared-ui,tabs,progress,estimated-progress,ZoneHealthPage,DnsPage,BotsPage,GatewayPoliciesPage,ShieldsPage,CommandPalette,savedViews,theme,RulesReview,TunnelDrawer,storage,FindingsPage}.test.tsx` | Actually rendered React components (jsdom + Testing Library, `tests/components/setup.ts`): page behaviour for PQC, Connect, Applications, Groups, DNS Records, Rate Limits & Bots and Page & API Shield (Page Shield data rendered alongside API Shield's "not checked" state, and a malicious flag surfacing as a high-severity finding); the shared StatCard/EmptyState and the rule that no page redefines them; the ARIA tabs contract; the loading caption's honesty rules and estimate bookkeeping; the command palette's combobox keyboard contract, fuzzy filtering and Ray ID detection; saved views' per-account scoping, cap and malformed-entry handling against a real (and a throwing) `localStorage`; theme cycling plus "system" following `matchMedia` live; and Findings' per-source status states — loading, checked with a count, not checked with a reason (including a 403 naming the missing permission and escalating to the shared disconnect handler), and not opened; and the tunnel drawer's latest-version badge and all four connector-metrics states (no target, load, loaded, error) |
+| Component | `tests/components/{PqcPage,ConnectPage,AppsTable,GroupsPage,shared-ui,tabs,progress,estimated-progress,ZoneHealthPage,DnsPage,BotsPage,GatewayPoliciesPage,ShieldsPage,CommandPalette,savedViews,theme,RulesReview,TunnelDrawer,storage,FindingsPage,Sidebar}.test.tsx` | Actually rendered React components (jsdom + Testing Library, `tests/components/setup.ts`): page behaviour for PQC, Connect, Applications, Groups, DNS Records, Rate Limits & Bots and Page & API Shield (Page Shield data rendered alongside API Shield's "not checked" state, and a malicious flag surfacing as a high-severity finding); the shared StatCard/EmptyState and the rule that no page redefines them; the ARIA tabs contract; the loading caption's honesty rules and estimate bookkeeping; the command palette's combobox keyboard contract, fuzzy filtering and Ray ID detection; saved views' per-account scoping, cap and malformed-entry handling against a real (and a throwing) `localStorage`; theme cycling plus "system" following `matchMedia` live; Findings' per-source status states — loading, checked with a count, not checked with a reason (including a 403 naming the missing permission and escalating to the shared disconnect handler), and not opened; the tunnel drawer's latest-version badge and all four connector-metrics states (no target, load, loaded, error); and the sidebar's `/docs` link (href, `target="_blank"`, safe `rel`, survives the collapsed state) |
 | Integration | `tests/integration-ai-security.test.ts` | The AI route wired to the ported library, Cloudflare client and Cache API, with only the network mocked — including cache-key tenant isolation |
-| System | `tests/system-routes.test.ts`, `tests/{access-usage,gateway-usage,workers-analytics,workers-ai,ai-gateway,access-tunnels,request-trace,data-fanout,zone-health,gateway-policies,dns-records,ratelimit-bot,shields,edge-cache,tunnel-metrics-route}.test.ts` | Every route through the real app against one mocked Cloudflare: response shapes, validation, upstream error mapping, and the cross-cutting header and `no-store` contract. `ai-gateway.test.ts` covers per-dataset degradation when a field does not resolve; `data-fanout.test.ts` pins the embedded-policy read and the concurrent tunnel fetches; `ratelimit-bot.test.ts` also carries `GET /api/bots/report`'s route tests alongside its lib unit tests; `gateway-policies.test.ts` carries both `GET /api/gateway/policies`'s route tests and the enforcement-stage/finding lib unit tests; `shields.test.ts` carries `GET /api/shields/report` alongside the Page Shield/API Shield lib unit tests — every reader's 401/403/code-10000-as-missing-permission and 404-as-unavailable degradation, findings raised only from readable data, the 500-item truncation cap, and the own-domain vs. third-party host check; `tunnel-metrics-route.test.ts` covers `GET /api/tunnels/:tunnelId/metrics` (unknown tunnel id → 404 with no fetch, non-owned account → 403 with no metrics fetch, a redirect and an oversize body both treated as errors, the happy path, and that the configured URL never reaches the response body) plus `hasMetricsTarget`/`latestCloudflared` on the tunnel map |
+| System | `tests/system-routes.test.ts`, `tests/openapi.test.ts`, `tests/{access-usage,gateway-usage,workers-analytics,workers-ai,ai-gateway,access-tunnels,request-trace,data-fanout,zone-health,gateway-policies,dns-records,ratelimit-bot,shields,edge-cache,tunnel-metrics-route}.test.ts` | Every route through the real app against one mocked Cloudflare: response shapes, validation, upstream error mapping, and the cross-cutting header and `no-store` contract. `ai-gateway.test.ts` covers per-dataset degradation when a field does not resolve; `data-fanout.test.ts` pins the embedded-policy read and the concurrent tunnel fetches; `ratelimit-bot.test.ts` also carries `GET /api/bots/report`'s route tests alongside its lib unit tests; `gateway-policies.test.ts` carries both `GET /api/gateway/policies`'s route tests and the enforcement-stage/finding lib unit tests; `shields.test.ts` carries `GET /api/shields/report` alongside the Page Shield/API Shield lib unit tests — every reader's 401/403/code-10000-as-missing-permission and 404-as-unavailable degradation, findings raised only from readable data, the 500-item truncation cap, and the own-domain vs. third-party host check; `tunnel-metrics-route.test.ts` covers `GET /api/tunnels/:tunnelId/metrics` (unknown tunnel id → 404 with no fetch, non-owned account → 403 with no metrics fetch, a redirect and an oversize body both treated as errors, the happy path, and that the configured URL never reaches the response body) plus `hasMetricsTarget`/`latestCloudflared` on the tunnel map; `openapi.test.ts` proves the OpenAPI document and Hono's own route table describe exactly the same set of paths (and would fail if one drifted from the other), that only `/health` is unsecured, that the document parses and every `$ref` resolves, and `GET /api/openapi.json`/`GET /docs`'s auth gate, content type and the `/docs`-only CSP exception |
 | Compatibility | `tests/compat-upstream-shapes.test.ts` | Upstream drift the app does not control: pagination, partial-scope tokens, unknown detection categories, non-JSON responses, and the Workers globals Node lacks |
 | Security | `tests/security-boundaries.test.ts`, `tests/routes-auth.test.ts`, `tests/no-adhoc-auth.test.ts`, `tests/matched-data.test.ts` | The adversarial half: credential confinement, allowlist evasion, input handling, the guardrail keeping credential resolution in one module, and the prompt-decryption boundaries — key never stored, never sent, never exported. `routes-auth.test.ts` also requires every account- or zone-scoped route to refuse a non-allowlisted scope with no upstream call and no cache access — checked against a mutant with the check deleted from each route |
 | Regression | `tests/shell-layout.test.ts`, `tests/refresh-affordance.test.ts`, `tests/apps-export.test.ts`, `tests/error-boundary.test.ts`, `tests/waf-wide-window.test.ts`, `tests/app-server-mode-accounts.test.ts`, `tests/tsconfig-references.test.ts` | Failures with no runtime error to catch them: the flex height chain and PageShell as the sole scroller, refresh living only in the top bar, CSV exporting rendered text rather than raw JSON, and the error-boundary message formatter |
@@ -597,7 +625,7 @@ Cloudflare API quota, which is why it never runs as part of `npm test`.
 | `npm test` | Vitest suite — unit, integration, system, compatibility, security and regression layers (see [Tests](#tests)). Excludes the opt-in live E2E suite |
 | `npm run check` | tsc project build + tests + vite build + wrangler dry-run |
 | `npm run lint` | ESLint |
-| `npm run build` | Vite production build → `web/dist` |
+| `npm run build` | Copies Swagger UI's assets into `web/public/docs/` ([scripts/copy-swagger-ui.mjs](scripts/copy-swagger-ui.mjs)), then Vite production build → `web/dist` |
 | `npm run deploy` | Build then `wrangler deploy` with the placeholder `wrangler.jsonc` |
 | `npm run deploy:live` | Build then deploy with the gitignored `wrangler.local.jsonc` — the real deployment |
 

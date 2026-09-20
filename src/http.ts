@@ -72,3 +72,24 @@ export const SECURITY_HEADERS: Record<string, string> = {
 		"form-action 'self'",
 	].join("; "),
 };
+
+/**
+ * Paths whose CSP relaxes `style-src` to include `'unsafe-inline'`.
+ *
+ * Swagger UI injects inline `<style>` tags it does not let us route around, so `/docs` alone
+ * needs this. Kept as an explicit, small, documented list rather than a path prefix or pattern —
+ * a new route must be added here deliberately, not swept in by matching `/docs*`. `script-src`
+ * is never loosened for any path.
+ */
+export const CSP_UNSAFE_INLINE_STYLE_PATHS: readonly string[] = ["/docs"];
+
+/** The response headers to stamp for a given request path — `SECURITY_HEADERS`, with the `/docs` CSP exception applied when the path is on the list above. */
+export function securityHeadersFor(path: string): Record<string, string> {
+	if (!CSP_UNSAFE_INLINE_STYLE_PATHS.includes(path)) {
+		return SECURITY_HEADERS;
+	}
+	return {
+		...SECURITY_HEADERS,
+		"Content-Security-Policy": SECURITY_HEADERS["Content-Security-Policy"].replace("style-src 'self'", "style-src 'self' 'unsafe-inline'"),
+	};
+}

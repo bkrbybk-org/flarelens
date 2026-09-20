@@ -5,11 +5,11 @@
   "scripts": {
     "dev": "vite",
     "dev:worker": "wrangler dev",
-    "build": "vite build",
+    "build": "node scripts/copy-swagger-ui.mjs && vite build",
     "deploy": "npm run build && wrangler deploy",
     "test": "vitest run",
     "lint": "eslint .",
-    "check": "tsc -b && vitest run && vite build && wrangler deploy --dry-run --outdir=dist",
+    "check": "tsc -b && vitest run && npm run build && wrangler deploy --dry-run --outdir=dist",
     "types": "wrangler types",
     "deploy:live": "npm run build && wrangler deploy -c wrangler.local.jsonc"
   },
@@ -29,6 +29,7 @@
     "eslint": "^10.6.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^30.0.1",
+    "swagger-ui-dist": "^5.33.0",
     "tailwindcss": "^4.3.2",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.63.0",
