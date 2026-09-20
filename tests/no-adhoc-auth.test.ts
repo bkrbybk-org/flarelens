@@ -57,7 +57,13 @@ describe("credential resolution stays centralised", () => {
 		// A route trusting the header's presence would accept a spoofed one off-path.
 		for (const file of sourceFiles(SOURCE_ROOT)) {
 			const relative = file.slice(file.indexOf("src"));
-			if (relative === AUTH_MODULE || relative === DOC_MODULE) continue;
+			if (relative === AUTH_MODULE) continue;
+			if (relative === DOC_MODULE) {
+				// Exempt for the string, never for the behaviour: the document module must not
+				// touch a request at all, so it cannot act on the header it names.
+				expect(readFileSync(file, "utf8"), `${relative} must not read requests`).not.toMatch(/c\.req|\breq\.headers|request\.headers/);
+				continue;
+			}
 			const source = readFileSync(file, "utf8");
 			expect(source, `${relative} must not read Access headers directly`).not.toMatch(
 				/Cf-Access-Jwt-Assertion|Cf-Access-Authenticated-User-Email/i,
