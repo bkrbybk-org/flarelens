@@ -4,10 +4,12 @@
  *
  * Page Shield is verified live against this account: `page_shield`, `page_shield/scripts`,
  * `page_shield/connections` and `page_shield/policies` all return real data with the bound
- * read-only token. API Shield is NOT verified: every `/api_gateway/*` read returned
- * "Authentication error" on every zone tried — the bound token lacks the scope. That half is
- * built from Cloudflare's documented shapes (see the doc comments on each fetcher) and must
- * render that fact honestly: "not checked — missing permission", never "0 endpoints". A read
+ * read-only token. API Shield was built from Cloudflare's documented shapes (see the doc comments
+ * on each fetcher) while the token lacked the scope, and verified live on 2026-09-27 once it was
+ * granted: operations, discovery, schema validation, user schemas and configuration all read on
+ * the zones that have API Shield. A zone without it answers 403 code 10403 ("not entitled"),
+ * which is reported as unavailable, not as a missing scope. Either way an unread value renders as
+ * "not checked", never "0 endpoints". A read
  * that returns zero real zero is indistinguishable from a read that never happened, so the two
  * must never collapse into the same rendering.
  *
@@ -48,7 +50,17 @@ export interface ShZone {
  * itself is not available on this plan or zone, not a permission problem — so it gets its own
  * reason rather than being folded into "missing permission".
  */
+/** Cloudflare's "You are not entitled for this service": the zone lacks the product, not the token a scope. */
+const NOT_ENTITLED_CODE = 10403;
+
 function unavailableReason(status: number, code: number | undefined, message: string, scopeName: string): string {
+	// Checked before the generic 403: this comes back as a 403 too, and telling the operator to add
+	// a token scope would send them after a fix that changes nothing. Seen live on 2026-09-27 —
+	// API Gateway configuration on zones without API Shield, while the same token read the other
+	// zones' configuration fine.
+	if (code === NOT_ENTITLED_CODE || /not entitled/i.test(message)) {
+		return "Not available — this zone is not entitled to this feature (plan or add-on), so no token scope would change it.";
+	}
 	if (status === 401 || status === 403 || code === 10000) {
 		return `Needs "${scopeName}" — the bound token is not authorized to read this on this zone.`;
 	}
@@ -272,8 +284,8 @@ async function fetchZonePageShield(zone: ShZone, token: string, now: Date): Prom
 // ---------------------------------------------------------------------------
 // API Shield
 //
-// UNVERIFIED against a live account (every /api_gateway/* read returned "Authentication error"
-// with the bound token). Shapes below are built from Cloudflare's documented API resources:
+// Built from Cloudflare's documented API resources, verified live on 2026-09-27 (43 saved
+// operations, discovery, log-mode schema validation and 2 uploaded schemas read on one zone):
 //   https://developers.cloudflare.com/api/resources/api_gateway/
 //   https://developers.cloudflare.com/api/resources/api_gateway/subresources/user_schemas/
 //   https://developers.cloudflare.com/api/resources/api_gateway/subresources/settings/subresources/schema_validation/

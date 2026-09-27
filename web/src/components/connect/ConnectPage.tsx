@@ -66,12 +66,16 @@ const OPTIONAL_PERMISSIONS = [
 	{ label: "SSL and Certificates: Read", description: "Certificate expiry in Zone Health." },
 	{ label: "Zone: DNS: Read", description: "Every DNS record across the account's zones, in DNS Records and PQC Readiness." },
 	{
+		label: "Zone Settings: Read",
+		description: "TLS 1.3, minimum TLS version and SSL mode for PQC Readiness — every verdict depends on them. Without it each zone's settings are reported as unreadable, never assumed.",
+	},
+	{
 		label: "Zone: Bot Management: Read",
 		description: "Bot management settings (Bot Fight Mode / Super Bot Fight Mode / Enterprise Bot Management) in Rate Limits & Bots.",
 	},
 	// Rate-limit rules live on the http_ratelimit phase entrypoint ruleset, read the same way as
-	// WAF's custom-firewall entrypoint. This is this app's understanding of which scope gates
-	// that read, not a Cloudflare-confirmed mapping — unverified against a real account.
+	// WAF's custom-firewall entrypoint. Confirmed live on 2026-09-17: a token holding the WAF read
+	// scopes reads it (200 with rules, 404 where a zone has none).
 	{
 		label: "Account WAF: Read / Zone WAF: Read",
 		description: "Rate-limit rules in Rate Limits & Bots — read under the same WAF scopes as WAF Analytics.",
@@ -84,12 +88,11 @@ const OPTIONAL_PERMISSIONS = [
 		label: "Client-side Security: Read",
 		description: "Page Shield status, scripts, connections and policies in Page & API Shield — formerly named \"Page Shield: Read\" in Cloudflare's own docs.",
 	},
-	// Every /api_gateway/* read returned "Authentication error" against the account this was built
-	// on, with only the scopes above granted — API Shield could not be verified live. Built from
-	// Cloudflare's documented API resources instead: https://developers.cloudflare.com/api/resources/api_gateway/
+	// Built from Cloudflare's documented API resources, then verified live on 2026-09-27 once the
+	// scope was granted: https://developers.cloudflare.com/api/resources/api_gateway/
 	{
 		label: "API Gateway: Read",
-		description: "Saved and discovered endpoints, schema validation settings, uploaded schemas and session identifier configuration in Page & API Shield — unverified against a live account.",
+		description: "Saved and discovered endpoints, schema validation settings, uploaded schemas and session identifier configuration in Page & API Shield. A zone without API Shield answers “not entitled”, which no scope changes.",
 	},
 ] as const;
 

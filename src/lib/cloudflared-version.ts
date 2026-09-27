@@ -46,6 +46,13 @@ export type LatestCloudflared = { version: string; publishedAt: string } | { err
 const GITHUB_RELEASE_URL = "https://api.github.com/repos/cloudflare/cloudflared/releases/latest";
 
 /**
+ * How long the tunnel map will wait on GitHub. The map awaits this value, so without a bound a
+ * slow or stalled GitHub would hold the whole Tunnel Map — and Findings' tunnels source — open for
+ * as long as the connection lasted. Past this the comparison is simply unavailable.
+ */
+export const GITHUB_TIMEOUT_MS = 3000;
+
+/**
  * Fetches the latest `cloudflared` GitHub release, tolerant of any failure (rate limit, network,
  * malformed body): the caller always gets a value, never a thrown error, because this must never
  * take the tunnel map down with it.
@@ -54,6 +61,7 @@ export async function fetchLatestCloudflaredRelease(): Promise<LatestCloudflared
 	try {
 		const response = await fetch(GITHUB_RELEASE_URL, {
 			headers: { "User-Agent": "flarelens", Accept: "application/vnd.github+json" },
+			signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
 		});
 		if (!response.ok) {
 			return { error: `GitHub returned HTTP ${response.status}` };
@@ -65,6 +73,9 @@ export async function fetchLatestCloudflaredRelease(): Promise<LatestCloudflared
 		}
 		return { version: body.tag_name as string, publishedAt: body.published_at };
 	} catch (err) {
+		if (err instanceof Error && err.name === "TimeoutError") {
+			return { error: `GitHub did not answer within ${GITHUB_TIMEOUT_MS / 1000}s` };
+		}
 		return { error: err instanceof Error ? err.message : "Failed to reach GitHub" };
 	}
 }

@@ -309,6 +309,25 @@ describe("fetchShieldsReport degradation", () => {
 		}
 	});
 
+	it("reports a not-entitled zone as unavailable, not as a missing token scope", async () => {
+		// Live shape (2026-09-27): API Gateway configuration on a zone without API Shield answers
+		// 403 with code 10403, while the same token reads the rest. A scope hint would mislead.
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input instanceof Request ? input.url : input);
+			if (url.includes("/api_gateway/configuration")) {
+				return json({ success: false, errors: [{ message: "You are not entitled for this service", code: 10403 }] }, 403);
+			}
+			if (url.includes("/api_gateway/settings/schema_validation")) return json({ success: true, result: { validation_default_mitigation_action: "none" } });
+			if (url.endsWith("/page_shield")) return json({ success: true, result: { enabled: true } });
+			return json(list([]));
+		}) as typeof fetch;
+		const api = (await fetchShieldsReport([ZONE], "tok", NOW)).zones[0].apiShield;
+		expect(api.operations.available).toBe(true);
+		expect(api.configuration.available).toBe(false);
+		expect(api.configuration.reason).toMatch(/not entitled/);
+		expect(api.configuration.reason).not.toMatch(/API Gateway: Read/);
+	});
+
 	it("reads saved operations, discovery state, schema validation, user schemas and session identifier when permitted", async () => {
 		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input instanceof Request ? input.url : input);

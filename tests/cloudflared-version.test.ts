@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	compareCloudflaredVersions,
 	fetchLatestCloudflaredRelease,
+	GITHUB_TIMEOUT_MS,
 	getLatestCloudflaredCached,
 	monthsBetween,
 	parseCloudflaredVersion,
@@ -93,6 +94,18 @@ describe("fetchLatestCloudflaredRelease", () => {
 		}) as typeof fetch;
 		const result = await fetchLatestCloudflaredRelease();
 		expect(result).toEqual({ error: "network down" });
+	});
+
+	it("bounds the wait on GitHub, and reports a timeout as such", async () => {
+		// The tunnel map awaits this; an unbounded fetch let a stalled GitHub hold the whole map.
+		let signal: AbortSignal | undefined;
+		globalThis.fetch = vi.fn(async (_input, init) => {
+			signal = init?.signal ?? undefined;
+			throw new DOMException("The operation timed out.", "TimeoutError");
+		}) as typeof fetch;
+		const result = await fetchLatestCloudflaredRelease();
+		expect(signal).toBeInstanceOf(AbortSignal);
+		expect(result).toEqual({ error: `GitHub did not answer within ${GITHUB_TIMEOUT_MS / 1000}s` });
 	});
 
 	it("degrades to an error when the tag is unparsable", async () => {

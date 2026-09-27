@@ -24,3 +24,7 @@ web/dist/
 
 # Swagger UI assets copied from node_modules by scripts/copy-swagger-ui.mjs at build time
 web/public/docs/
+
+# Output of an endpoint-scanning tool, not part of the app
+result.html
+result.yaml

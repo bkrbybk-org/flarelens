@@ -1,25 +1,20 @@
 # Flarelens — Progress
 
-Status snapshot, last reviewed **2026-09-17** against a full read of the tree, a live probe of
-the deployed API, and a UI/UX consistency pass across every section. See [README.md](README.md) for how to run the app; this file tracks where the
+Status snapshot, last reviewed **2026-09-27** against a full read of the tree, the gate, and a
+live probe of every route on the deployed Worker. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-one sections, 26 API routes (including the OpenAPI document and Swagger UI), 1,127 tests green across 76 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings.
+**TL;DR** — Twenty sections, 26 API routes (24 under `/api/*`, plus `/health` and `/docs`), 1,135 tests green across 77 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
-no longer asks for a token. Every section has now been exercised against real account data
-through an Access service token, AI Gateway included — its field names are resolved from the
-schema at runtime rather than guessed, and returned real traffic on 2026-09-08.
-Running version `9c377681`, deployed 2026-09-20 (OpenAPI document and Swagger UI; `70c69cb1` was
-the same feature before the API Shield compatibility fix). The previous
-version was `c9403a43`, deployed 2026-09-19 (route split, Findings everywhere, executive report,
-Gateway Policies, Page & API Shield, cloudflared version check, connector metrics, dependency
-upgrades). The previous versions were `4cdb50c5` (2026-09-18: WAF evaluation order),
-`53721ea5` (same day, before display fixes), `5eaae590` (2026-09-17: audit fixes),
-`0f744ea2` (same day: Tunnel Map connector details), `fe0829a7` (same day, same feature before a small UI fix), `6394e637` (same day: WAF Rules Review grouped by ruleset), `286c5402` (same day: DNS Records, Rate Limits & Bots, command palette, saved views,
-system theme), `b18efed1` (same day, superseded by UI fixes), `3a924e84` (2026-09-16), and `fe2564bb` and `8bb29774` (2026-09-15). The three slowest routes were cut by
-two-thirds in that deploy (`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s,
-`/api/pqc/report` 6.5s → 4.3s, measured in production) with responses verified unchanged.
+no longer asks for a token. Every section has been exercised against real account data through an
+Access service token. Two halves were built from Cloudflare's docs before the token could read
+them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
+Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
+Running version `fb0da916`, deployed 2026-09-27 (review fixes). Each earlier deploy, and what
+it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
+`/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
+`/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
 
 **In `8bb29774` and `fe2564bb`:** the Zone Health section, access posture findings, a 60-second per-credential edge
 cache on four configuration routes, PQC validation-record exclusion, the WAF wide-window warning, and
@@ -37,15 +32,19 @@ pull request; there is no deploy job, deliberately — see the note under Recent
 
 ## Sections
 
-Eighteen sections, grouped in the sidebar by Cloudflare product area:
+Twenty sections, grouped in the sidebar by Cloudflare product area:
 
 | Group | Routes |
 |---|---|
-| Zero Trust | `#/access`, `#/groups`, `#/access-usage`, `#/tunnels`, `#/gateway` |
-| Security | `#/waf`, `#/ai-security`, `#/request`, `#/pqc`, `#/zone-health`, `#/dns`, `#/bots` |
+| Zero Trust | `#/access`, `#/groups`, `#/access-usage`, `#/tunnels`, `#/gateway`, `#/gateway-policies` |
+| Security | `#/waf`, `#/ai-security`, `#/request`, `#/pqc`, `#/zone-health`, `#/dns`, `#/bots`, `#/shields` |
 | Performance | `#/cache` |
 | Developer Platform | `#/workers`, `#/workers-ai`, `#/ai-gateway`, `#/cost` |
 | Audit | `#/findings` |
+
+Beyond the sections: a command palette (⌘K), saved views per account, a light/dark/system theme,
+and the API documentation at `/docs` (Swagger UI over `GET /api/openapi.json`), linked from the
+sidebar footer.
 
 All time-windowed sections share one range picker in the top bar (`hooks/useTimeRange.ts`),
 stored in minutes and clamped per section to whatever its upstream dataset allows — Access Usage
@@ -66,7 +65,7 @@ sent to the Worker, which only ever handles ciphertext.
 ### Request flow
 
 ```
-browser ──► Worker (Hono, src/index.ts) ──► api.cloudflare.com
+browser ──► Worker (Hono, src/index.ts → src/routes/*) ──► api.cloudflare.com
               │                              (REST + GraphQL)
               └─► ASSETS binding ──► web/dist (Vite build)
 ```
@@ -84,7 +83,7 @@ Storage is therefore not quite "nothing": a `CF_API_TOKEN` secret (no KV, no D1)
 Security layer writes per-zone results to the edge Cache API, namespaced by a SHA-256 fingerprint
 of the calling token — see the P2 entry below.
 
-### API routes ([src/index.ts](src/index.ts))
+### API routes ([src/routes/](src/routes/), registered in order by [src/index.ts](src/index.ts))
 
 | Route | Scope | Consumed by |
 |---|---|---|
@@ -108,19 +107,26 @@ of the calling token — see the P2 entry below.
 | `GET /api/workers/scripts` | account | Workers Analytics filter — needs `Workers Scripts: Read`, degrades if absent |
 | `POST /api/workers/metrics` | account | Workers Analytics; also half of Cost & Usage |
 | `POST /api/workers-ai/usage` | account | Workers AI; also half of Cost & Usage |
+| `GET /api/gateway/policies` | account | Gateway Policies — the account's Gateway rules in enforcement order (DNS resolver → DNS → network → HTTP), with findings. Edge-cached |
+| `GET /api/shields/report` | account (optional zone) | Page & API Shield — Page Shield status, scripts, connections and policies, and API Shield endpoints, schema validation and session identifiers, each read degrading on its own. Edge-cached |
+| `GET /api/tunnels/:tunnelId/metrics` | account | Connector CPU/memory from a metrics endpoint named only in the `TUNNEL_METRICS` secret, never in the request; 404 when the tunnel has none |
+| `GET /api/openapi.json` | — (auth required) | OpenAPI 3.0.3 document for every route, server URL taken from the request |
+| `GET /docs` | — (auth required) | Swagger UI, self-hosted; the one path whose CSP adds `'unsafe-inline'` to `style-src` |
 | `POST /api/ai-gateway/usage` | account | AI Gateway (proxy requests, tokens, errors, cache, spend). Field names resolved from the live schema — see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
 | `app.all("*")` | — | static asset fallback |
 
 All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, missing/bad token →
+401, token lacking a scope → 403 (the client shows it in place; only a 401 ends the session),
+disallowed account or zone → 403 before any upstream call, upstream failure → 502.
 
-**Edge cache.** `/api/zones`, `/api/access/tunnels`, `/api/pqc/report` and `/api/zone-health/report` are held in
+**Edge cache.** `/api/zones`, `/api/access/tunnels`, `/api/pqc/report`, `/api/zone-health/report`,
+`/api/dns/records`, `/api/bots/report`, `/api/gateway/policies` and `/api/shields/report` are held in
 the Worker's Cache API for 60 seconds ([src/lib/edge-cache.ts](src/lib/edge-cache.ts)). The key is the auth mode, a
 SHA-256 fingerprint of the *resolved* credential, the path and only the already-validated params, and it is
 consulted only after auth, validation and the allowlist have all passed. Only `success: true` 200s are stored.
 The top bar's Sync sends `X-Flarelens-Fresh: 1`, which bypasses and refreshes the entry; a mount or account
 switch takes the cached read. Pages served from cache say so with the clock time it was cached. Browser
 responses stay `no-store`.
-401/403, disallowed account or zone → 403 before any upstream call, upstream failure → 502.
 
 Every route that takes a time window parses both bounds into ISO instants and re-emits them
 through `toISOString()`. That is the injection boundary: the bounds are interpolated into GraphQL
@@ -132,6 +138,15 @@ documents, so no caller text reaches a query.
 
 | Path | Role |
 |---|---|
+| [src/index.ts](src/index.ts), [src/routes/](src/routes/) | Entry point (app, security-header middleware, route registration in order, asset fallback) and one module per area exporting `register<Area>Routes` |
+| [src/http.ts](src/http.ts), [src/env.ts](src/env.ts), [src/cf-types.ts](src/cf-types.ts) | Shared route helpers (`validHexId`, cache headers, `SECURITY_HEADERS`, `securityHeadersFor` with the `/docs` CSP exception), the `Env`/`App` types, Cloudflare shapes shared between routes |
+| [src/lib/cf-rest.ts](src/lib/cf-rest.ts) | The one Cloudflare REST client: `CF_API_BASE`, `authHeaders`, `fetchCloudflare`/`fetchCloudflareAll`, paginated `restList`, bounded `mapWithConcurrency` |
+| [src/openapi.ts](src/openapi.ts) | OpenAPI 3.0.3 document builder — 3.0 because API Shield rejects 3.1; tests pin it against Hono's own route table |
+| [src/lib/dns-records.ts](src/lib/dns-records.ts) | DNS Records: flattened records, `origin-exposed` / `internal-address` flags, per-zone errors kept |
+| [src/lib/ratelimit-bot.ts](src/lib/ratelimit-bot.ts) | Rate-limit entrypoint rules (404 = real zero, 403 = unknown) and bot management settings with plan-tier inference and findings |
+| [src/lib/gateway-policies.ts](src/lib/gateway-policies.ts) | Gateway rules by enforcement stage and precedence, terminating actions per type, findings |
+| [src/lib/shields.ts](src/lib/shields.ts) | Page Shield and API Shield reads, each degrading on its own (missing scope vs not entitled vs unavailable), findings |
+| [src/lib/tunnel-metrics.ts](src/lib/tunnel-metrics.ts), [src/lib/cloudflared-version.ts](src/lib/cloudflared-version.ts) | Connector metrics from deploy-configured targets only (https, no IP/localhost, 5s, no redirects, 2 MB cap, strict Prometheus parser); latest `cloudflared` release from GitHub, cached 1h, `YYYY.M.P` compare |
 | [src/lib/waf-meta.ts](src/lib/waf-meta.ts) | Flattens rulesets (account + zone scopes, managed `execute` targets, custom firewall entrypoint) into a rule-id/ref keyed map |
 | [src/lib/cache-analysis.ts](src/lib/cache-analysis.ts) | Cache GraphQL queries, last-match attribution, insights, A–F health grade, labeled mock fallback |
 | [src/lib/cache-cf-types.ts](src/lib/cache-cf-types.ts) | Cloudflare REST/GraphQL response shapes for the cache path |
@@ -156,7 +171,11 @@ documents, so no caller text reaches a query.
 | [web/src/lib/waf/](web/src/lib/waf/) | `aggregate` (correlation, action drift, per-rule detail), `chart` (bucketing), `format`, `constants`, `types` |
 | [web/src/lib/rules.ts](web/src/lib/rules.ts) | Access rule vocabulary (`describeRule`, ~20 rule types), `resolvePolicy`, decision tones |
 | [web/src/lib/findings.ts](web/src/lib/findings.ts) | Pure audit checks per source (`accessFindings`, `groupsFindings`, `wafFindings`, `cacheFindings`), plus the shared `groupUsedBy` cross-reference |
-| [web/src/lib/csv.ts](web/src/lib/csv.ts) | RFC 4180 `toCsv` + `downloadCsv` (quotes fields containing commas/quotes/newlines) |
+| [web/src/lib/csv.ts](web/src/lib/csv.ts) | RFC 4180 `toCsv` + `downloadCsv`; cells that would run as spreadsheet formulas get a leading apostrophe; UTF-8 BOM so Excel reads Thai names |
+| [web/src/lib/findings-sources.ts](web/src/lib/findings-sources.ts) | Findings mappers for every section added after the first four, including WAF evaluation order grouped by cause |
+| [web/src/lib/report.ts](web/src/lib/report.ts) | `buildReportHtml` — the executive report: self-contained HTML, every interpolated value escaped |
+| [web/src/lib/waf/evaluation.ts](web/src/lib/waf/evaluation.ts) | `buildEvaluationOrder` — WAF rules as Cloudflare runs them, with "never runs" claimed only for disabled deployments and literal match-all stoppers |
+| [web/src/lib/savedViews.ts](web/src/lib/savedViews.ts), [web/src/lib/storage.ts](web/src/lib/storage.ts) | Saved views per account; Web Storage access that never throws when a browser blocks site data |
 | [web/src/lib/sectionSnapshot.ts](web/src/lib/sectionSnapshot.ts) | Account-scoped cross-page store carrying the last WAF/Cache load to Findings — see the note under Frontend |
 | [web/src/lib/ui.ts](web/src/lib/ui.ts) | **Style tokens — single source.** `CARD`, `ALERT_ERROR`/`ALERT_WARN`, `BTN_*`, `INPUT`/`SEARCH_INPUT`/`SELECT`, `BADGE`, `MUTED`, `SECTION_TITLE`, `FOCUS_RING`/`FOCUS_ROW`. Adding a second token for one role is a bug, not a choice |
 | [web/src/features/tunnels/sankey.ts](web/src/features/tunnels/sankey.ts) | Pure layout for the Tunnel Map's flow diagram (Access → tunnel → origin): node stacking, ribbon geometry, and the tone rules — a node reads as the worst thing inside it, so "No tunnel" turns amber when it holds an unidentified origin |
@@ -171,7 +190,7 @@ documents, so no caller text reaches a query.
 
 ### Frontend
 
-React 19 + Vite 8 + Tailwind 4 + TanStack Table 8. Feature-folder layout under `web/src/features/{access,waf,cache,findings}/`, shared UI in `web/src/components/` (`PageShell`, `StatCard`, `EmptyState`, `Tabs`, `ProgressBar`, `table/ColumnFilterPopover`, `Icons`, `shell/{Sidebar,Topbar}`).
+React 19 + Vite 8 + Tailwind 4 + TanStack Table 9. One feature folder per section under `web/src/features/`, shared UI in `web/src/components/` (`PageShell`, `StatCard`, `EmptyState`, `Tabs`, `ProgressBar`, `table/ColumnFilterPopover`, `Icons`, `shell/{Sidebar,Topbar}`).
 
 **One of everything.** Sections used to disagree about their own shape: two page frames, two stat-card
 layouts, four empty states with four voices, two sizes of error banner, and a refresh control that
@@ -196,6 +215,12 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 | [useZeroTrustData](web/src/hooks/useZeroTrustData.ts) / [useWafData](web/src/features/waf/useWafData.ts) / [useCacheData](web/src/features/cache/useCacheData.ts) | Per-section fetch + state |
 | [useEstimatedProgress](web/src/hooks/useEstimatedProgress.ts) | Progress estimated from this section's last real load duration. Exposes `etaMs`, `elapsedMs` and `measured`: a countdown is shown only when the estimate was measured and still ahead of the clock, otherwise elapsed time |
 | [useSectionRefresh](web/src/hooks/useSectionRefresh.ts) | Puts the mounted section's reload behind the top bar's Sync button |
+| [useFocusTrap](web/src/hooks/useFocusTrap.ts) | Keyboard contract shared by the command palette, the name dialog and the tunnel drawer: Tab cycles inside, Escape closes, focus returns |
+
+Every data loader ends the session only through `isSessionError` in
+[web/src/api/client.ts](web/src/api/client.ts) — a 401. A 403 is a permission answer about one
+read and is shown in place; [tests/session-errors.test.ts](tests/session-errors.test.ts) fails if
+any `onAuthError` call is not guarded by it.
 
 **Cross-page snapshots.** WAF and Cache data lives in their pages' hooks, which unmount on
 navigation, so [sectionSnapshot.ts](web/src/lib/sectionSnapshot.ts) carries the last load
@@ -212,7 +237,9 @@ Disconnect clears the store.
 |---|---|---|
 | `cf_api_token`, `cf_account_id`, `cf_account_name` | sessionStorage | Cleared on tab close; never persisted to disk |
 | `cf_zt_prefs` | localStorage | `PREFS_VERSION = 3`; a version bump discards saved column order/visibility so new defaults apply. The policies table keeps its own `policyColumnVisibility` / `policyColumnOrder` keys: it shares column ids (`name`, `updated_at`, `id`) with the applications table, so one saved order would scramble the other |
-| `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (14 keys, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
+| `flarelens_saved_views` | localStorage | Saved views: name + hash + account, listed only for the current account, capped at 50 each |
+| `flarelens_recent_commands` | localStorage | Command palette's recently used commands |
+| `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (18 keys in all, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
 
 ### Tests
 
@@ -221,46 +248,10 @@ DOM; and a `component` project, `environment: "jsdom"` + `@testing-library/react
 rendered components — `tests/components/setup.ts` wires jest-dom matchers and RTL's auto-cleanup
 into that project only, so the node project's Workers-shaped globals stay untouched).
 
-| File | Covers |
-|---|---|
-| `tests/expr.test.ts` | Wirefilter evaluator: operators, functions, Kleene tri-state laws, `forAttribution` query-field rejection |
-| `tests/cache-analysis.test.ts` | Last-match attribution, unattributed block, `topUrls` ranking, insights, A–F grade thresholds |
-| `tests/waf-aggregate.test.ts` | Ruleset/rule correlation, action drift, zero-traffic + disabled rules, id/ref dedupe |
-| `tests/waf-meta.test.ts` | Merge order survives the concurrent scope fetch |
-| `tests/findings.test.ts` | Every audit check, plus the snapshot account-scoping guard |
-| `tests/pqc.test.ts` | Every readiness verdict, the inventory filter and ordering, and the route including the DNS-scope degradation |
-| `tests/rules.test.ts` | `describeRule` per rule type, `resolvePolicy`, decision tones |
-| `tests/csv.test.ts` | RFC 4180 escaping edge cases |
-| `tests/components/PqcPage.test.tsx` | Rendered `PqcPage` (fetch mocked at `api/client`'s `fetchPqcReport`): verdict filter chips narrow/restore rows, search matches hostname and zone, a zone-level error renders instead of being swallowed, empty state on no match |
-| `tests/components/ConnectPage.test.tsx` | Rendered `ConnectPage`: empty-token submit shows "API Token is required" and calls no fetch; every required/optional permission entry renders |
-| `tests/components/AppsTable.test.tsx` | Rendered `AppsTable`: the global search box narrows visible rows and clearing it restores them |
-| `tests/components/GroupsPage.test.tsx` | Rendered `GroupsPage`: tab order and deep-linking, the policies table's default sort and search, the created column hidden but selectable, a referenced list's name/size/entries, and an unreadable list stating why |
-| `tests/components/shared-ui.test.tsx` | The shared pieces that ended two design generations: number formatting, "loading" vs "empty" staying distinguishable, StatGrid's single breakpoint, and that no page defines its own StatCard, Kpi or EmptyState again |
-| `tests/components/tabs.test.tsx` | The ARIA tabs pattern rather than the markup: each tab points at its panel, arrows move and wrap, exactly one tab is in the tab order |
-| `tests/refresh-affordance.test.ts` | Refresh exists only in the top bar, every reloadable section registers one, and the registration clears on unmount |
-| `tests/ai-gateway.test.ts` | AI Gateway route: series/totals fold, rate arithmetic (never divides by zero), per-dataset degradation when a field does not resolve, validation, auth, `no-store`, 502 on load-bearing failure, and the same "no per-user dimension" privacy assertion as the other aggregate-only sections |
-| `tests/data-fanout.test.ts` | `/api/data` and the tunnel map use embedded app policies, fetch only apps missing the field, and issue the three tunnel-side reads concurrently (checked to fail against a serialised build) |
-| `tests/zone-health.test.ts`, `tests/components/ZoneHealthPage.test.tsx` | Certificate thresholds by source, 9109/403 as not-checked, unissued packs, dangling tunnel vs live, NXDOMAIN vs every other DoH outcome, validation targets skipped, the lookup cap, private addresses (incl. IPv4-mapped IPv6), duplicates, the tunnel list fetched alongside zone reads; and a page that never calls DNS clean without saying what went unchecked |
-| `tests/edge-cache.test.ts` | Key determinism and namespacing, BYOT tokens never sharing an entry, errors never cached, Fresh bypass and repair, byte-identical HITs, cache failure falling through |
-| `tests/routes-auth.test.ts` (allowlist block) | Every one of the 15 account/zone-scoped routes refuses a non-allowlisted scope in server mode with exactly 403, no upstream call and no cache lookup or write, plus a control proving the allowlisted request passes the gate. Verified against 19 mutants |
-| `tests/waf-wide-window.test.ts`, `tests/app-server-mode-accounts.test.ts` | The WAF warning beyond 7 days; server mode reusing `config.accounts` instead of refetching accounts |
-| `tests/tsconfig-references.test.ts` | Root `tsconfig.json` keeps referencing both test projects, so tests cannot silently drop out of type-checking again |
-| `tests/tunnel-sankey.test.ts` | The flow diagram's arithmetic, which fails silently: every column sums to the row count, each node's ribbons sum to the node, no band overflows the node it leaves, no two nodes in a column overlap, and an unidentified origin never folds into the others |
-| `tests/components/progress.test.tsx` | The honesty rules for the time caption (countdown only when measured and ahead; elapsed otherwise; never "0s"), the bar outside the dimmed region, content left interactive |
-| `tests/components/estimated-progress.test.tsx` | No estimate before a first timed load, recorded duration used next time, blended rather than replaced, nothing recorded from a failure |
-| `tests/system-routes.test.ts` | Every core route through the real app against one mocked Cloudflare: shapes, validation, error mapping, headers, `no-store` |
-| `tests/compat-upstream-shapes.test.ts` | Pagination, partial-scope tokens (including per-app policy failures), malformed payloads, Workers-only globals |
-| `tests/access-tunnels.test.ts` | The hostname → app → tunnel → origin chain, origin kinds, both gap types, degradation without scopes |
-| `tests/access-usage.test.ts`, `tests/gateway-usage.test.ts`, `tests/workers-analytics.test.ts`, `tests/workers-ai.test.ts` | Each telemetry route: aggregation, validation, presentation helpers; Gateway also its verdict vocabulary and the no-per-user-field privacy assertion |
-| `tests/request-trace.test.ts` | Ray ID normalisation, field-ceiling and per-zone entitlement retries, the route |
-| `tests/integration-ai-security.test.ts` | AI route wired to the real library and Cache API with only the network mocked, including cache-key tenant isolation |
-| `tests/ai-sec-{catalog,dashboard,params,transform}.test.ts` | AI Security domain layer: labels and mitigations, `buildDashboard`, window/bucket parameters, detection predicates |
-| `tests/auth.test.ts`, `tests/routes-auth.test.ts`, `tests/no-adhoc-auth.test.ts` | Credential resolution, every route gated in both modes, and the source guard keeping auth in one module (including the server-mode empty-token trap) |
-| `tests/security-boundaries.test.ts`, `tests/matched-data.test.ts` | Bound token never leaves the Worker, allowlist evasion, input handling; prompt-decryption key never stored, sent or exported |
-| `tests/shell-layout.test.ts` | The flex height chain, PageShell as the only scroll container, and Applications as the deliberate exception |
-| `tests/waf-chart.test.ts`, `tests/chart-hover.test.ts`, `tests/hash-params.test.ts` | WAF bucketing, chart hover hit-testing and placement, deep-link params including route-keyed adoption |
-| `tests/apps-export.test.ts`, `tests/error-boundary.test.ts` | CSV exports rendered text rather than raw JSON; the error-boundary formatter |
-| `tests/e2e-live.test.ts` | The deployed Worker through real Access. **Opt-in** (`FLARELENS_E2E=1`), spends real API quota |
+77 test files, 1,135 tests. [README.md](README.md#tests) keeps the per-file table by layer (unit,
+component, integration, system, compatibility, security, regression, opt-in E2E) and is the one
+place that list is maintained — this file used to carry a second copy that had fallen a dozen
+files behind.
 
 ---
 
@@ -391,13 +382,49 @@ into that project only, so the node project's Workers-shaped globals stay untouc
 | # | Issue | Impact | Fix |
 |---|---|---|---|
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules. **Re-confirmed 2026-09-16** after four further deploys — the deployed values have not moved, which rules out a stale build |
-| P3 | **Bound token lacks Zone: Bot Management: Read** | Rate Limits & Bots reports every zone's bot settings as *not checked* (4 unknown), so the bot findings never fire and the plan-tier inference is untested against a real response | Add the scope to `CF_API_TOKEN`; then check the tier and the "protection off" reading against live data — both are inferred from documented fields, not a confirmed mapping |
 | P3 | **Bound token lacks SSL and Certificates: Read** | Zone Health reports edge and custom certificates as *not checked* on every zone (8 unknown checks), so certificate expiry is currently unmonitored | Add the scope to `CF_API_TOKEN`; no code change — the section starts grading on the next load |
-| P3 | **Bound token lacks API Gateway: Read** | Page & API Shield reports API Shield as not checked on every zone | Add the scope; then verify the API Shield half against live data — it is built from Cloudflare's API docs only |
+| P3 | **Two zones are not entitled to API Shield** | Their API Shield configuration reads answer 403 code 10403; the other reads succeed. The page now says "not entitled" rather than asking for a scope | Nothing to fix in the app. Enable API Shield on those zones only if they should have it |
 | P3 | **`/api/waf/rulesets` takes ~20s uncached** | WAF Analytics' first load is slow; it fetches every ruleset's detail per zone and has no edge cache | Put it behind the same 60s per-credential edge cache as the other configuration routes |
+| P2 | **Cloudflare API reads have no timeout** | On 2026-09-27 `/api/access/tunnels` once returned nothing until the connection ended, while every other route answered; not reproduced since. The GitHub call in that route is now bounded (3s), but `restList`/`fetchCloudflare` in [src/lib/cf-rest.ts](src/lib/cf-rest.ts) and the route-local fetches can still wait as long as the platform allows | Give the shared client a per-request timeout and map it to a stated "Cloudflare did not answer" error per source, so one slow read degrades its section instead of holding it |
+| P3 | **"AI bots not blocked" reads a deprecated field** | The finding checks `ai_bots_protection`, which Cloudflare deprecated on 2026-09-15. The live responses now also carry per-behaviour fields — `ai_training`, `ai_search`, `ai_user` — which the finding ignores, so it can call a zone unprotected while `ai_training: "disallow"` protects it | Read the per-behaviour fields and report each; keep the legacy field only as a fallback |
+| P3 | **`tests/data-fanout.test.ts` times real 20ms delays** | It asserts concurrency from wall-clock timing and failed once under full-suite load (2026-09-19); passes on rerun | Assert concurrency from the order requests start in, not from elapsed time |
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **Review against the tree and the live account (2026-09-27, `fb0da916`).** A read of every
+  route, module and doc, checked against the gate and a live probe of each route.
+  - *Now verified live:* the token gained Bot Management and API Gateway scopes. **Bot
+    management:** all four zones read as Enterprise, confirming the plan-tier inference and the
+    decision to count an Enterprise zone as protected without `fight_mode` — those responses carry
+    no `fight_mode` or `sbfm_*` keys at all. **API Shield:** 43 saved endpoints, 4 discovered but not
+    saved, 2 uploaded schemas and log-only schema validation on one zone (a medium finding), 3
+    endpoints on another.
+  - *Bug found:* the other two zones answer API Shield configuration with 403 code 10403, "You are
+    not entitled for this service", and the page told the operator to add "API Gateway: Read" — a
+    fix that changes nothing. Not-entitled is now its own reason, checked before the generic 403,
+    with a test built on the live response.
+  - *Connect screen:* it listed every optional scope except **Zone Settings: Read**, which every
+    PQC verdict depends on. Added.
+  - *Docs corrected:* section count (README said nineteen, this file twenty-one and eighteen; there
+    are twenty), the OpenAPI version (3.1 → 3.0.3 in two places), five routes and four edge-cached
+    routes missing from the route table, eighteen modules missing from the modules table, TanStack
+    Table 8 → 9, two storage keys, a test table here that had fallen a dozen files behind (now a
+    pointer to the README's), two test files missing from the README's, and "unverified" notes on
+    scopes that have since been confirmed. A leftover "unverified" comment on the rate-limit scope
+    survived the 2026-09-19 cleanup because its wording differed from what was matched.
+  - *Untracked:* `result.html` and `result.yaml`, output of an endpoint-scanning tool committed
+    by accident on 2026-09-09. Nothing referenced them and they held no identifiers; the local
+    copies are kept.
+  - *A hang, bounded where it could be:* during the route sweep, `/api/access/tunnels` returned no
+    response at all while every other route answered; it has answered in ~6s on every attempt
+    since. The route awaits a GitHub call (the latest-`cloudflared` comparison) that had no
+    timeout, so a stalled GitHub could hold the whole Tunnel Map and Findings' tunnels source. It
+    is now bounded at 3s and degrades to "latest version unknown", with a test. That the hang was
+    GitHub is not proven — the route's Cloudflare reads have no timeout either, which is now an
+    open issue.
+  - *New open items:* upstream reads without timeouts, the "AI bots not blocked" finding reading a
+    deprecated field, and one test that times real delays. All listed above.
 
 - **The API documents itself (2026-09-20, `70c69cb1`).** `GET /api/openapi.json` serves an
   OpenAPI 3.1 document for all 24 endpoints — both credential modes, the success/error envelopes,
@@ -708,7 +735,7 @@ that need a change in the Cloudflare dashboard are still open above.
 |---|---|---|---|
 | **CD** — deploy from GitHub Actions (CI already runs `check` + `lint`) | Deploys are local only | S | A way to supply account/zone/Access ids without putting them in the public repo — the reason there is no deploy job today |
 | **Cache range comparison** — current vs previous equivalent window (hit-ratio and volume delta) | Turns a point-in-time number into a trend signal | M | — |
-| **Findings covers the newer sections** | Findings folds in Access, Groups, WAF and Cache only. Everything since — AI detections, Workers error rates, Gateway blocks, Access login failures, and most pointedly the Tunnel Map's ungated hostnames, Zone Health's dangling CNAMEs and expiring certificates — never reaches the audit view, though an ungated origin is exactly what a Findings entry is for | M | — |
+| **Cache `/api/waf/rulesets`** — the 60s per-credential edge cache the other configuration routes use | Uncached it takes ~20s on this account, which is WAF Analytics' first load | S | — |
 | **Per-user Access and Gateway breakdowns** | `userUuid`, `email`, `deviceId` are available and deliberately unqueried | S | **A privacy decision, not a technical one** — and under a shared bound token those reads are attributable to nobody |
 | **Snapshot diff / audit trail** — capture policy snapshots, diff them (and diff the newest against live) | Biggest product differentiator; answers "what changed since the last review" | L | Nothing — **designed and ready to build** |
 
