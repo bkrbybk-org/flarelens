@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-27** against a full read of the tree, t
 live probe of every route on the deployed Worker. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-two sections, 27 API routes (25 under `/api/*`, plus `/health` and `/docs`), 1,185 tests green across 82 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-two sections, 27 API routes (25 under `/api/*`, plus `/health` and `/docs`), 1,192 tests green across 83 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `87b13af0`, deployed 2026-09-28 (timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester). Each earlier deploy, and what
+Running version `c2170fc9`, deployed 2026-09-28 (full WAF counts from the groups dataset; before it the same day: timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester). Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -393,6 +393,19 @@ files behind.
 
 ### Recently resolved
 
+- **WAF counts were sampled (2026-09-28, `c2170fc9`).** WAF Analytics counted `firewallEventsAdaptive`
+  rows, which are adaptively sampled — the rows carry no `sampleInterval`, which is why the
+  2026-09-12 reading of the 30-day anomaly concluded it was not sampling. The groups dataset reports
+  it: about 3 events per row over 6 hours, 4 over 24 hours, 6 over 7 days, 39 over 30 days. Totals,
+  the timeline and a new top-countries card now come from `firewallEventsAdaptiveGroups`, read in
+  parallel with the rows. Live: 24h blocks 1,406 → **5,739**; 30 days, where rows fell to 8,477
+  (fewer than 7 days' 16,690), the full count is 333,910 against 7 days' 100,967 — the anomaly is
+  explained and gone from the headline. The per-rule tables are still built from rows, and the page
+  says so with the sample size and interval, and names the actions left out of the totals (skip,
+  AI Labyrinth). Found while testing: series points placed at their bucket's start landed one chart
+  bucket early whenever the window did not start on the hour; they now sit at the bucket midpoint.
+  Idea ported from `cf-attack-analyzer`, a half-finished side project whose Worker file was empty.
+
 - **Six items (2026-09-28, `87b13af0`).** Verified against the live account after deploy.
   - *Every upstream call bounded.* `upstreamFetch` gives each Cloudflare request 25s and turns a
     timeout into a 504 in Cloudflare's own error shape, so each section's existing degrade path
@@ -763,6 +776,7 @@ that need a change in the Cloudflare dashboard are still open above.
 |---|---|---|---|
 | **CD** — deploy from GitHub Actions (CI already runs `check` + `lint`) | Deploys are local only | S | A way to supply account/zone/Access ids without putting them in the public repo — the reason there is no deploy job today |
 | **Cache range comparison** — current vs previous equivalent window (hit-ratio and volume delta) | Turns a point-in-time number into a trend signal | M | — |
+| **Exact per-rule WAF counts** — `firewallEventsAdaptiveGroups` by `ruleId` + `action` | Totals are now full counts but the rule tables still count sampled rows (~4× low over 24h, ~39× over 30 days), so a rule's count and the headline disagree | S–M | — |
 | **Per-user Access and Gateway breakdowns** | `userUuid`, `email`, `deviceId` are available and deliberately unqueried | S | **A privacy decision, not a technical one** — and under a shared bound token those reads are attributable to nobody |
 | **Snapshot diff / audit trail** — capture policy snapshots, diff them (and diff the newest against live) | Biggest product differentiator; answers "what changed since the last review" | L | Nothing — **designed and ready to build** |
 
