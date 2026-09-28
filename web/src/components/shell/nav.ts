@@ -4,6 +4,7 @@ import {
 	AppsIcon,
 	BoltIcon,
 	ChartIcon,
+	CheckIcon,
 	FilterIcon,
 	CoinIcon,
 	DatabaseIcon,
@@ -34,7 +35,7 @@ export const NAV_GROUPS: { label: string; items: { route: Route; label: string; 
 		items: [
 			{ route: "access", label: "Access Applications", icon: AppsIcon },
 			{ route: "groups", label: "Access Groups", icon: UsersIcon },
-			{ route: "access-tester", label: "Policy Tester", icon: FilterIcon },
+			{ route: "access-tester", label: "Policy Tester", icon: CheckIcon },
 			{ route: "access-usage", label: "Access Usage", icon: ChartIcon },
 			{ route: "tunnels", label: "Tunnel Map", icon: ShareIcon },
 			{ route: "gateway", label: "Gateway Usage", icon: GlobeIcon },

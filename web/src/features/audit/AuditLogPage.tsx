@@ -199,7 +199,7 @@ export function AuditLogPage({ session, timeRange, onAuthError }: { session: Ses
 												<div className={`text-xs ${MUTED}`}>{contextLabel(e.actor.context)}</div>
 											</td>
 											<td className="py-1.5 pr-3">
-												<div className="flex items-center gap-2">
+												<div className="flex min-w-[14rem] items-center gap-2">
 													<ActionBadge type={e.actionType} />
 													<span>{e.description}</span>
 												</div>

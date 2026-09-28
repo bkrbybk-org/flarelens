@@ -27,7 +27,7 @@ const INITIAL_REQUIRED: RequiredCheck[] = [
 	{
 		key: "account",
 		label: "Account Settings: Read",
-		description: "Lists the accounts your token can access.",
+		description: "Lists the accounts your token can access, and reads the account audit log for Audit Log.",
 		status: "idle",
 	},
 	{

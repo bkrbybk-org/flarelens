@@ -42,7 +42,7 @@ describe("ConnectPage", () => {
 		render(<ConnectPage onConnect={vi.fn()} />);
 
 		expect(screen.getByText("Account Settings: Read")).toBeInTheDocument();
-		expect(screen.getByText("Lists the accounts your token can access.")).toBeInTheDocument();
+		expect(screen.getByText("Lists the accounts your token can access, and reads the account audit log for Audit Log.")).toBeInTheDocument();
 		expect(screen.getByText("Access: Read")).toBeInTheDocument();
 		expect(screen.getByText("Applications, policies, and identity providers.")).toBeInTheDocument();
 	});

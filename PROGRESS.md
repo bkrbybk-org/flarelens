@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-27** against a full read of the tree, t
 live probe of every route on the deployed Worker. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty sections, 26 API routes (24 under `/api/*`, plus `/health` and `/docs`), 1,135 tests green across 77 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-two sections, 27 API routes (25 under `/api/*`, plus `/health` and `/docs`), 1,185 tests green across 82 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `fb0da916`, deployed 2026-09-27 (review fixes). Each earlier deploy, and what
+Running version `87b13af0`, deployed 2026-09-28 (timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester). Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -32,15 +32,15 @@ pull request; there is no deploy job, deliberately — see the note under Recent
 
 ## Sections
 
-Twenty sections, grouped in the sidebar by Cloudflare product area:
+Twenty-two sections, grouped in the sidebar by Cloudflare product area:
 
 | Group | Routes |
 |---|---|
-| Zero Trust | `#/access`, `#/groups`, `#/access-usage`, `#/tunnels`, `#/gateway`, `#/gateway-policies` |
+| Zero Trust | `#/access`, `#/groups`, `#/access-tester`, `#/access-usage`, `#/tunnels`, `#/gateway`, `#/gateway-policies` |
 | Security | `#/waf`, `#/ai-security`, `#/request`, `#/pqc`, `#/zone-health`, `#/dns`, `#/bots`, `#/shields` |
 | Performance | `#/cache` |
 | Developer Platform | `#/workers`, `#/workers-ai`, `#/ai-gateway`, `#/cost` |
-| Audit | `#/findings` |
+| Audit | `#/findings`, `#/audit` |
 
 Beyond the sections: a command palette (⌘K), saved views per account, a light/dark/system theme,
 and the API documentation at `/docs` (Swagger UI over `GET /api/openapi.json`), linked from the
@@ -110,6 +110,7 @@ of the calling token — see the P2 entry below.
 | `GET /api/gateway/policies` | account | Gateway Policies — the account's Gateway rules in enforcement order (DNS resolver → DNS → network → HTTP), with findings. Edge-cached |
 | `GET /api/shields/report` | account (optional zone) | Page & API Shield — Page Shield status, scripts, connections and policies, and API Shield endpoints, schema validation and session identifiers, each read degrading on its own. Edge-cached |
 | `GET /api/tunnels/:tunnelId/metrics` | account | Connector CPU/memory from a metrics endpoint named only in the `TUNNEL_METRICS` secret, never in the request; 404 when the tunnel has none |
+| `POST /api/audit/logs` | account | Audit Log — Cloudflare's v2 account audit log for a window of up to 30 days, paged by cursor to 5,000 events. Actor IPs and request/response bodies are withheld. Not cached |
 | `GET /api/openapi.json` | — (auth required) | OpenAPI 3.0.3 document for every route, server URL taken from the request |
 | `GET /docs` | — (auth required) | Swagger UI, self-hosted; the one path whose CSP adds `'unsafe-inline'` to `style-src` |
 | `POST /api/ai-gateway/usage` | account | AI Gateway (proxy requests, tokens, errors, cache, spend). Field names resolved from the live schema — see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
@@ -120,7 +121,7 @@ All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, mis
 disallowed account or zone → 403 before any upstream call, upstream failure → 502.
 
 **Edge cache.** `/api/zones`, `/api/access/tunnels`, `/api/pqc/report`, `/api/zone-health/report`,
-`/api/dns/records`, `/api/bots/report`, `/api/gateway/policies` and `/api/shields/report` are held in
+`/api/dns/records`, `/api/bots/report`, `/api/gateway/policies`, `/api/shields/report` and `/api/waf/rulesets` are held in
 the Worker's Cache API for 60 seconds ([src/lib/edge-cache.ts](src/lib/edge-cache.ts)). The key is the auth mode, a
 SHA-256 fingerprint of the *resolved* credential, the path and only the already-validated params, and it is
 consulted only after auth, validation and the allowlist have all passed. Only `success: true` 200s are stored.
@@ -140,8 +141,9 @@ documents, so no caller text reaches a query.
 |---|---|
 | [src/index.ts](src/index.ts), [src/routes/](src/routes/) | Entry point (app, security-header middleware, route registration in order, asset fallback) and one module per area exporting `register<Area>Routes` |
 | [src/http.ts](src/http.ts), [src/env.ts](src/env.ts), [src/cf-types.ts](src/cf-types.ts) | Shared route helpers (`validHexId`, cache headers, `SECURITY_HEADERS`, `securityHeadersFor` with the `/docs` CSP exception), the `Env`/`App` types, Cloudflare shapes shared between routes |
-| [src/lib/cf-rest.ts](src/lib/cf-rest.ts) | The one Cloudflare REST client: `CF_API_BASE`, `authHeaders`, `fetchCloudflare`/`fetchCloudflareAll`, paginated `restList`, bounded `mapWithConcurrency` |
+| [src/lib/cf-rest.ts](src/lib/cf-rest.ts) | The one Cloudflare REST client: `upstreamFetch` (25s limit; a timeout becomes a 504 in Cloudflare's error shape), `CF_API_BASE`, `authHeaders`, `fetchCloudflare`/`fetchCloudflareAll`, paginated `restList`, bounded `mapWithConcurrency` |
 | [src/openapi.ts](src/openapi.ts) | OpenAPI 3.0.3 document builder — 3.0 because API Shield rejects 3.1; tests pin it against Hono's own route table |
+| [src/lib/audit-log.ts](src/lib/audit-log.ts) | Account audit log: cursor-paged v2 read capped at 5,000 events; IPs and bodies withheld; dashboard analytics queries flagged read-only |
 | [src/lib/dns-records.ts](src/lib/dns-records.ts) | DNS Records: flattened records, `origin-exposed` / `internal-address` flags, per-zone errors kept |
 | [src/lib/ratelimit-bot.ts](src/lib/ratelimit-bot.ts) | Rate-limit entrypoint rules (404 = real zero, 403 = unknown) and bot management settings with plan-tier inference and findings |
 | [src/lib/gateway-policies.ts](src/lib/gateway-policies.ts) | Gateway rules by enforcement stage and precedence, terminating actions per type, findings |
@@ -174,7 +176,8 @@ documents, so no caller text reaches a query.
 | [web/src/lib/csv.ts](web/src/lib/csv.ts) | RFC 4180 `toCsv` + `downloadCsv`; cells that would run as spreadsheet formulas get a leading apostrophe; UTF-8 BOM so Excel reads Thai names |
 | [web/src/lib/findings-sources.ts](web/src/lib/findings-sources.ts) | Findings mappers for every section added after the first four, including WAF evaluation order grouped by cause |
 | [web/src/lib/report.ts](web/src/lib/report.ts) | `buildReportHtml` — the executive report: self-contained HTML, every interpolated value escaped |
-| [web/src/lib/waf/evaluation.ts](web/src/lib/waf/evaluation.ts) | `buildEvaluationOrder` — WAF rules as Cloudflare runs them, with "never runs" claimed only for disabled deployments and literal match-all stoppers |
+| [web/src/lib/waf/evaluation.ts](web/src/lib/waf/evaluation.ts) | `buildEvaluationOrder` — WAF rules as Cloudflare runs them, managed rules with each deployment's overrides applied (`effectiveRule`: rule, then last matching category, then ruleset), with "never runs" claimed only for disabled deployments and literal match-all stoppers |
+| [web/src/lib/access-eval.ts](web/src/lib/access-eval.ts) | `evaluateAccess` — Access policy evaluation for the Policy Tester, three-valued so an undecidable rule makes the verdict "depends" |
 | [web/src/lib/savedViews.ts](web/src/lib/savedViews.ts), [web/src/lib/storage.ts](web/src/lib/storage.ts) | Saved views per account; Web Storage access that never throws when a browser blocks site data |
 | [web/src/lib/sectionSnapshot.ts](web/src/lib/sectionSnapshot.ts) | Account-scoped cross-page store carrying the last WAF/Cache load to Findings — see the note under Frontend |
 | [web/src/lib/ui.ts](web/src/lib/ui.ts) | **Style tokens — single source.** `CARD`, `ALERT_ERROR`/`ALERT_WARN`, `BTN_*`, `INPUT`/`SEARCH_INPUT`/`SELECT`, `BADGE`, `MUTED`, `SECTION_TITLE`, `FOCUS_RING`/`FOCUS_ROW`. Adding a second token for one role is a bug, not a choice |
@@ -239,7 +242,7 @@ Disconnect clears the store.
 | `cf_zt_prefs` | localStorage | `PREFS_VERSION = 3`; a version bump discards saved column order/visibility so new defaults apply. The policies table keeps its own `policyColumnVisibility` / `policyColumnOrder` keys: it shares column ids (`name`, `updated_at`, `id`) with the applications table, so one saved order would scramble the other |
 | `flarelens_saved_views` | localStorage | Saved views: name + hash + account, listed only for the current account, capped at 50 each |
 | `flarelens_recent_commands` | localStorage | Command palette's recently used commands |
-| `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (18 keys in all, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
+| `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (19 keys in all, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
 
 ### Tests
 
@@ -385,12 +388,37 @@ files behind.
 | P3 | **Bound token lacks SSL and Certificates: Read** | Zone Health reports edge and custom certificates as *not checked* on every zone (8 unknown checks), so certificate expiry is currently unmonitored | Add the scope to `CF_API_TOKEN`; no code change — the section starts grading on the next load |
 | P3 | **Two zones are not entitled to API Shield** | Their API Shield configuration reads answer 403 code 10403; the other reads succeed. The page now says "not entitled" rather than asking for a scope | Nothing to fix in the app. Enable API Shield on those zones only if they should have it |
 | P3 | **`/api/waf/rulesets` takes ~20s uncached** | WAF Analytics' first load is slow; it fetches every ruleset's detail per zone and has no edge cache | Put it behind the same 60s per-credential edge cache as the other configuration routes |
-| P2 | **Cloudflare API reads have no timeout** | On 2026-09-27 `/api/access/tunnels` once returned nothing until the connection ended, while every other route answered; not reproduced since. The GitHub call in that route is now bounded (3s), but `restList`/`fetchCloudflare` in [src/lib/cf-rest.ts](src/lib/cf-rest.ts) and the route-local fetches can still wait as long as the platform allows | Give the shared client a per-request timeout and map it to a stated "Cloudflare did not answer" error per source, so one slow read degrades its section instead of holding it |
-| P3 | **"AI bots not blocked" reads a deprecated field** | The finding checks `ai_bots_protection`, which Cloudflare deprecated on 2026-09-15. The live responses now also carry per-behaviour fields — `ai_training`, `ai_search`, `ai_user` — which the finding ignores, so it can call a zone unprotected while `ai_training: "disallow"` protects it | Read the per-behaviour fields and report each; keep the legacy field only as a fallback |
 | P3 | **`tests/data-fanout.test.ts` times real 20ms delays** | It asserts concurrency from wall-clock timing and failed once under full-suite load (2026-09-19); passes on rerun | Assert concurrency from the order requests start in, not from elapsed time |
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **Six items (2026-09-28, `87b13af0`).** Verified against the live account after deploy.
+  - *Every upstream call bounded.* `upstreamFetch` gives each Cloudflare request 25s and turns a
+    timeout into a 504 in Cloudflare's own error shape, so each section's existing degrade path
+    reports it; AI Security's retry loop skips it. 23 call sites moved onto it, and a source test
+    fails on any direct `fetch`. Closes the P2 from 2026-09-27.
+  - *WAF rulesets cached.* Same 60s per-credential cache as the other configuration routes; live,
+    ~20s → 0.15s on a repeat load. Sync bypasses it; auto-refresh does not.
+  - *AI-crawler finding.* Reads `ai_training`, `ai_search` and `ai_user` (values from Cloudflare's
+    API reference) instead of the deprecated switch, and says a robots.txt `disallow` is not a
+    block. Live: all four zones only ask training crawlers via robots.txt and allow search and
+    agent crawlers.
+  - *Managed-rule overrides in evaluation order.* Each execute rule's overrides are recorded and
+    applied per deployment — rule, then the last matching category, then ruleset-wide, per
+    Cloudflare's docs — and a changed rule is marked Overridden with its default. Live: 6 execute
+    rules carry overrides; 2,230 managed rules carry categories. The "never runs" count for the zone
+    with the disabled deployment moved from 852 to 861 as the managed ruleset grew.
+  - *Audit Log (`#/audit`).* v2 account audit log under the scope already required. Live: 1,014
+    events in a week, 179 of them dashboard analytics queries that the log files as creates —
+    hidden by default. Actor IPs and request/response bodies are withheld, pinned by a test.
+  - *Access Policy Tester (`#/access-tester`).* Evaluates an application's own policies for a
+    described request, following Cloudflare's order of enforcement. Three-valued, so groups not
+    entered, device posture or a partly-read list give "depends", never a guess. On live data an
+    outside address is denied, with each policy's rule-by-rule trace.
+  - *Polish found in the browser:* Policy Tester and Gateway Policies shared a sidebar icon, and the
+    Audit Log's action column wrapped word by word at narrow widths. Both fixed. Also restored the
+    spacing in 18 import lines an earlier script had collapsed.
 
 - **Review against the tree and the live account (2026-09-27, `fb0da916`).** A read of every
   route, module and doc, checked against the gate and a live probe of each route.
@@ -735,7 +763,6 @@ that need a change in the Cloudflare dashboard are still open above.
 |---|---|---|---|
 | **CD** — deploy from GitHub Actions (CI already runs `check` + `lint`) | Deploys are local only | S | A way to supply account/zone/Access ids without putting them in the public repo — the reason there is no deploy job today |
 | **Cache range comparison** — current vs previous equivalent window (hit-ratio and volume delta) | Turns a point-in-time number into a trend signal | M | — |
-| **Cache `/api/waf/rulesets`** — the 60s per-credential edge cache the other configuration routes use | Uncached it takes ~20s on this account, which is WAF Analytics' first load | S | — |
 | **Per-user Access and Gateway breakdowns** | `userUuid`, `email`, `deviceId` are available and deliberately unqueried | S | **A privacy decision, not a technical one** — and under a shared bound token those reads are attributable to nobody |
 | **Snapshot diff / audit trail** — capture policy snapshots, diff them (and diff the newest against live) | Biggest product differentiator; answers "what changed since the last review" | L | Nothing — **designed and ready to build** |
 
