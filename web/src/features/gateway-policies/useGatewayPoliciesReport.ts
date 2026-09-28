@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchGatewayPoliciesReport, isSessionError } from "../../api/client";
+import { fetchGatewayPoliciesReport, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { GwReport } from "./types";
 

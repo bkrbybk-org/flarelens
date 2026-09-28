@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchBotsReport, isSessionError } from "../../api/client";
+import { fetchBotsReport, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { RatelimitBotResult } from "./types";
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchWorkerMetrics, fetchWorkerScripts, isSessionError } from "../../api/client";
+import { fetchWorkerMetrics, fetchWorkerScripts, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { Granularity, WorkerMetricsResult } from "./types";
 

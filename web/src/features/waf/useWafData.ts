@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchWafEvents, fetchWafRulesets, isSessionError } from "../../api/client";
+import { fetchWafEvents, fetchWafRulesets, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { FirewallEvent, RuleMetaMap, WafDiagnostics } from "../../lib/waf/types";
 

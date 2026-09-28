@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchZoneHealthReport, isSessionError } from "../../api/client";
+import { fetchZoneHealthReport, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { ZoneHealthResult } from "./types";
 

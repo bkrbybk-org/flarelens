@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchShieldsReport, isSessionError } from "../../api/client";
+import { fetchShieldsReport, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { ShieldsResult } from "./types";
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {traceRequest, isSessionError } from "../../api/client";
+import { traceRequest, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { RequestTraceResult } from "./types";
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchAiSecurity, isSessionError } from "../../api/client";
+import { fetchAiSecurity, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { AiSecResult } from "../../lib/ai-sec/types";
 

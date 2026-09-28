@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchTunnelMap, isSessionError } from "../../api/client";
+import { fetchTunnelMap, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { TunnelMapResult } from "./types";
 

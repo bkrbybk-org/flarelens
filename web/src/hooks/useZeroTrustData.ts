@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {fetchZeroTrustData, isSessionError } from "../api/client";
+import { fetchZeroTrustData, isSessionError } from "../api/client";
 import type { CfPolicy, ZeroTrustData } from "../types";
 import { useEstimatedProgress } from "./useEstimatedProgress";
 

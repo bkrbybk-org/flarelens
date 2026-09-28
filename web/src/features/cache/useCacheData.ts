@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchCacheAnalysis, isSessionError } from "../../api/client";
+import { fetchCacheAnalysis, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { CacheAnalysis } from "./types";
 

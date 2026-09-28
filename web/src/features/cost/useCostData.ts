@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchWorkerMetrics, fetchWorkersAiUsage, isSessionError } from "../../api/client";
+import { fetchWorkerMetrics, fetchWorkersAiUsage, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { WorkerMetricsResult } from "../workers/types";
 import type { WorkersAiResult } from "../workers-ai/types";

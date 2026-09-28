@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchDnsRecords, isSessionError } from "../../api/client";
+import { fetchDnsRecords, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { DnsRecordsResult } from "./types";
 

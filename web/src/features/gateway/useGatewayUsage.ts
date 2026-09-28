@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchGatewayUsage, isSessionError } from "../../api/client";
+import { fetchGatewayUsage, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { GatewayGranularity, GatewayUsageResult } from "./types";
 

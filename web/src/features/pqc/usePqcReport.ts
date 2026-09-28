@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchPqcReport, isSessionError } from "../../api/client";
+import { fetchPqcReport, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { PqcResult } from "./types";
 

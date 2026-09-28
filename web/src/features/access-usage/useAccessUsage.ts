@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchAccessUsage, isSessionError } from "../../api/client";
+import { fetchAccessUsage, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { AccessGranularity, AccessUsageResult } from "./types";
 

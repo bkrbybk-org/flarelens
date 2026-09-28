@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {fetchAiGatewayUsage, isSessionError } from "../../api/client";
+import { fetchAiGatewayUsage, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
 import type { AiGatewayGranularity, AiGatewayUsageResult } from "./types";
 
