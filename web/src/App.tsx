@@ -6,6 +6,7 @@ import { ConnectPage } from "./components/connect/ConnectPage";
 import { Dashboard } from "./features/access/Dashboard";
 import { useAppLogins } from "./features/access/useAppLogins";
 import { GroupsPage } from "./features/access/GroupsPage";
+import { PolicyTesterPage } from "./features/access/PolicyTesterPage";
 import { CachePage } from "./features/cache/CachePage";
 import { FindingsPage } from "./features/findings/FindingsPage";
 import { WafPage } from "./features/waf/WafPage";
@@ -53,7 +54,7 @@ function defaultViewName(title: string): string {
 }
 
 /** Sections backed by the shared /api/data payload rather than their own loader. */
-const DATA_ROUTES = new Set<Route>(["access", "groups", "findings"]);
+const DATA_ROUTES = new Set<Route>(["access", "groups", "access-tester", "findings"]);
 
 const PAGE_TITLES: Record<Route, string> = {
 	access: "Access Applications",
@@ -76,6 +77,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	cost: "Cost & Usage",
 	findings: "Findings",
 	audit: "Audit Log",
+	"access-tester": "Access Policy Tester",
 	shields: "Page & API Shield",
 };
 
@@ -412,6 +414,19 @@ export default function App() {
 							error={data.error}
 							progress={data.progress}
 							ctx={ctx}
+						/>
+					)}
+					{route === "access-tester" && (
+						<PolicyTesterPage
+							apps={data.data?.apps || []}
+							groups={data.data?.groups || []}
+							lists={data.data?.lists || []}
+							idps={data.data?.idps || []}
+							reusableMap={data.reusableMap}
+							ctx={ctx}
+							loading={data.loading}
+							error={data.error}
+							progress={data.progress}
 						/>
 					)}
 					{route === "waf" && <WafPage session={session} zoneId={prefs.wafZone} timeRange={timeRange} onAuthError={handleDisconnect} />}

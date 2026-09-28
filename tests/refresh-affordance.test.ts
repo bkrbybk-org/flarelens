@@ -43,7 +43,7 @@ describe("refresh", () => {
 		// shared /api/data payload that App reloads directly. Request Trace is neither: it has
 		// nothing to reload until a ray id is submitted, so it shows no Sync at all.
 		const app = readFileSync(join(WEB, "App.tsx"), "utf8");
-		expect(app).toContain('const DATA_ROUTES = new Set<Route>(["access", "groups", "findings"]);');
+		expect(app).toContain('const DATA_ROUTES = new Set<Route>(["access", "groups", "access-tester", "findings"]);');
 
 		const registering = sources()
 			.filter(({ text }) => text.includes("useSectionRefresh("))
