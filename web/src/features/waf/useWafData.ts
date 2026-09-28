@@ -34,16 +34,21 @@ export function useWafData(onAuthError: () => void) {
 	}, [onAuthError]);
 	const { start: progressStart, stop: progressStop } = progress;
 
-	const load = useCallback(async (token: string, accountId: string, zoneId: string, minutes: number) => {
+	/**
+	 * `fresh` bypasses the 60s edge cache on the ruleset metadata. Only the top bar's Sync asks for
+	 * it; a mount, a window change and auto-refresh take the cached configuration, since rulesets
+	 * change far less often than the events they label.
+	 */
+	const load = useCallback(async (token: string, accountId: string, zoneId: string, minutes: number, fresh = false) => {
 		const requestId = ++requestIdRef.current;
 		setState((prev) => ({ ...prev, loading: true, error: null }));
 		progressStart();
 		let success = false;
 		const until = Date.now();
 		try {
-			const [eventsRes, ruleMeta] = await Promise.all([
+			const [eventsRes, { result: ruleMeta }] = await Promise.all([
 				fetchWafEvents<FirewallEvent, WafDiagnostics>(token, accountId, zoneId, minutes),
-				fetchWafRulesets<RuleMetaMap>(token, accountId, zoneId),
+				fetchWafRulesets<RuleMetaMap>(token, accountId, zoneId, { fresh }),
 			]);
 			if (requestId !== requestIdRef.current) return;
 			success = true;

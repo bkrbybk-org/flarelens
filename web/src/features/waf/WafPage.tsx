@@ -103,7 +103,8 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 	];
 
 	const refresh = useCallback(
-		() => void load(session.token, session.accountId, zoneId, minutes).then(() => setLastRefreshed(new Date().toISOString())),
+		// Sync is an explicit "show me what is there now", so it also bypasses the ruleset cache.
+		() => void load(session.token, session.accountId, zoneId, minutes, true).then(() => setLastRefreshed(new Date().toISOString())),
 		[load, session.token, session.accountId, zoneId, minutes],
 	);
 	useSectionRefresh(refresh, waf.loading);

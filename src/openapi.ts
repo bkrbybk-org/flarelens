@@ -594,14 +594,15 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 				get: {
 					tags: ["WAF"],
 					summary: "WAF ruleset metadata (rule names, descriptions) for an account or zone",
-					description: "Account-level by default; add `zone_id` for one zone, or `include_zones=1` to fan out across every zone in the account.",
+					description: "Account-level by default; add `zone_id` for one zone, or `include_zones=1` to fan out across every zone in the account. Edge-cached for 60 seconds per scope. Includes each rule's position, what an `execute` rule runs and with which overrides, and each managed rule's categories.",
 					parameters: [
 						accountIdQuery,
 						zoneIdQuery,
 						{ name: "include_zones", in: "query", required: false, description: "Set to \"1\" to also collect ruleset metadata for every zone in the account.", schema: { type: "string", enum: ["1"] } },
+						freshHeaderParam,
 					],
 					responses: {
-						200: okJson(successEnvelope(genericObject)),
+						200: okJson(successEnvelope(genericObject), cacheHeaders),
 						400: response400,
 						401: response401,
 						403: response403,

@@ -363,3 +363,54 @@ describe("client: Sync-only fresh bypass (source assertion)", () => {
 		expect(src).toMatch(/X-Flarelens-Cache"\)\s*===\s*"HIT"/);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// GET /api/waf/rulesets: the slowest configuration read, now behind the same cache.
+
+describe("GET /api/waf/rulesets edge cache", () => {
+	function mockRulesetsUpstream() {
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input instanceof Request ? input.url : input);
+			upstreamCalls++;
+			if (url.endsWith("/rulesets")) {
+				return json({ success: true, result: [{ id: "rs1", name: "default", kind: "zone", phase: "http_request_firewall_custom" }] });
+			}
+			if (url.includes("/rulesets/")) {
+				return json({ success: true, result: { id: "rs1", name: "default", kind: "zone", phase: "http_request_firewall_custom", rules: [{ id: "r1", action: "block", expression: "true" }] } });
+			}
+			return json({ success: true, result: [], result_info: { total_pages: 1 } });
+		}) as typeof fetch;
+	}
+	const get = (fresh = false, zone = "") =>
+		app.request(
+			`/api/waf/rulesets?account_id=${ACCOUNT}${zone ? `&zone_id=${zone}` : "&include_zones=1"}`,
+			{ headers: { Authorization: "Bearer caller-token", ...(fresh ? { "X-Flarelens-Fresh": "1" } : {}) } },
+			ENV,
+			ctx(),
+		);
+
+	it("reads Cloudflare once, then serves the same metadata from cache", async () => {
+		mockRulesetsUpstream();
+		const first = await get();
+		expect(first.headers.get("X-Flarelens-Cache")).toBe("MISS");
+		const calls = upstreamCalls;
+		const second = await get();
+		expect(second.headers.get("X-Flarelens-Cache")).toBe("HIT");
+		expect(await second.json()).toEqual(await first.json());
+		expect(upstreamCalls).toBe(calls);
+	});
+
+	it("keys on the scope — a single zone and the whole account never share an entry", async () => {
+		mockRulesetsUpstream();
+		await get();
+		const zone = await get(false, "33333333333333333333333333333333");
+		expect(zone.headers.get("X-Flarelens-Cache")).toBe("MISS");
+	});
+
+	it("lets Sync bypass it", async () => {
+		mockRulesetsUpstream();
+		await get();
+		const fresh = await get(true);
+		expect(fresh.headers.get("X-Flarelens-Cache")).toBe("MISS");
+	});
+});

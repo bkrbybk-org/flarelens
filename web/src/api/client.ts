@@ -166,14 +166,14 @@ export function fetchCacheAnalysis<T>(token: string, zoneId: string, rangeHours:
 	return postJson<T>("/api/cache/analyze", token, { zoneId, rangeHours });
 }
 
-export function fetchWafRulesets<M>(token: string, accountId: string, zoneId: string): Promise<M> {
+export function fetchWafRulesets<M>(token: string, accountId: string, zoneId: string, opts?: { fresh?: boolean }): Promise<CachedResult<M>> {
 	const params = new URLSearchParams({ account_id: accountId });
 	if (zoneId) {
 		params.set("zone_id", zoneId);
 	} else {
 		params.set("include_zones", "1");
 	}
-	return apiFetch<M>(`/api/waf/rulesets?${params.toString()}`, token);
+	return apiFetchCached<M>(`/api/waf/rulesets?${params.toString()}`, token, opts?.fresh);
 }
 
 export interface AppConfig {

@@ -4,8 +4,10 @@
 import { assertAllowedScope, resolveAuth } from "../lib/auth";
 import { collectRulesetsForScope, UpstreamError, type RuleMetaMap, type RulesetScope } from "../lib/waf-meta";
 import { fetchCloudflareAll, mapWithConcurrency, upstreamFetch } from "../lib/cf-rest";
+import { tokenFingerprint } from "../lib/ai-sec";
+import { CACHE_TTL_SECONDS, cacheKey, withEdgeCache } from "../lib/edge-cache";
 import type { CfZone } from "../cf-types";
-import { validHexId } from "../http";
+import { edgeCacheWaitUntil, validHexId, withCacheHeaders } from "../http";
 import type { App } from "../env";
 
 const GRAPHQL_EVENT_LIMIT = 10000;
@@ -197,39 +199,58 @@ export function registerWafRoutes(app: App): void {
 		}
 		const includeZones = c.req.query("include_zones") === "1";
 
-		const scopes: RulesetScope[] = [{ kind: "accounts", id: accountId, source: "account" }];
-		if (zoneId) {
-			scopes.push({ kind: "zones", id: zoneId, source: "zone" });
-		} else if (includeZones) {
-			const zonesRes = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`, token);
-			if (zonesRes.status === 200) {
-				scopes.push(...zonesRes.result.map((z) => ({ kind: "zones" as const, id: z.id, source: `zone:${z.name || z.id}` })));
-			}
-		}
+		// Configuration, not telemetry, and the slowest route in the app uncached (~20s across an
+		// account's zones: every ruleset's detail, per scope). Same per-credential edge cache as the
+		// other configuration routes, read only after auth, validation and scope have passed.
+		const fingerprint = await tokenFingerprint(token);
+		const key = cacheKey({
+			fingerprint,
+			mode: auth.auth.mode,
+			path: "/api/waf/rulesets",
+			params: { account_id: accountId, zone_id: zoneId ?? undefined, include_zones: includeZones ? "1" : undefined },
+		});
+		const fresh = c.req.header("X-Flarelens-Fresh") === "1";
+		const { status, body, cachedAt, hit } = await withEdgeCache({
+			key,
+			ttlSeconds: CACHE_TTL_SECONDS,
+			fresh,
+			waitUntil: edgeCacheWaitUntil(c),
+			compute: async () => {
+				const scopes: RulesetScope[] = [{ kind: "accounts", id: accountId, source: "account" }];
+				if (zoneId) {
+					scopes.push({ kind: "zones", id: zoneId, source: "zone" });
+				} else if (includeZones) {
+					const zonesRes = await fetchCloudflareAll<CfZone>(`/zones?account.id=${encodeURIComponent(accountId)}`, token);
+					if (zonesRes.status === 200) {
+						scopes.push(...zonesRes.result.map((z) => ({ kind: "zones" as const, id: z.id, source: `zone:${z.name || z.id}` })));
+					}
+				}
 
-		const meta: RuleMetaMap = {};
-		try {
-			// Each scope gets its own map so completion order can't race the
-			// last-write-wins merge below; scopes run concurrently, but the merge
-			// walks `scopes` in original (account-first-then-zones) order so a
-			// zone entry still overrides an account entry for the same rule id,
-			// exactly as the old sequential loop did.
-			const perScope = await mapWithConcurrency(scopes, 5, async (scope) => {
-				const scopeMeta: RuleMetaMap = {};
-				await collectRulesetsForScope(scope, token, scopeMeta);
-				return scopeMeta;
-			});
-			for (const scopeMeta of perScope) {
-				Object.assign(meta, scopeMeta);
-			}
-		} catch (err) {
-			if (err instanceof UpstreamError) {
-				const status = err.status === 401 || err.status === 403 || err.status === 429 ? err.status : 502;
-				return c.json({ success: false, errors: [{ message: err.message }] }, status as 502);
-			}
-			throw err;
-		}
-
-		return c.json({ success: true, result: meta });
+				const meta: RuleMetaMap = {};
+				try {
+					// Each scope gets its own map so completion order can't race the
+					// last-write-wins merge below; scopes run concurrently, but the merge
+					// walks `scopes` in original (account-first-then-zones) order so a
+					// zone entry still overrides an account entry for the same rule id,
+					// exactly as the old sequential loop did.
+					const perScope = await mapWithConcurrency(scopes, 5, async (scope) => {
+						const scopeMeta: RuleMetaMap = {};
+						await collectRulesetsForScope(scope, token, scopeMeta);
+						return scopeMeta;
+					});
+					for (const scopeMeta of perScope) {
+						Object.assign(meta, scopeMeta);
+					}
+				} catch (err) {
+					if (err instanceof UpstreamError) {
+						const errStatus = err.status === 401 || err.status === 403 || err.status === 429 ? err.status : 502;
+						return { status: errStatus, body: { success: false, errors: [{ message: err.message }] } };
+					}
+					throw err;
+				}
+				return { status: 200, body: { success: true, result: meta } };
+			},
+		});
+		return withCacheHeaders(c.json(body as never, status as 200), hit, cachedAt);
 	});
 }
