@@ -10,6 +10,7 @@ import {
 	GlobeIcon,
 	KeyIcon,
 	LockIcon,
+	PencilIcon,
 	PulseIcon,
 	RouteIcon,
 	SearchIcon,
@@ -67,6 +68,9 @@ export const NAV_GROUPS: { label: string; items: { route: Route; label: string; 
 	},
 	{
 		label: "Audit",
-		items: [{ route: "findings", label: "Findings", icon: AlertIcon }],
+		items: [
+			{ route: "findings", label: "Findings", icon: AlertIcon },
+			{ route: "audit", label: "Audit Log", icon: PencilIcon },
+		],
 	},
 ];

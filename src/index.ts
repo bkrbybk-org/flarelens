@@ -19,6 +19,7 @@ import { registerBotsRoutes } from "./routes/bots";
 import { registerAccessUsageRoutes } from "./routes/access-usage";
 import { registerWorkersRoutes } from "./routes/workers";
 import { registerCacheRoutes } from "./routes/cache";
+import { registerAuditRoutes } from "./routes/audit";
 import { registerShieldsRoutes } from "./routes/shields";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -56,6 +57,7 @@ registerBotsRoutes(app);
 registerAccessUsageRoutes(app);
 registerWorkersRoutes(app);
 registerCacheRoutes(app);
+registerAuditRoutes(app);
 registerShieldsRoutes(app);
 registerDocsRoutes(app);
 

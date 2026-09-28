@@ -173,6 +173,7 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 			{ name: "Core", description: "Bootstrap: health, accounts, deployment config, zones." },
 			{ name: "Access", description: "Zero Trust Access applications, policies, identity providers." },
 			{ name: "Access Usage", description: "Access login telemetry." },
+			{ name: "Audit Log", description: "Who changed what in the account, and when." },
 			{ name: "AI Gateway", description: "AI Gateway request volume, tokens, spend." },
 			{ name: "AI Security", description: "AI Security for Apps detections." },
 			{ name: "Rate Limits & Bots", description: "Rate-limit rules and bot management posture." },
@@ -294,6 +295,30 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 							from: { type: "string", format: "date-time", description: "ISO-8601 UTC instant." },
 							to: { type: "string", format: "date-time", description: "ISO-8601 UTC instant. Must be after `from`, and at most 7 days later." },
 							granularity: { type: "string", default: "hourly" },
+						},
+					}),
+					responses: {
+						200: okJson(successEnvelope(genericObject)),
+						400: response400,
+						401: response401,
+						403: response403,
+						502: response502,
+					},
+				},
+			},
+			"/api/audit/logs": {
+				post: {
+					tags: ["Audit Log"],
+					summary: "Account configuration changes in a window",
+					description:
+						"Cloudflare's v2 account audit log, newest first: who (email, else token name), what (action type and description), which resource and zone, the result and the request line. Window of at most 30 days; reads stop after 5,000 events and set `truncated`. Actor IP addresses and request/response bodies are withheld. Dashboard analytics queries, which the log records as creates, are flagged `readOnly`. Needs Account Settings: Read. Not cached.",
+					requestBody: jsonBody({
+						type: "object",
+						required: ["accountId", "from", "to"],
+						properties: {
+							accountId: HEX_ID_SCHEMA,
+							from: { type: "string", format: "date-time", description: "ISO-8601 UTC instant." },
+							to: { type: "string", format: "date-time", description: "ISO-8601 UTC instant. Must be after `from`, and at most 30 days later." },
 						},
 					}),
 					responses: {

@@ -211,6 +211,10 @@ export function fetchAccessUsage<T>(
 	return postJson<T>("/api/access/usage", token, body);
 }
 
+export function fetchAuditLog<T>(token: string, body: { accountId: string; from: string; to: string }): Promise<T> {
+	return postJson<T>("/api/audit/logs", token, body);
+}
+
 export function fetchWorkersAiUsage<T>(
 	token: string,
 	body: { accountId: string; from: string; to: string; granularity: string },

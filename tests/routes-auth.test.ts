@@ -147,6 +147,7 @@ const SCOPED_ROUTES: { name: string; request: (account: string, zone: string) =>
 	{ name: "GET /api/workers/scripts", request: (a) => ({ path: `/api/workers/scripts?account_id=${a}` }) },
 	{ name: "POST /api/waf/events", request: (a) => ({ path: "/api/waf/events", init: post({ accountId: a }) }) },
 	{ name: "POST /api/access/usage", request: (a) => ({ path: "/api/access/usage", init: post({ accountId: a, ...RANGE }) }) },
+	{ name: "POST /api/audit/logs", request: (a) => ({ path: "/api/audit/logs", init: post({ accountId: a, ...RANGE }) }) },
 	{ name: "POST /api/gateway/usage", request: (a) => ({ path: "/api/gateway/usage", init: post({ accountId: a, ...RANGE }) }) },
 	{ name: "POST /api/workers/metrics", request: (a) => ({ path: "/api/workers/metrics", init: post({ accountId: a, ...RANGE }) }) },
 	{ name: "POST /api/workers-ai/usage", request: (a) => ({ path: "/api/workers-ai/usage", init: post({ accountId: a, ...RANGE }) }) },

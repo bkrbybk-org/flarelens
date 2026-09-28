@@ -22,6 +22,7 @@ import { DnsPage } from "./features/dns/DnsPage";
 import { BotsPage } from "./features/bots/BotsPage";
 import { RequestTracePage } from "./features/request/RequestTracePage";
 import { CostPage } from "./features/cost/CostPage";
+import { AuditLogPage } from "./features/audit/AuditLogPage";
 import { AiSecurityPage } from "./features/ai-security/AiSecurityPage";
 import { ShieldsPage } from "./features/shields/ShieldsPage";
 import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
@@ -74,6 +75,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	bots: "Rate Limits & Bots",
 	cost: "Cost & Usage",
 	findings: "Findings",
+	audit: "Audit Log",
 	shields: "Page & API Shield",
 };
 
@@ -439,6 +441,7 @@ export default function App() {
 							onAuthError={handleDisconnect}
 						/>
 					)}
+					{route === "audit" && <AuditLogPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "findings" && (
 						<FindingsPage
 							session={session}
