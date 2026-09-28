@@ -17,11 +17,11 @@ describe("wideWindowWarning", () => {
 		expect(wideWindowWarning(0)).toBeNull();
 	});
 
-	it("warns past 7 days, naming the measured counts", () => {
+	it("warns past 7 days — about the sampled rule tables, not the full-count totals", () => {
 		const warning = wideWindowWarning(10081);
 		expect(warning).not.toBeNull();
-		expect(warning).toMatch(/5,388/);
-		expect(warning).toMatch(/18,440/);
+		expect(warning).toMatch(/per-rule tables/);
+		expect(warning).toMatch(/full counts and are not affected/);
 		expect(warning).toMatch(/7 days/);
 	});
 

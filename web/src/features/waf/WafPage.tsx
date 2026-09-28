@@ -3,7 +3,7 @@ import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { PageShell } from "../../components/PageShell";
 import { TabPanel, Tabs } from "../../components/Tabs";
 import { StatCard, StatGrid } from "../../components/StatCard";
-import { ALERT_ERROR, ALERT_WARN, INPUT, SEARCH_INPUT } from "../../lib/ui";
+import { ALERT_ERROR, ALERT_WARN, CARD, INPUT, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
 import { useHashSyncedState } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
@@ -30,13 +30,46 @@ type Tab = "overview" | "rules";
 const SEVEN_DAYS_MINUTES = 7 * 24 * 60;
 
 /**
- * Measured on this account 2026-09-12: a 30-day window returned fewer WAF events (5,388) than a
- * 7-day window (18,440). Past 7 days the event log is a sparse, non-uniform sample rather than
- * more data, so counts from it are not comparable with a narrower window. Null at or under 7 days.
+ * The event rows are adaptively sampled, more heavily the wider the window: on this account a
+ * 30-day window once returned fewer rows (5,388) than a 7-day one (18,440). The headline counts and
+ * the chart now come from the groups dataset's full counts and are unaffected; what stays sampled
+ * is the per-rule breakdown, which is built from the rows. So the warning is only needed — and only
+ * about the rule tables — past 7 days. Null at or under 7 days.
  */
 export function wideWindowWarning(minutes: number): string | null {
 	if (minutes <= SEVEN_DAYS_MINUTES) return null;
-	return "This window is wider than 7 days. On this account a 30-day window returned fewer events than a 7-day window (5,388 vs 18,440, measured 2026-09-12) — beyond 7 days the event log is a sparse sample, not a complete count. Don't read trends from event counts at this window size.";
+	return "Past 7 days the per-rule tables are built from a sparse sample of events (a 30-day window once returned fewer rows than a 7-day one). The totals and the chart above use Cloudflare's full counts and are not affected — compare rules within this window, not across window sizes.";
+}
+
+/** Actions the headline leaves out, with a readable name. */
+const OTHER_ACTIONS: Record<string, string> = {
+	skip: "skip",
+	link_maze_injected: "AI Labyrinth links injected",
+	link_maze_visited: "AI Labyrinth visits",
+};
+
+/** Where WAF events come from, by full count. Country codes as Cloudflare reports them. */
+function TopCountries({ countries, total }: { countries: { country: string; count: number }[]; total: number }) {
+	const max = Math.max(1, ...countries.map((c) => c.count));
+	return (
+		<section className={CARD} aria-label="Top countries">
+			<h2 className={`mb-3 ${SECTION_TITLE}`}>Top countries</h2>
+			<ul className="space-y-1.5 text-sm">
+				{countries.map(({ country, count }) => (
+					<li key={country} className="flex items-center gap-3">
+						<span className="w-10 shrink-0 font-mono text-xs">{country}</span>
+						<span className="h-2 flex-1 rounded bg-zinc-100 dark:bg-zinc-800">
+							<span className="block h-2 rounded bg-cf/70" style={{ width: `${(count / max) * 100}%` }} />
+						</span>
+						<span className="w-24 shrink-0 text-right tabular-nums">
+							{count.toLocaleString()}
+							<span className="ml-1 text-xs text-zinc-500 dark:text-zinc-400">{total ? `${Math.round((count / total) * 100)}%` : ""}</span>
+						</span>
+					</li>
+				))}
+			</ul>
+		</section>
+	);
 }
 
 export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProps) {
@@ -83,13 +116,29 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 
 	const rulesetRows = useMemo(() => aggregateRulesets(waf.events, waf.ruleMeta), [waf.events, waf.ruleMeta]);
 
-	const kpis = useMemo(() => ({
-		total: waf.events.length,
-		blocked: countEventsByActions(waf.events, ["block"]),
-		challenged: countEventsByActions(waf.events, ["challenge", "managed_challenge", "js_challenge"]),
-		logged: countEventsByActions(waf.events, ["log"]),
-		rulesets: rulesetRows.length,
-	}), [waf.events, rulesetRows]);
+	// Full counts when the groups dataset answered; counting sampled rows only as a stated fallback.
+	const agg = waf.aggregates;
+	const kpis = useMemo(() => {
+		const sum = (actions: string[]) => actions.reduce((n, a) => n + (agg?.byAction[a] ?? 0), 0);
+		return agg
+			? {
+				total: agg.total,
+				blocked: sum(["block"]),
+				challenged: sum(["challenge", "managed_challenge", "js_challenge"]),
+				logged: sum(["log"]),
+				rulesets: rulesetRows.length,
+			}
+			: {
+				total: waf.events.length,
+				blocked: countEventsByActions(waf.events, ["block"]),
+				challenged: countEventsByActions(waf.events, ["challenge", "managed_challenge", "js_challenge"]),
+				logged: countEventsByActions(waf.events, ["log"]),
+				rulesets: rulesetRows.length,
+			};
+	}, [agg, waf.events, rulesetRows]);
+	const otherActions = agg
+		? Object.entries(agg.byAction).filter(([action, count]) => count > 0 && !["block", "challenge", "managed_challenge", "js_challenge", "log"].includes(action))
+		: [];
 
 	const selectCls =
 		INPUT;
@@ -153,6 +202,25 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 					<StatCard key={label} label={label} value={value} icon={icon} iconClass={cls} />
 				))}
 			</StatGrid>
+			{waf.loaded && (
+				<p className="text-xs text-zinc-500 dark:text-zinc-400">
+					{agg ? (
+						<>
+							Totals and the chart are Cloudflare's full counts. The rule tables below are built from a sample of{" "}
+							{waf.events.length.toLocaleString()} events
+							{agg.sampleInterval && agg.sampleInterval > 1.05 ? ` (each sampled event stands for about ${agg.sampleInterval.toFixed(1)} on average)` : ""}.
+							{otherActions.length > 0 && (
+								<> Not counted above: {otherActions.map(([action, count]) => `${count.toLocaleString()} ${OTHER_ACTIONS[action] ?? action}`).join(", ")}.</>
+							)}
+						</>
+					) : (
+						<>
+							Full counts could not be read{waf.aggregatesError ? ` (${waf.aggregatesError})` : ""}, so every number here counts sampled events and
+							understates real traffic.
+						</>
+					)}
+				</p>
+			)}
 
 			{/* Tabs */}
 			<Tabs
@@ -169,7 +237,8 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 			{tab === "overview" ? (
 				<TabPanel id="overview" idPrefix="waf">
 					<div className="space-y-4">
-						<EventGraph events={waf.events} window={waf.window} />
+						<EventGraph events={waf.events} window={waf.window} series={agg?.series} bucket={agg?.bucket} />
+						{agg && agg.countries.length > 0 && <TopCountries countries={agg.countries} total={agg.total} />}
 						<div className="relative">
 							<SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400" />
 							<input

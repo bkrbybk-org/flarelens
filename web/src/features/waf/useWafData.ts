@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchWafEvents, fetchWafRulesets, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
-import type { FirewallEvent, RuleMetaMap, WafDiagnostics } from "../../lib/waf/types";
+import type { FirewallEvent, RuleMetaMap, WafAggregates, WafDiagnostics } from "../../lib/waf/types";
 
 interface WafState {
 	events: FirewallEvent[];
 	ruleMeta: RuleMetaMap;
 	diagnostics: WafDiagnostics | null;
+	/** Full counts; null when they could not be read — see aggregatesError. */
+	aggregates: WafAggregates | null;
+	aggregatesError: string | null;
 	window: { since: number; until: number; minutes: number } | null;
 	loading: boolean;
 	error: string | null;
@@ -17,6 +20,8 @@ const INITIAL: WafState = {
 	events: [],
 	ruleMeta: {},
 	diagnostics: null,
+	aggregates: null,
+	aggregatesError: null,
 	window: null,
 	loading: false,
 	error: null,
@@ -56,6 +61,8 @@ export function useWafData(onAuthError: () => void) {
 				events: eventsRes.events,
 				ruleMeta,
 				diagnostics: eventsRes.diagnostics || null,
+				aggregates: (eventsRes.aggregates as WafAggregates | undefined) ?? null,
+				aggregatesError: eventsRes.aggregatesError ?? null,
 				window: { since: until - minutes * 60 * 1000, until, minutes },
 				loading: false,
 				error: null,

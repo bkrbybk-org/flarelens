@@ -2,10 +2,12 @@
 
 import { CHART_ACTIONS } from "./constants";
 import { clampNumber, formatBucketTime, normalizeAction } from "./format";
-import type { FirewallEvent } from "./types";
+import type { FirewallEvent, WafAggregates } from "./types";
 
 export interface TimedEvent extends FirewallEvent {
 	time: number;
+	/** How many events this point stands for; 1 for a sampled row, the bucket count for a series point. */
+	weight?: number;
 }
 
 export interface GraphBucket {
@@ -22,6 +24,25 @@ export function eventsWithTime(events: FirewallEvent[]): TimedEvent[] {
 		.filter((event) => event.datetime)
 		.map((event) => ({ ...event, time: new Date(event.datetime!).getTime() }))
 		.filter((event) => Number.isFinite(event.time));
+}
+
+/**
+ * The groups dataset's series as weighted points, so the chart has one bucketing path whichever
+ * source it draws. Each point sits at the middle of its series bucket: the chart's own buckets start
+ * wherever the window starts, rarely on the hour, and a point at the series bucket's start would
+ * land one chart bucket early. A point before the window (a partial first bucket) moves to its start.
+ */
+export function seriesAsTimedEvents(series: WafAggregates["series"], windowStart: number, bucket: WafAggregates["bucket"] = "1h"): TimedEvent[] {
+	const half = (bucket === "15m" ? 15 : 60) * 30_000;
+	const points: TimedEvent[] = [];
+	for (const { ts, byAction } of series) {
+		const time = new Date(ts).getTime();
+		if (!Number.isFinite(time)) continue;
+		for (const [action, count] of Object.entries(byAction)) {
+			if (count > 0) points.push({ action, datetime: ts, time: Math.max(time + half, windowStart), weight: count });
+		}
+	}
+	return points;
 }
 
 export function graphBuckets(
@@ -47,8 +68,9 @@ export function graphBuckets(
 		const index = clampNumber(Math.floor((event.time - start) / bucketMs), 0, bucketCount - 1);
 		const group = chartActionFor(normalizeAction(event.action));
 		if (!group) continue;
-		buckets[index].counts[group.key] += 1;
-		if (chartActions[group.key]) buckets[index].total += 1;
+		const weight = event.weight ?? 1;
+		buckets[index].counts[group.key] += weight;
+		if (chartActions[group.key]) buckets[index].total += weight;
 	}
 	return buckets;
 }

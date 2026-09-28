@@ -579,7 +579,7 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 					tags: ["WAF"],
 					summary: "WAF firewall events for an account or zone",
 					description:
-						"Cursor-paginates the GraphQL `firewallEventsAdaptive` dataset backwards from now over a lookback (`minutes`, clamped to 5–43200; default 360), deduped by ray+rule+action, up to 5 pages of 10,000 rows. `diagnostics.truncated` reports whether the page cap was hit before the window was exhausted.",
+						"Cursor-paginates the GraphQL `firewallEventsAdaptive` dataset backwards from now over a lookback (`minutes`, clamped to 5–43200; default 360), deduped by ray+rule+action, up to 5 pages of 10,000 rows. `diagnostics.truncated` reports whether the page cap was hit before the window was exhausted. Those rows are adaptively sampled, so alongside them `aggregates` carries Cloudflare's full, sample-adjusted counts from `firewallEventsAdaptiveGroups`: `byAction` (every action, including skip and AI Labyrinth), `total` (block, challenge, managed/JS challenge, log), a `series` in 15-minute buckets up to 6 hours and hourly beyond, the top 10 `countries`, and the average `sampleInterval`. When those cannot be read, `aggregatesError` says why and the rows are still returned.",
 					requestBody: jsonBody({
 						type: "object",
 						required: ["accountId"],

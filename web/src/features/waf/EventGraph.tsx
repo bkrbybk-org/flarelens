@@ -8,23 +8,26 @@ import {
 	HOURLY_GRAPH_THRESHOLD_MINUTES,
 	MAX_GRAPH_BUCKETS,
 } from "../../lib/waf/constants";
-import { eventsWithTime, formatPeakBucket, graphBuckets, graphBucketRange, peakBucket } from "../../lib/waf/chart";
+import { eventsWithTime, formatPeakBucket, graphBuckets, graphBucketRange, peakBucket, seriesAsTimedEvents } from "../../lib/waf/chart";
 import { axisTimeLabel } from "../../lib/waf/format";
-import type { FirewallEvent } from "../../lib/waf/types";
+import type { FirewallEvent, WafAggregates } from "../../lib/waf/types";
 import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 
 interface EventGraphProps {
 	events: FirewallEvent[];
 	window: { since: number; until: number; minutes: number } | null;
+	/** Full counts. When present the chart draws these; the sampled rows are the fallback. */
+	series?: WafAggregates["series"] | null;
+	bucket?: WafAggregates["bucket"];
 }
 
 
-export function EventGraph({ events, window: win }: EventGraphProps) {
+export function EventGraph({ events, window: win, series, bucket }: EventGraphProps) {
 	const [chartActions, setChartActions] = useState<Record<string, boolean>>(
 		Object.fromEntries(CHART_ACTIONS.map((a) => [a.key, true])),
 	);
 
-	const withTime = eventsWithTime(events);
+	const withTime = series && win ? seriesAsTimedEvents(series, win.since, bucket) : eventsWithTime(events);
 
 	// All of this is computed before the empty-state return: useChartHover has to run on every
 	// render, so every value it depends on must exist even when there is nothing to draw.

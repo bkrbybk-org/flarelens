@@ -96,6 +96,16 @@ export interface RuleReviewRow {
 	lastSeen: string;
 }
 
+/** Mirrors src/lib/waf-aggregates.ts: Cloudflare's full, sample-adjusted counts. */
+export interface WafAggregates {
+	byAction: Record<string, number>;
+	total: number;
+	series: { ts: string; byAction: Record<string, number> }[];
+	bucket: "15m" | "1h";
+	countries: { country: string; count: number }[];
+	sampleInterval: number | null;
+}
+
 export interface WafDiagnostics {
 	scope: string;
 	since: string;

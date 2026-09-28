@@ -92,6 +92,8 @@ export function fetchZones(token: string, accountId: string, opts?: { fresh?: bo
 
 interface WafEventsEnvelope<T, D> extends ApiEnvelope<T> {
 	diagnostics?: D;
+	aggregates?: unknown;
+	aggregatesError?: string;
 }
 
 export async function fetchWafEvents<E, D>(
@@ -99,7 +101,7 @@ export async function fetchWafEvents<E, D>(
 	accountId: string,
 	zoneId: string,
 	minutes: number,
-): Promise<{ events: E[]; diagnostics?: D }> {
+): Promise<{ events: E[]; diagnostics?: D; aggregates?: unknown; aggregatesError?: string }> {
 	const response = await fetch("/api/waf/events", {
 		method: "POST",
 		headers: authHeaders(token, { "Content-Type": "application/json" }),
@@ -114,7 +116,7 @@ export async function fetchWafEvents<E, D>(
 	if (!response.ok || !data.success) {
 		throw new ApiError(data.errors?.[0]?.message || "Request failed", response.status);
 	}
-	return { events: data.result || [], diagnostics: data.diagnostics };
+	return { events: data.result || [], diagnostics: data.diagnostics, aggregates: data.aggregates, aggregatesError: data.aggregatesError };
 }
 
 /**

@@ -5,6 +5,7 @@ import { assertAllowedScope, resolveAuth } from "../lib/auth";
 import { collectRulesetsForScope, UpstreamError, type RuleMetaMap, type RulesetScope } from "../lib/waf-meta";
 import { fetchCloudflareAll, mapWithConcurrency, upstreamFetch } from "../lib/cf-rest";
 import { tokenFingerprint } from "../lib/ai-sec";
+import { fetchWafAggregates, type WafAggregates } from "../lib/waf-aggregates";
 import { CACHE_TTL_SECONDS, cacheKey, withEdgeCache } from "../lib/edge-cache";
 import type { CfZone } from "../cf-types";
 import { edgeCacheWaitUntil, validHexId, withCacheHeaders } from "../http";
@@ -108,6 +109,20 @@ export function registerWafRoutes(app: App): void {
 		const since = new Date(Date.now() - minutes * 60 * 1000).toISOString();
 		const query = zoneId ? zoneFirewallEventsQuery : accountFirewallEventsQuery;
 
+		// Full counts from the groups dataset, read alongside the sampled rows rather than after
+		// them. Their failure costs the full counts only — the page falls back to counting rows and
+		// says so — never the rows themselves.
+		const aggregatesPromise: Promise<{ aggregates: WafAggregates } | { aggregatesError: string }> = fetchWafAggregates(
+			token,
+			zoneId ? { kind: "zone", id: zoneId } : { kind: "account", id: accountId },
+			since,
+			new Date().toISOString(),
+			minutes,
+		).then(
+			(aggregates) => ({ aggregates }),
+			(err: unknown) => ({ aggregatesError: err instanceof Error ? err.message : "Full counts could not be read" }),
+		);
+
 		// Cursor pagination: walk backwards from "now" with datetime_leq. Pages
 		// overlap on boundary seconds, so events are deduped by ray+rule+action.
 		const events: Omit<FirewallEvent, "rayName">[] = [];
@@ -165,9 +180,11 @@ export function registerWafRoutes(app: App): void {
 			before = oldest;
 		}
 
+		const aggregates = await aggregatesPromise;
 		return c.json({
 			success: true,
 			result: events,
+			...aggregates,
 			diagnostics: {
 				scope: zoneId ? "zone" : "account",
 				since,
