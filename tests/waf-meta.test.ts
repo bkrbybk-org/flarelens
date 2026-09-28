@@ -224,3 +224,33 @@ describe("evaluation-order metadata", () => {
 		expect(entry.deployment?.entrypointId).toBe("root-1");
 	});
 });
+
+describe("managed-rule overrides and categories", () => {
+	it("records an execute rule's overrides and a managed rule's categories", () => {
+		const meta: RuleMetaMap = {};
+		collectRulesetMeta(meta, {
+			id: "zone-ep", name: "zone", kind: "zone", phase: "http_request_firewall_managed",
+			rules: [{
+				id: "exec", action: "execute", expression: "true", enabled: true,
+				action_parameters: {
+					id: "owasp",
+					// Live shape, 2026-09-28.
+					overrides: {
+						categories: [{ category: "paranoia-level-2", enabled: false }],
+						rules: [{ action: "block", id: "score", score_threshold: 60 }],
+					},
+				},
+			}],
+		}, "zone:example.com");
+		collectRulesetMeta(meta, {
+			id: "owasp", name: "OWASP", kind: "managed", phase: "http_request_firewall_managed",
+			rules: [{ id: "r1", action: "block", enabled: true, categories: ["paranoia-level-2", "xss"] }],
+		}, "zone:example.com");
+		expect(meta.exec.overrides).toEqual({
+			categories: [{ category: "paranoia-level-2", enabled: false, action: undefined }],
+			rules: [{ id: "score", action: "block", enabled: undefined, scoreThreshold: 60 }],
+		});
+		expect(meta.r1.categories).toEqual(["paranoia-level-2", "xss"]);
+		expect(meta.r1.overrides).toBeUndefined();
+	});
+});

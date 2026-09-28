@@ -146,6 +146,8 @@ export function aggregateRules(events: FirewallEvent[], ruleMeta: RuleMetaMap): 
 				phase: meta?.phase || "",
 				position: meta?.position,
 				executes: meta?.executes,
+				overrides: meta?.overrides,
+				categories: meta?.categories,
 				type: ruleType(meta),
 				level: ruleLevel(meta),
 				configuredAction: meta?.action || "",

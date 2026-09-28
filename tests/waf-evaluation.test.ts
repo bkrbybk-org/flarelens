@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { aggregateRules } from "../web/src/lib/waf/aggregate";
-import { buildEvaluationOrder } from "../web/src/lib/waf/evaluation";
+import { buildEvaluationOrder, effectiveRule } from "../web/src/lib/waf/evaluation";
 import type { RuleMetaEntry, RuleMetaMap } from "../web/src/lib/waf/types";
 
 const rs = (id: string, name: string, kind: string, phase: string, source: string, extra: Partial<RuleMetaEntry> = {}): RuleMetaEntry => ({
@@ -95,5 +95,59 @@ describe("buildEvaluationOrder", () => {
 	it("marks every rule of a ruleset whose execute rule is disabled", () => {
 		const meta = { ...base, exec: rule("exec", "acct-root", 0, "execute", "true", { executes: "acct-custom", phase: CUSTOM, enabled: false }) };
 		expect(build(meta).stages[0].items[0].target?.items.every((i) => /disabled/.test(i.unreachable ?? ""))).toBe(true);
+	});
+});
+
+describe("effectiveRule — managed-rule overrides", () => {
+	const row = (over: Partial<RuleMetaEntry> = {}) =>
+		aggregateRules([], { m: rule("m", "cf-owasp", 0, "block", "x", { type: "managed", categories: ["paranoia-level-2", "xss"], ...over }) })[0];
+
+	it("returns the rule's own settings when nothing overrides it", () => {
+		expect(effectiveRule(row())).toEqual({ enabled: true, action: "block", overriddenBy: null });
+		expect(effectiveRule(row(), { rules: [{ id: "other", action: "log" }] })).toEqual({ enabled: true, action: "block", overriddenBy: null });
+	});
+
+	it("applies a category override — the live shape turning paranoia levels off", () => {
+		const eff = effectiveRule(row(), { categories: [{ category: "paranoia-level-2", enabled: false }, { category: "paranoia-level-3", enabled: false }] });
+		expect(eff).toMatchObject({ enabled: false, action: "block", overriddenBy: "category", defaults: { enabled: true, action: "block" } });
+	});
+
+	it("lets a rule override beat a category override, and a category beat the ruleset", () => {
+		const overrides = {
+			action: "log",
+			categories: [{ category: "xss", action: "managed_challenge" }],
+			rules: [{ id: "m", action: "block", scoreThreshold: 60 }],
+		};
+		expect(effectiveRule(row(), overrides)).toMatchObject({ action: "block", overriddenBy: "rule", scoreThreshold: 60 });
+		expect(effectiveRule(row(), { action: "log", categories: [{ category: "xss", action: "managed_challenge" }] })).toMatchObject({
+			action: "managed_challenge",
+			overriddenBy: "category",
+		});
+		expect(effectiveRule(row(), { action: "log", enabled: true })).toMatchObject({ action: "log", overriddenBy: "ruleset" });
+	});
+
+	it("uses the last matching category when several apply", () => {
+		const eff = effectiveRule(row(), { categories: [{ category: "xss", enabled: false }, { category: "paranoia-level-2", enabled: true }] });
+		expect(eff.enabled).toBe(true);
+		expect(eff.overriddenBy).toBeNull(); // net effect equals the default, so nothing is reported as changed
+	});
+
+	it("resolves enabled and action independently", () => {
+		const eff = effectiveRule(row({ enabled: false }), { categories: [{ category: "xss", enabled: true }], rules: [{ id: "m", action: "log" }] });
+		expect(eff).toMatchObject({ enabled: true, action: "log", overriddenBy: "rule" });
+	});
+
+	it("judges a match-all stopper by its effective state, per deployment", () => {
+		const meta: RuleMetaMap = {
+			"z-man": rs("z-man", "zone", "zone", MANAGED, "zone:a.example"),
+			exec: rule("exec", "z-man", 0, "execute", "true", { executes: "cf", phase: MANAGED, overrides: { rules: [{ id: "stop", action: "log" }] } }),
+			cf: rs("cf", "Managed", "managed", MANAGED, "zone:a.example"),
+			stop: rule("stop", "cf", 0, "block", "true", { type: "managed", phase: MANAGED }),
+			after: rule("after", "cf", 1, "block", "x", { type: "managed", phase: MANAGED }),
+		};
+		// The deployment downgrades the match-all block to log, so the rule after it still runs.
+		const items = buildEvaluationOrder(meta, aggregateRules([], meta)).stages[0].items[0].target!.items;
+		expect(items[0].effective).toMatchObject({ action: "log", overriddenBy: "rule" });
+		expect(items[1].unreachable).toBeUndefined();
 	});
 });

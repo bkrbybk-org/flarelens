@@ -27,6 +27,10 @@ export interface RuleMetaEntry {
 	position?: number;
 	/** For an `execute` rule: the id of the ruleset it runs. */
 	executes?: string;
+	/** For an `execute` rule: the overrides it applies to the ruleset it runs. */
+	overrides?: ExecuteOverrides;
+	/** For a managed rule: its category tags, which category overrides match on. */
+	categories?: string[];
 	/**
 	 * For a ruleset run by an `execute` rule: where it is deployed. Rules inside it run at that
 	 * execute rule's position in the entrypoint, in their own order.
@@ -37,6 +41,40 @@ export interface RuleMetaEntry {
 	 * without) the ruleset itself being read. The real entry replaces it.
 	 */
 	placeholder?: boolean;
+}
+
+/**
+ * What an `execute` rule changes about the managed rules it runs. Cloudflare applies them most
+ * specific first — rule, then category (the last matching category in the list wins), then the
+ * whole ruleset:
+ * https://developers.cloudflare.com/ruleset-engine/managed-rulesets/override-managed-ruleset/
+ */
+export interface ExecuteOverrides {
+	action?: string;
+	enabled?: boolean;
+	categories?: { category: string; action?: string; enabled?: boolean }[];
+	rules?: { id: string; action?: string; enabled?: boolean; scoreThreshold?: number }[];
+}
+
+function toOverrides(raw: NonNullable<NonNullable<CfRule["action_parameters"]>["overrides"]> | undefined): ExecuteOverrides | undefined {
+	if (!raw) return undefined;
+	const out: ExecuteOverrides = {};
+	if (typeof raw.action === "string") out.action = raw.action;
+	if (typeof raw.enabled === "boolean") out.enabled = raw.enabled;
+	const categories = (raw.categories ?? [])
+		.filter((c): c is { category: string; action?: string; enabled?: boolean } => typeof c?.category === "string")
+		.map((c) => ({ category: c.category, action: typeof c.action === "string" ? c.action : undefined, enabled: typeof c.enabled === "boolean" ? c.enabled : undefined }));
+	if (categories.length) out.categories = categories;
+	const rules = (raw.rules ?? [])
+		.filter((r): r is { id: string; action?: string; enabled?: boolean; score_threshold?: number } => typeof r?.id === "string")
+		.map((r) => ({
+			id: r.id,
+			action: typeof r.action === "string" ? r.action : undefined,
+			enabled: typeof r.enabled === "boolean" ? r.enabled : undefined,
+			scoreThreshold: typeof r.score_threshold === "number" ? r.score_threshold : undefined,
+		}));
+	if (rules.length) out.rules = rules;
+	return Object.keys(out).length ? out : undefined;
 }
 
 export interface RulesetDeployment {
@@ -63,7 +101,18 @@ interface CfRule {
 	action?: string;
 	enabled?: boolean;
 	expression?: unknown;
-	action_parameters?: { id?: string; overrides?: { ruleset?: { description?: string } } };
+	/** Managed rules only: the tags a category override matches on. */
+	categories?: string[];
+	action_parameters?: {
+		id?: string;
+		overrides?: {
+			ruleset?: { description?: string };
+			action?: string;
+			enabled?: boolean;
+			categories?: { category?: string; action?: string; enabled?: boolean }[];
+			rules?: { id?: string; action?: string; enabled?: boolean; score_threshold?: number }[];
+		};
+	};
 }
 
 interface CfRuleset {
@@ -167,6 +216,8 @@ function addRuleEntry(meta: RuleMetaMap, rule: CfRule, context: RulesetContext, 
 		expression: typeof rule.expression === "string" ? rule.expression.slice(0, 500) : "",
 		position,
 		executes: rule.action === "execute" ? rule.action_parameters?.id : undefined,
+		overrides: rule.action === "execute" ? toOverrides(rule.action_parameters?.overrides) : undefined,
+		categories: Array.isArray(rule.categories) && rule.categories.length ? rule.categories.filter((c) => typeof c === "string") : undefined,
 	};
 	if (rule.id) meta[rule.id] = entry;
 	if (rule.ref) meta[rule.ref] = entry;

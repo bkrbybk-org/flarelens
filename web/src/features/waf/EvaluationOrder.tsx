@@ -23,6 +23,28 @@ function ActionChip({ action }: { action: string }) {
 	return <span className={`${BADGE} ${tone}`}>{action ? titleCase(action) : "—"}</span>;
 }
 
+const OVERRIDE_SOURCE: Record<NonNullable<EvalItem["effective"]["overriddenBy"]>, string> = {
+	rule: "a rule override",
+	category: "a category override",
+	ruleset: "a ruleset-wide override",
+};
+
+/** Says an override changed this rule, and what the rule would do on its own. */
+function OverrideBadge({ item }: { item: EvalItem }) {
+	const { effective } = item;
+	if (!effective.defaults || !effective.overriddenBy) return null;
+	const was: string[] = [];
+	if (effective.defaults.enabled !== effective.enabled) was.push(effective.defaults.enabled ? "enabled" : "disabled");
+	if (effective.defaults.action !== effective.action) was.push(titleCase(effective.defaults.action || "default"));
+	if (effective.scoreThreshold !== undefined) was.push(`score threshold set to ${effective.scoreThreshold}`);
+	const title = `Changed by ${OVERRIDE_SOURCE[effective.overriddenBy]} on this deployment${was.length ? ` — by default: ${was.join(", ")}` : ""}.`;
+	return (
+		<span className={`${BADGE} bg-violet-500/10 text-violet-700 dark:text-violet-300`} title={title}>
+			Overridden{effective.scoreThreshold !== undefined ? ` · threshold ${effective.scoreThreshold}` : ""}
+		</span>
+	);
+}
+
 function RuleLine({ item, onSelect, nested = false }: { item: EvalItem; onSelect: SelectRule; nested?: boolean }) {
 	const { row } = item;
 	return (
@@ -30,13 +52,14 @@ function RuleLine({ item, onSelect, nested = false }: { item: EvalItem; onSelect
 			type="button"
 			onClick={() => onSelect({ id: row.id, name: row.name, configuredAction: row.configuredAction, lastSeen: row.lastSeen })}
 			className={`flex w-full flex-wrap items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 ${FOCUS_RING} ${
-				item.unreachable || !row.enabled ? "opacity-60" : ""
+				item.unreachable || !item.effective.enabled ? "opacity-60" : ""
 			}`}
 		>
 			<span className={`w-8 shrink-0 text-right font-mono text-xs tabular-nums ${MUTED}`}>{nested ? "" : "#"}{item.position}</span>
 			<span className="min-w-0 flex-1 truncate">{row.name}</span>
-			<ActionChip action={row.configuredAction} />
-			{!row.enabled && <span className={BADGE_NEUTRAL}>Disabled</span>}
+			<ActionChip action={item.effective.action} />
+			{!item.effective.enabled && <span className={BADGE_NEUTRAL}>Disabled</span>}
+			<OverrideBadge item={item} />
 			{item.unreachable && (
 				<span className={`${BADGE} bg-amber-500/10 text-amber-700 dark:text-amber-400`} title={item.unreachable}>
 					Never runs
@@ -176,8 +199,8 @@ export function EvaluationOrder({ ruleMeta, rows, visible, onSelect }: Evaluatio
 			<p className={`text-xs ${MUTED}`}>
 				Top to bottom, the way Cloudflare evaluates a request: custom rules, then rate limiting, then managed rules; account
 				before zone; each list in order. A terminating action (block, challenge) ends evaluation there — log, skip and
-				execute do not. A rate-limiting rule acts only past its threshold. Managed rules show their default action; per-rule
-				overrides on a deployment are not reflected. Event counts are per rule, across every zone. "Never runs" is only claimed behind a rule that matches every request.
+				execute do not. A rate-limiting rule acts only past its threshold. Managed rules
+				are shown as each deployment runs them — its per-rule, per-category and ruleset-wide overrides applied, marked "Overridden". Event counts are per rule, across every zone. "Never runs" is only claimed behind a disabled deployment or a rule that matches every request.
 				{neverRuns.length > 0 && (
 					<strong className="text-amber-700 dark:text-amber-400"> Rules that never run: {neverRuns.join(", ")}.</strong>
 				)}

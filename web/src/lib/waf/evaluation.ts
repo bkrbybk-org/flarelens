@@ -1,4 +1,4 @@
-import type { RuleMetaEntry, RuleMetaMap, RuleReviewRow } from "./types";
+import type { ExecuteOverrides, RuleMetaEntry, RuleMetaMap, RuleReviewRow } from "./types";
 
 /**
  * The order Cloudflare actually evaluates WAF rules in, rebuilt from ruleset metadata.
@@ -9,9 +9,10 @@ import type { RuleMetaEntry, RuleMetaMap, RuleReviewRow } from "./types";
  * position. A terminating action ends evaluation for that request: nothing after it, in this
  * phase or a later one, sees it.
  *
- * What this cannot see: managed-rule overrides (a deployment can re-enable or change the action
- * of individual managed rules; the defaults are shown), and overlap between expressions other
- * than a literal match-everything `true`. "Unreachable" is only claimed for that literal case.
+ * Managed rules are shown as each deployment runs them: its overrides — per rule, per category,
+ * for the whole ruleset — are applied to the rule's defaults (see `effectiveRule`). What this
+ * cannot see: overlap between expressions other than a literal match-everything `true`.
+ * "Unreachable" is only claimed for that literal case.
  */
 
 export const EVALUATION_PHASES = [
@@ -31,6 +32,69 @@ export interface EvalItem {
 	unreachable?: string;
 	/** For an execute rule: the ruleset it runs, with that ruleset's rules in order. */
 	target?: { id: string; name: string; type: string; items: EvalItem[] };
+	/** How this rule actually runs — its own settings, or a deployment's override of them. */
+	effective: EffectiveRule;
+}
+
+export interface EffectiveRule {
+	enabled: boolean;
+	action: string;
+	/** Which override decided it, if one did. */
+	overriddenBy: "rule" | "category" | "ruleset" | null;
+	/** The rule's own settings, when an override changed them. */
+	defaults?: { enabled: boolean; action: string };
+	/** An anomaly-score threshold an override set (the OWASP ruleset's scoring rule). */
+	scoreThreshold?: number;
+}
+
+/**
+ * A managed rule as one deployment runs it. Most specific wins: a rule override, then the last
+ * category override in the list that matches one of the rule's categories, then a ruleset-wide
+ * override, then the rule's own default. `enabled` and `action` resolve independently — a category
+ * can turn a rule on while a rule override changes only its action. A ruleset-wide `enabled` is
+ * applied to every rule; Cloudflare's docs say ruleset overrides reach "existing and future
+ * rules" without singling out rules that are off by default.
+ * https://developers.cloudflare.com/ruleset-engine/managed-rulesets/override-managed-ruleset/
+ */
+export function effectiveRule(row: RuleReviewRow, overrides?: ExecuteOverrides): EffectiveRule {
+	const own = { enabled: row.enabled, action: row.configuredAction };
+	if (!overrides) return { ...own, overriddenBy: null };
+
+	const ruleOverride = overrides.rules?.find((r) => r.id === row.id);
+	const categories = new Set(row.categories ?? []);
+	const categoryOverrides = (overrides.categories ?? []).filter((c) => categories.has(c.category));
+	const lastCategory = <K extends "enabled" | "action">(key: K) => {
+		for (let i = categoryOverrides.length - 1; i >= 0; i--) {
+			if (categoryOverrides[i][key] !== undefined) return categoryOverrides[i][key];
+		}
+		return undefined;
+	};
+
+	let overriddenBy: EffectiveRule["overriddenBy"] = null;
+	const resolve = <T>(ruleValue: T | undefined, categoryValue: T | undefined, rulesetValue: T | undefined, fallback: T): T => {
+		if (ruleValue !== undefined) {
+			overriddenBy = "rule";
+			return ruleValue;
+		}
+		if (categoryValue !== undefined) {
+			overriddenBy ??= "category";
+			return categoryValue;
+		}
+		if (rulesetValue !== undefined) {
+			overriddenBy ??= "ruleset";
+			return rulesetValue;
+		}
+		return fallback;
+	};
+	const enabled = resolve(ruleOverride?.enabled, lastCategory("enabled"), overrides.enabled, own.enabled);
+	const action = resolve(ruleOverride?.action, lastCategory("action"), overrides.action, own.action);
+	const scoreThreshold = ruleOverride?.scoreThreshold;
+	if (scoreThreshold !== undefined) overriddenBy ??= "rule";
+
+	const changed = enabled !== own.enabled || action !== own.action || scoreThreshold !== undefined;
+	return changed
+		? { enabled, action, overriddenBy, defaults: own, ...(scoreThreshold !== undefined ? { scoreThreshold } : {}) }
+		: { enabled, action, overriddenBy: null };
 }
 
 export interface EvalStage {
@@ -59,11 +123,11 @@ function byPosition(a: RuleReviewRow, b: RuleReviewRow): number {
 }
 
 /** A rule that stops every request reaching it: enabled, terminating, matching everything. */
-function stopsEverything(row: RuleReviewRow, phase: string): boolean {
+function stopsEverything(item: EvalItem, phase: string): boolean {
 	// A rate-limiting rule acts only past its threshold, so even a match-all one lets
 	// requests under the limit carry on.
 	if (phase === "http_ratelimit") return false;
-	return row.enabled && TERMINATING.has(row.configuredAction) && row.expression.trim() === "true";
+	return item.effective.enabled && TERMINATING.has(item.effective.action) && item.row.expression.trim() === "true";
 }
 
 export function buildEvaluationOrder(ruleMeta: RuleMetaMap, rows: RuleReviewRow[]): EvaluationOrder {
@@ -84,7 +148,11 @@ export function buildEvaluationOrder(ruleMeta: RuleMetaMap, rows: RuleReviewRow[
 		if (entry?.isRuleset && !entry.placeholder) rulesets.set(entry.rulesetId || key, entry);
 	}
 
-	const toItem = (row: RuleReviewRow): EvalItem => ({ row, position: (row.position ?? 0) + 1 });
+	const toItem = (row: RuleReviewRow, overrides?: ExecuteOverrides): EvalItem => ({
+		row,
+		position: (row.position ?? 0) + 1,
+		effective: effectiveRule(row, overrides),
+	});
 
 	const stages: EvalStage[] = [];
 	for (const [id, entry] of rulesets) {
@@ -97,7 +165,9 @@ export function buildEvaluationOrder(ruleMeta: RuleMetaMap, rows: RuleReviewRow[
 					id: row.executes,
 					name: target?.name || row.executes,
 					type: target?.type || "",
-					items: (rulesByRuleset.get(row.executes) ?? []).map(toItem),
+					// Applied per deployment: one managed ruleset is often run by several execute rules,
+					// each with different overrides.
+					items: (rulesByRuleset.get(row.executes) ?? []).map((inner) => toItem(inner, row.overrides)),
 				};
 			}
 			return item;
@@ -162,12 +232,12 @@ function markUnreachable(stages: EvalStage[]): void {
 					for (const inner of item.target.items) {
 						if (stop) {
 							inner.unreachable ??= stop;
-						} else if (everyRequest && stopsEverything(inner.row, stage.phase)) {
+						} else if (everyRequest && stopsEverything(inner, stage.phase)) {
 							stop = `"${inner.row.name}" in ${item.target.name} stops every request before this rule.`;
 						}
 					}
 				}
-			} else if (stopsEverything(item.row, stage.phase)) {
+			} else if (stopsEverything(item, stage.phase)) {
 				stop = `"${item.row.name}" stops every request before this rule.`;
 			}
 		}

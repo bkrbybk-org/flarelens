@@ -27,7 +27,17 @@ export interface RuleMetaEntry {
 	position?: number;
 	executes?: string;
 	deployment?: { entrypointId: string; position: number; enabled: boolean; expression: string };
+	overrides?: ExecuteOverrides;
+	categories?: string[];
 	placeholder?: boolean;
+}
+
+/** Mirrors src/lib/waf-meta.ts: what an execute rule changes about the managed rules it runs. */
+export interface ExecuteOverrides {
+	action?: string;
+	enabled?: boolean;
+	categories?: { category: string; action?: string; enabled?: boolean }[];
+	rules?: { id: string; action?: string; enabled?: boolean; scoreThreshold?: number }[];
 }
 
 export type RuleMetaMap = Record<string, RuleMetaEntry>;
@@ -68,6 +78,10 @@ export interface RuleReviewRow {
 	position?: number;
 	/** For an execute rule, the ruleset it runs. */
 	executes?: string;
+	/** For an execute rule, the overrides it applies to that ruleset. */
+	overrides?: ExecuteOverrides;
+	/** For a managed rule, its category tags. */
+	categories?: string[];
 	type: string;
 	level: string;
 	configuredAction: string;
