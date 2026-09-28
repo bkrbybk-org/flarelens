@@ -263,6 +263,51 @@ export interface Finding {
  * back `unknown` — an unreadable ruleset or an unreadable bot_management response contributes to
  * the unknown-checks count instead, never to a finding either way.
  */
+/**
+ * AI crawler policy, per behaviour. Cloudflare replaced the single `ai_bots_protection` switch
+ * (deprecated 2026-09-15) with one setting per behaviour. Values, per the API reference:
+ * `disabled` (no policy — allowed), `only_on_ad_pages`, `block`, and for training alone
+ * `disallow` — a robots.txt directive, which a crawler may simply ignore.
+ * https://developers.cloudflare.com/api/resources/bot_management/methods/get/
+ */
+const AI_BEHAVIOURS = [
+	{ key: "ai_training", label: "training" },
+	{ key: "ai_search", label: "search" },
+	{ key: "ai_user", label: "assistant/agent" },
+] as const;
+
+function describeAiPolicy(value: string): string {
+	if (value === "disabled") return "allowed";
+	if (value === "only_on_ad_pages") return "blocked on ad pages only";
+	if (value === "disallow") return "asked not to crawl via robots.txt, not blocked";
+	return `"${value}"`;
+}
+
+/**
+ * One finding per zone naming every AI behaviour that is not blocked outright, or none when all
+ * are. Reads the per-behaviour settings; falls back to the legacy switch only for a response that
+ * carries none of them. Informational: letting AI crawlers in is a legitimate choice, but it
+ * should be one someone made, and "robots.txt only" is easy to mistake for a block.
+ */
+export function aiBotFinding(s: Record<string, unknown>): { title: string; detail: string } | null {
+	const present = AI_BEHAVIOURS.filter(({ key }) => typeof s[key] === "string");
+	if (present.length > 0) {
+		const open = present.filter(({ key }) => s[key] !== "block");
+		if (open.length === 0) return null;
+		return {
+			title: "AI bots not blocked",
+			detail: `AI ${open.map(({ key, label }) => `${label} bots: ${describeAiPolicy(s[key] as string)}`).join("; ")}.`,
+		};
+	}
+	if (typeof s.ai_bots_protection === "string" && s.ai_bots_protection !== "block") {
+		return {
+			title: "AI bots not blocked",
+			detail: `ai_bots_protection is "${s.ai_bots_protection}", not "block". This is Cloudflare's legacy switch, deprecated 2026-09-15; this zone reports no per-behaviour AI settings.`,
+		};
+	}
+	return null;
+}
+
 export function computeFindings(rateLimitScopes: RateLimitScope[], botZones: BotManagementZone[]): Finding[] {
 	const findings: Finding[] = [];
 
@@ -320,15 +365,8 @@ export function computeFindings(rateLimitScopes: RateLimitScope[], botZones: Bot
 				detail: "enable_js is off, weakening this zone's bot detection signal.",
 			});
 		}
-		if (typeof s.ai_bots_protection === "string" && s.ai_bots_protection !== "block") {
-			findings.push({
-				severity: "info",
-				zoneId: zone.zoneId,
-				zoneName: zone.zoneName,
-				title: "AI bots not blocked",
-				detail: `ai_bots_protection is "${s.ai_bots_protection}", not "block". Cloudflare deprecated this legacy setting on 2026-09-15 in favour of per-behaviour AI bot policies, which this API field does not show.`,
-			});
-		}
+		const ai = aiBotFinding(s);
+		if (ai) findings.push({ severity: "info", zoneId: zone.zoneId, zoneName: zone.zoneName, ...ai });
 	}
 
 	return findings;

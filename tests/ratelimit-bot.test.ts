@@ -5,6 +5,7 @@ import {
 	fetchBotManagement,
 	fetchRateLimitScope,
 	fetchRatelimitBotReport,
+	aiBotFinding,
 	inferPlanTier,
 	isBotProtectionOn,
 	type BbZone,
@@ -341,5 +342,35 @@ describe("GET /api/bots/report", () => {
 		globalThis.fetch = vi.fn(async () => json({ success: false, errors: [{ message: "nope" }] }, 403)) as typeof fetch;
 		const res = await app.request(`/api/bots/report?account_id=${ACCOUNT}`, { headers: auth }, ENV, ctx());
 		expect(res.status).toBe(403);
+	});
+});
+
+describe("aiBotFinding — per-behaviour AI crawler policy", () => {
+	// Shapes as returned live on 2026-09-27 by four Enterprise zones.
+	const live = { ai_bots_protection: "only_on_ad_pages", ai_search: "disabled", ai_training: "disallow", ai_user: "disabled" };
+
+	it("names every behaviour not blocked, and says robots.txt disallow is not a block", () => {
+		expect(aiBotFinding(live)).toEqual({
+			title: "AI bots not blocked",
+			detail: "AI training bots: asked not to crawl via robots.txt, not blocked; search bots: allowed; assistant/agent bots: allowed.",
+		});
+	});
+
+	it("reads the per-behaviour fields over the legacy switch", () => {
+		// Legacy says block; the behaviours say otherwise — the behaviours win.
+		expect(aiBotFinding({ ...live, ai_bots_protection: "block" })?.detail).toMatch(/^AI training bots/);
+		expect(aiBotFinding({ ai_bots_protection: "only_on_ad_pages", ai_search: "block", ai_training: "block", ai_user: "block" })).toBeNull();
+	});
+
+	it("reports ad-pages-only as partial", () => {
+		expect(aiBotFinding({ ai_search: "block", ai_training: "block", ai_user: "only_on_ad_pages" })?.detail).toBe(
+			"AI assistant/agent bots: blocked on ad pages only.",
+		);
+	});
+
+	it("falls back to the legacy switch only when no behaviour is reported", () => {
+		expect(aiBotFinding({ ai_bots_protection: "disabled" })?.detail).toMatch(/legacy switch/);
+		expect(aiBotFinding({ ai_bots_protection: "block" })).toBeNull();
+		expect(aiBotFinding({})).toBeNull();
 	});
 });
