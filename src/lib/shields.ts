@@ -17,7 +17,7 @@
  * never folded into "no issues" or "0".
  */
 
-import { mapWithConcurrency, restList } from "./cf-rest";
+import { mapWithConcurrency, restList, upstreamFetch } from "./cf-rest";
 
 /** Workers allow ~6 simultaneous connections per host; same budget as every other section. */
 const CONCURRENCY = 5;
@@ -189,7 +189,7 @@ interface CfPageShieldPolicy {
  * this file — so it is fetched directly rather than through {@link restList}, which expects an
  * array and would misread an object `result` as an empty page. */
 async function fetchPageShieldStatus(zoneId: string, token: string): Promise<PageShieldStatus> {
-	const response = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/page_shield`, {
+	const response = await upstreamFetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/page_shield`, {
 		headers: { Authorization: `Bearer ${token}` },
 	});
 	let body: { success?: boolean; result?: CfPageShieldSettings; errors?: { message?: string; code?: number }[] };
@@ -381,7 +381,7 @@ async function fetchApiShieldDiscovery(zoneId: string, token: string): Promise<A
 }
 
 async function fetchApiShieldSchemaValidation(zoneId: string, token: string): Promise<ApiShieldSchemaValidation> {
-	const response = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/api_gateway/settings/schema_validation`, {
+	const response = await upstreamFetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/api_gateway/settings/schema_validation`, {
 		headers: { Authorization: `Bearer ${token}` },
 	});
 	let body: { success?: boolean; result?: CfApiGatewaySchemaValidationSettings; errors?: { message?: string; code?: number }[] };
@@ -417,7 +417,7 @@ async function fetchApiShieldUserSchemas(zoneId: string, token: string): Promise
 }
 
 async function fetchApiShieldConfiguration(zoneId: string, token: string): Promise<ApiShieldConfiguration> {
-	const response = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/api_gateway/configuration`, {
+	const response = await upstreamFetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/api_gateway/configuration`, {
 		headers: { Authorization: `Bearer ${token}` },
 	});
 	let body: { success?: boolean; result?: CfApiGatewayConfiguration; errors?: { message?: string; code?: number }[] };

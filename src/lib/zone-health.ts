@@ -19,7 +19,7 @@
  * that times out — all of these are absences, and an absence must never render the same as a zero.
  */
 
-import { mapWithConcurrency, restList as restListZh } from "./cf-rest";
+import { mapWithConcurrency, restList as restListZh, upstreamFetch } from "./cf-rest";
 /** Same rationale as pqc.ts: Workers allow ~6 simultaneous connections per host. */
 const CONCURRENCY = 5;
 /** Total DNS-over-HTTPS lookups this report will make, across every zone. */
@@ -372,7 +372,7 @@ export async function defaultDohLookup(target: string): Promise<DohOutcome> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), DOH_TIMEOUT_MS);
 	try {
-		const response = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(target)}&type=A`, {
+		const response = await upstreamFetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(target)}&type=A`, {
 			headers: { accept: "application/dns-json" },
 			signal: controller.signal,
 		});

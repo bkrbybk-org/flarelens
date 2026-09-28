@@ -11,7 +11,7 @@
  * scopes differ: a token can read Access and not Tunnels, and a partial map is still useful.
  */
 
-import { CF_API_BASE as REST_BASE, authHeaders, mapWithConcurrency, restList } from "./cf-rest";
+import { CF_API_BASE as REST_BASE, authHeaders, mapWithConcurrency, restList, upstreamFetch } from "./cf-rest";
 
 export class TunnelMapError extends Error {
 	constructor(message: string, readonly status: number) {
@@ -313,7 +313,7 @@ function originLabel(kind: OriginKind): string {
  * is a round trip of wall clock spent on an ordering accident.
  */
 async function readConfig(url: string, token: string): Promise<{ ingress: CfIngressRule[]; error?: string }> {
-	const response = await fetch(url, { headers: authHeaders(token) });
+	const response = await upstreamFetch(url, { headers: authHeaders(token) });
 	let body: { success?: boolean; result?: { config?: { ingress?: CfIngressRule[] } }; errors?: { message?: string }[] };
 	try {
 		body = await response.json();
@@ -327,7 +327,7 @@ async function readConfig(url: string, token: string): Promise<{ ingress: CfIngr
 }
 
 async function readConnectors(url: string, token: string): Promise<{ connectors: TunnelConnector[]; connectorsError?: string }> {
-	const response = await fetch(url, { headers: authHeaders(token) });
+	const response = await upstreamFetch(url, { headers: authHeaders(token) });
 	let body: { success?: boolean; result?: CfConnector[]; errors?: { message?: string }[] };
 	try {
 		body = await response.json();

@@ -26,7 +26,7 @@
  * would be reporting a setting that does nothing.
  */
 
-import { CF_API_BASE as REST_BASE, mapWithConcurrency, restList } from "./cf-rest";
+import { CF_API_BASE as REST_BASE, mapWithConcurrency, restList, upstreamFetch } from "./cf-rest";
 /** Workers allow ~6 simultaneous connections per host; the zone fan-out is two calls per zone. */
 const CONCURRENCY = 4;
 
@@ -599,7 +599,7 @@ async function fetchTunnelHosts(accountId: string, token: string): Promise<{ hos
 	const tunnels = list.result.filter((t) => !t.deleted_at);
 	const hosts = new Set<string>();
 	await mapWithConcurrency(tunnels, CONCURRENCY, async (tunnel) => {
-		const response = await fetch(`${REST_BASE}/accounts/${accountId}/cfd_tunnel/${tunnel.id}/configurations`, {
+		const response = await upstreamFetch(`${REST_BASE}/accounts/${accountId}/cfd_tunnel/${tunnel.id}/configurations`, {
 			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 		});
 		let body: { success?: boolean; result?: { config?: { ingress?: { hostname?: string }[] } } };

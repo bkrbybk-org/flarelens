@@ -14,7 +14,7 @@
  *                    a future plan tier adds one this file does not yet know about.
  */
 
-import { CF_API_BASE, mapWithConcurrency } from "./cf-rest";
+import { CF_API_BASE, mapWithConcurrency, upstreamFetch } from "./cf-rest";
 
 const RATE_LIMIT_PHASE = "http_ratelimit";
 
@@ -35,7 +35,7 @@ interface CfBody<T = unknown> {
 }
 
 async function cfFetch<T = unknown>(url: string, token: string): Promise<{ status: number; body: CfBody<T> }> {
-	const response = await fetch(url, {
+	const response = await upstreamFetch(url, {
 		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 	});
 	let body: CfBody<T>;

@@ -9,6 +9,8 @@
  * shared bound token those reads would not be attributable to a person anyway.
  */
 
+import { upstreamFetch } from "./cf-rest";
+
 const GRAPHQL_ENDPOINT = "https://api.cloudflare.com/client/v4/graphql";
 
 export const GATEWAY_GRANULARITIES = ["hourly", "daily"] as const;
@@ -220,7 +222,7 @@ export async function fetchGatewayUsage(
 	options: { since: string; until: string; granularity: GatewayGranularity },
 ): Promise<GatewayUsageResult> {
 	const timeDimension = TIME_DIMENSION[options.granularity];
-	const response = await fetch(GRAPHQL_ENDPOINT, {
+	const response = await upstreamFetch(GRAPHQL_ENDPOINT, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 		body: JSON.stringify({

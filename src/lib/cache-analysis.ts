@@ -28,7 +28,7 @@ import {
 	type GqlGroup,
 	type GqlResponse,
 } from "./cache-cf-types";
-import { CF_API_BASE as CF_API } from "./cf-rest";
+import { CF_API_BASE as CF_API, upstreamFetch } from "./cf-rest";
 
 export type CacheCredentials = { token: string; zoneId: string };
 
@@ -124,7 +124,7 @@ function authHeaders(creds: Pick<CacheCredentials, "token">): Record<string, str
 }
 
 async function cfFetch<T>(path: string, creds: Pick<CacheCredentials, "token">): Promise<{ status: number; json: CfEnvelope<T> | null }> {
-	const res = await fetch(`${CF_API}${path}`, { headers: authHeaders(creds) });
+	const res = await upstreamFetch(`${CF_API}${path}`, { headers: authHeaders(creds) });
 	let json: CfEnvelope<T> | null = null;
 	try {
 		json = (await res.json()) as CfEnvelope<T>;
@@ -228,7 +228,7 @@ async function queryGraphql(
 	variables: Record<string, string>,
 ): Promise<GqlResult> {
 	try {
-		const res = await fetch(`${CF_API}/graphql`, {
+		const res = await upstreamFetch(`${CF_API}/graphql`, {
 			method: "POST",
 			headers: authHeaders(creds),
 			body: JSON.stringify({ query, variables }),

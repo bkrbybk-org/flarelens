@@ -7,6 +7,8 @@
  * correct and a policy people can actually get through are different questions.
  */
 
+import { upstreamFetch } from "./cf-rest";
+
 const GRAPHQL_ENDPOINT = "https://api.cloudflare.com/client/v4/graphql";
 
 export const ACCESS_GRANULARITIES = ["hourly", "daily"] as const;
@@ -178,7 +180,7 @@ export async function fetchAccessUsage(
 	},
 ): Promise<AccessUsageResult> {
 	const timeDimension = TIME_DIMENSION[options.granularity];
-	const response = await fetch(GRAPHQL_ENDPOINT, {
+	const response = await upstreamFetch(GRAPHQL_ENDPOINT, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 		body: JSON.stringify({

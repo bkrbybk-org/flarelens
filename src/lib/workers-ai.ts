@@ -6,6 +6,8 @@
  * through Cloudflare. This one is about the account's own inference workloads.
  */
 
+import { upstreamFetch } from "./cf-rest";
+
 const GRAPHQL_ENDPOINT = "https://api.cloudflare.com/client/v4/graphql";
 
 export const AI_GRANULARITIES = ["hourly", "daily"] as const;
@@ -151,7 +153,7 @@ export async function fetchWorkersAi(
 	options: { since: string; until: string; granularity: AiGranularity },
 ): Promise<WorkersAiResult> {
 	const timeDimension = TIME_DIMENSION[options.granularity];
-	const response = await fetch(GRAPHQL_ENDPOINT, {
+	const response = await upstreamFetch(GRAPHQL_ENDPOINT, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 		body: JSON.stringify({

@@ -24,6 +24,47 @@ export interface RestListResult<T> {
 	status: number;
 }
 
+/**
+ * How long any one upstream request may take. Generous — GraphQL analytics over a wide window is
+ * legitimately slow — but bounded: without it a stalled read held its whole route open for as long
+ * as the platform allowed (the Tunnel Map once answered nothing at all, 2026-09-27).
+ */
+export const UPSTREAM_TIMEOUT_MS = 25_000;
+
+/** Set on the synthetic response {@link upstreamFetch} returns for a timeout, so retry loops can tell it apart. */
+export const TIMEOUT_MARKER_HEADER = "X-Flarelens-Upstream-Timeout";
+
+/**
+ * `fetch` with {@link UPSTREAM_TIMEOUT_MS} applied, for every call to Cloudflare.
+ *
+ * A timeout does not throw. It comes back as a 504 whose body has Cloudflare's own error shape
+ * (`{ success: false, errors: [{ message }] }`), so every caller's existing "non-2xx → report the
+ * reason, degrade this source" path handles it with no per-site code. Other network failures still
+ * throw, as they did.
+ */
+export async function upstreamFetch(input: string, init: RequestInit = {}, timeoutMs = UPSTREAM_TIMEOUT_MS): Promise<Response> {
+	const timeout = AbortSignal.timeout(timeoutMs);
+	const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+	try {
+		return await fetch(input, { ...init, signal });
+	} catch (err) {
+		if (timeout.aborted && !(init.signal?.aborted ?? false)) {
+			const host = (() => {
+				try {
+					return new URL(input).host;
+				} catch {
+					return "the upstream service";
+				}
+			})();
+			return new Response(
+				JSON.stringify({ success: false, errors: [{ message: `${host} did not answer within ${timeoutMs / 1000}s` }] }),
+				{ status: 504, headers: { "Content-Type": "application/json", [TIMEOUT_MARKER_HEADER]: "1" } },
+			);
+		}
+		throw err;
+	}
+}
+
 export function authHeaders(token: string): Record<string, string> {
 	return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 }
@@ -33,7 +74,7 @@ export async function restList<T>(path: string, token: string): Promise<RestList
 	const all: T[] = [];
 	const sep = path.includes("?") ? "&" : "?";
 	for (let page = 1; ; page++) {
-		const response = await fetch(`${CF_API_BASE}${path}${sep}per_page=${PER_PAGE}&page=${page}`, { headers: authHeaders(token) });
+		const response = await upstreamFetch(`${CF_API_BASE}${path}${sep}per_page=${PER_PAGE}&page=${page}`, { headers: authHeaders(token) });
 		let body: CfListEnvelope<T>;
 		try {
 			body = await response.json();
@@ -64,7 +105,7 @@ export interface CfListResponse<T> {
 /** One page of a Cloudflare list/read endpoint. Kept distinct from {@link restList} (whose error
  * shape is a single string) because several routes still branch on `data.success` themselves. */
 export async function fetchCloudflare<T>(path: string, token: string): Promise<{ status: number; data: CfListResponse<T> }> {
-	const response = await fetch(`${CF_API_BASE}${path}`, { headers: authHeaders(token) });
+	const response = await upstreamFetch(`${CF_API_BASE}${path}`, { headers: authHeaders(token) });
 
 	const status = response.status;
 	let data: CfListResponse<T>;

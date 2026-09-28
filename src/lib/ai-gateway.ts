@@ -41,6 +41,8 @@
  * not expose leaves its panel empty with a stated reason, which is the same contract the rest of
  * the section already had for a missing scope.
  */
+import { upstreamFetch } from "./cf-rest";
+
 interface DatasetCaps {
 	/** The dataset's real name on the account type. */
 	name: string;
@@ -116,7 +118,7 @@ function unwrapType(type: TypeRef | null | undefined): string | null {
 }
 
 async function introspect(token: string, query: string, variables?: Record<string, unknown>): Promise<IntrospectionResponse | null> {
-	const response = await fetch(GRAPHQL_ENDPOINT, {
+	const response = await upstreamFetch(GRAPHQL_ENDPOINT, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 		body: JSON.stringify({ query, variables }),
@@ -320,7 +322,7 @@ interface GraphqlEnvelope<T> {
 }
 
 async function postGraphql<T>(accountId: string, token: string, query: string, variables: Record<string, unknown>): Promise<{ account: T | undefined }> {
-	const response = await fetch(GRAPHQL_ENDPOINT, {
+	const response = await upstreamFetch(GRAPHQL_ENDPOINT, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 		body: JSON.stringify({ query, variables: { accountTag: accountId, ...variables } }),

@@ -3,7 +3,7 @@
 
 import { assertAllowedScope, resolveAuth } from "../lib/auth";
 import { collectRulesetsForScope, UpstreamError, type RuleMetaMap, type RulesetScope } from "../lib/waf-meta";
-import { fetchCloudflareAll, mapWithConcurrency } from "../lib/cf-rest";
+import { fetchCloudflareAll, mapWithConcurrency, upstreamFetch } from "../lib/cf-rest";
 import type { CfZone } from "../cf-types";
 import { validHexId } from "../http";
 import type { App } from "../env";
@@ -119,7 +119,7 @@ export function registerWafRoutes(app: App): void {
 				? { zoneTag: zoneId, since, before, actions: WAF_ACTIONS, limit: GRAPHQL_EVENT_LIMIT }
 				: { accountTag: accountId, since, before, actions: WAF_ACTIONS, limit: GRAPHQL_EVENT_LIMIT };
 
-			const response = await fetch("https://api.cloudflare.com/client/v4/graphql", {
+			const response = await upstreamFetch("https://api.cloudflare.com/client/v4/graphql", {
 				method: "POST",
 				headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
 				body: JSON.stringify({ query, variables }),

@@ -5,7 +5,7 @@
  * whose source was not available — the wire shapes here match what that deployment returns, so
  * a record from either backend renders identically.
  */
-import { CF_API_BASE as REST_BASE } from "./cf-rest";
+import { CF_API_BASE as REST_BASE, upstreamFetch } from "./cf-rest";
 
 const GRAPHQL_ENDPOINT = `${REST_BASE}/graphql`;
 
@@ -69,7 +69,7 @@ export function parseInstant(raw: unknown): string | null {
 
 /** Script names deployed on the account, sorted for a stable colour assignment client-side. */
 export async function listWorkerScripts(accountId: string, token: string): Promise<string[]> {
-	const response = await fetch(`${REST_BASE}/accounts/${accountId}/workers/scripts`, {
+	const response = await upstreamFetch(`${REST_BASE}/accounts/${accountId}/workers/scripts`, {
 		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 	});
 	let body: { success?: boolean; result?: { id?: string }[]; errors?: { message?: string }[] };
@@ -127,7 +127,7 @@ export async function fetchWorkerMetrics(
 	options: { since: string; until: string; granularity: Granularity },
 ): Promise<WorkerMetricsResult> {
 	const timeDimension = TIME_DIMENSION[options.granularity];
-	const response = await fetch(GRAPHQL_ENDPOINT, {
+	const response = await upstreamFetch(GRAPHQL_ENDPOINT, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 		body: JSON.stringify({

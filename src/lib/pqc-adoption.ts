@@ -24,6 +24,8 @@
  * could produce.
  */
 
+import { upstreamFetch } from "./cf-rest";
+
 const GRAPHQL_ENDPOINT = "https://api.cloudflare.com/client/v4/graphql";
 /** Per-zone rows for the breakdown. Hostname x key-exchange group stays small. */
 const ROW_LIMIT = 2000;
@@ -104,7 +106,7 @@ interface FieldsResponse {
 }
 
 async function graphql<T>(token: string, query: string, variables?: Record<string, unknown>): Promise<{ data?: T; error?: string }> {
-	const response = await fetch(GRAPHQL_ENDPOINT, {
+	const response = await upstreamFetch(GRAPHQL_ENDPOINT, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 		body: JSON.stringify({ query, variables }),

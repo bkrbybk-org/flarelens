@@ -1,5 +1,5 @@
 import { CfApiError, type AiSecEnv, type GraphQLError, type Zone } from './types';
-import { CF_API_BASE as REST_BASE } from '../../cf-rest';
+import { CF_API_BASE as REST_BASE, upstreamFetch, TIMEOUT_MARKER_HEADER } from '../../cf-rest';
 
 const GRAPHQL_ENDPOINT = `${REST_BASE}/graphql`;
 
@@ -17,7 +17,9 @@ async function fetchWithRetry(url: string, init: RequestInit, attempts = 3): Pro
 	let lastErr: unknown;
 	for (let i = 0; i < attempts; i++) {
 		try {
-			const res = await fetch(url, init);
+			const res = await upstreamFetch(url, init);
+			// A timeout already spent the full budget once; retrying it would triple the wait.
+			if (res.headers.get(TIMEOUT_MARKER_HEADER)) return res;
 			// Retry only on transient upstream conditions.
 			if (res.status === 429 || res.status >= 500) {
 				lastErr = new CfApiError(`Cloudflare API returned ${res.status}`, res.status, await res.text());

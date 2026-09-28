@@ -3,7 +3,7 @@
 // entrypoint) into a rule-id/ref keyed metadata map the frontend correlates
 // firewall events against.
 
-import { CF_API_BASE } from "./cf-rest";
+import { CF_API_BASE, upstreamFetch } from "./cf-rest";
 
 const MANAGED_RULESET_KIND = "managed";
 const CUSTOM_FIREWALL_PHASE = "http_request_firewall_custom";
@@ -90,7 +90,7 @@ export class UpstreamError extends Error {
 }
 
 async function cfFetch(url: string, token: string): Promise<CfBody> {
-	const response = await fetch(url, {
+	const response = await upstreamFetch(url, {
 		headers: {
 			"Authorization": `Bearer ${token}`,
 			"Content-Type": "application/json",
