@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { traceRequest, isSessionError } from "../../api/client";
+import { fetchWafRulesets, traceRequest, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
+import type { RuleMetaMap } from "../../lib/waf/types";
 import type { RequestTraceResult } from "./types";
 
 interface State {
 	result: RequestTraceResult | null;
+	/** The zone's and account's WAF rules, for laying the request's matches over them. */
+	ruleMeta: RuleMetaMap | null;
+	/** Why the rules could not be read; the request detail still shows without them. */
+	rulesError: string | null;
 	loading: boolean;
 	error: string | null;
 }
 
+const EMPTY: State = { result: null, ruleMeta: null, rulesError: null, loading: false, error: null };
+
 export function useRequestTrace(onAuthError: () => void) {
-	const [state, setState] = useState<State>({ result: null, loading: false, error: null });
+	const [state, setState] = useState<State>(EMPTY);
 	const progress = useEstimatedProgress("cf_request_trace_last_load_ms");
 	const requestIdRef = useRef(0);
 	const onAuthErrorRef = useRef(onAuthError);
@@ -22,7 +29,7 @@ export function useRequestTrace(onAuthError: () => void) {
 	const load = useCallback(
 		async (token: string, accountId: string, rayId: string, zoneId: string, minutes: number) => {
 			const requestId = ++requestIdRef.current;
-			setState((prev) => ({ ...prev, loading: true, error: null }));
+			setState({ ...EMPTY, loading: true });
 			progressStart();
 			let success = false;
 			try {
@@ -33,19 +40,31 @@ export function useRequestTrace(onAuthError: () => void) {
 					minutes,
 				});
 				if (requestId !== requestIdRef.current) return;
+				if (!result.foundIn) {
+					success = true;
+					setState({ ...EMPTY, result });
+					return;
+				}
+				// The zone's rules plus the account's, which run first. Edge-cached for 60s. A token
+				// without WAF read still gets the request detail, just not the rule-by-rule view.
+				let ruleMeta: RuleMetaMap | null = null;
+				let rulesError: string | null = null;
+				try {
+					ruleMeta = (await fetchWafRulesets<RuleMetaMap>(token, accountId, result.foundIn.id)).result;
+				} catch (err) {
+					if (isSessionError(err)) throw err;
+					rulesError = err instanceof Error ? err.message : "Could not read the WAF rules";
+				}
+				if (requestId !== requestIdRef.current) return;
 				success = true;
-				setState({ result, loading: false, error: null });
+				setState({ result, ruleMeta, rulesError, loading: false, error: null });
 			} catch (err) {
 				if (requestId !== requestIdRef.current) return;
 				if (isSessionError(err)) {
 					onAuthErrorRef.current();
 					return;
 				}
-				setState((prev) => ({
-					...prev,
-					loading: false,
-					error: err instanceof Error ? err.message : "Failed to trace the request",
-				}));
+				setState({ ...EMPTY, error: err instanceof Error ? err.message : "Failed to trace the request" });
 			} finally {
 				if (requestId === requestIdRef.current) progressStop(success);
 			}
@@ -53,5 +72,5 @@ export function useRequestTrace(onAuthError: () => void) {
 		[progressStart, progressStop],
 	);
 
-	return { ...state, progress, load, reset: () => setState({ result: null, loading: false, error: null }) };
+	return { ...state, progress, load, reset: () => setState(EMPTY) };
 }

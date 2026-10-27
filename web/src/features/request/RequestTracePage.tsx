@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { PageShell } from "../../components/PageShell";
-import { ALERT_ERROR, ALERT_WARN, CARD, INPUT, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, ALERT_WARN, CARD, INPUT, MUTED, SEARCH_INPUT, SECTION_TITLE } from "../../lib/ui";
 import { SearchIcon } from "../../components/Icons";
 import type { Session } from "../../hooks/useSession";
 import type { CfZone } from "../../types";
-import { getHashParams } from "../../hooks/useHashParams";
+import { getHashParams, setHashParam } from "../../hooks/useHashParams";
+import { buildRayVerdict } from "../../lib/waf/ray-verdict";
+import { reviewRay } from "../../lib/waf/ray-review";
+import { ReviewPanel, RulesTopDown, Verdict, sourceLabel } from "./RayVerdictView";
 import { useRequestTrace } from "./useRequestTrace";
 import {
 	FIELD_GROUPS,
@@ -16,13 +19,17 @@ import {
 } from "./types";
 import { DecryptKeyPanel, PromptPayload } from "../ai-security/PromptPayload";
 
-
 const LOOKBACKS: [number, string][] = [
 	[1440, "Last 24 hours"],
 	[10_080, "Last 7 days"],
 	[43_200, "Last 30 days"],
 ];
 
+/**
+ * One Ray ID, investigated: what Cloudflare decided, which rule decided it among every rule in
+ * evaluation order, whether that looks like a false positive (blocked) or a false negative (let
+ * through), and the full request record behind it.
+ */
 export function RequestTracePage({
 	session,
 	zones,
@@ -38,13 +45,14 @@ export function RequestTracePage({
 	// dance), rather than adopted later from an effect.
 	const [rayInput, setRayInput] = useState(() => getHashParams().get("ray")?.trim() || "");
 	const [zoneId, setZoneId] = useState(() => getHashParams().get("zone") || "");
-	const [minutes, setMinutes] = useState(1440);
+	// Seven days: a false-positive report usually arrives days after the request.
+	const [minutes, setMinutes] = useState(10_080);
 	/**
 	 * Payload-decryption key, in component state only — never stored, never sent to the Worker.
 	 * Same rule as the AI Security events table, and the same components enforce it.
 	 */
 	const [privateKey, setPrivateKey] = useState("");
-	const { result, loading, error, progress, load } = useRequestTrace(onAuthError);
+	const { result, ruleMeta, rulesError, loading, error, progress, load } = useRequestTrace(onAuthError);
 
 	const deepLinkRay = useRef(rayInput);
 	useEffect(() => {
@@ -57,10 +65,17 @@ export function RequestTracePage({
 	function submit(event: FormEvent) {
 		event.preventDefault();
 		const ray = rayInput.trim();
-		if (ray) load(session.token, session.accountId, ray, zoneId, minutes);
+		if (!ray) return;
+		setHashParam("ray", ray);
+		load(session.token, session.accountId, ray, zoneId, minutes);
 	}
 
 	const request = result?.request;
+	const verdict = useMemo(
+		() => (result?.foundIn && ruleMeta ? buildRayVerdict(result.firewallEvents, result.request, ruleMeta) : null),
+		[result, ruleMeta],
+	);
+	const review = useMemo(() => (verdict ? reviewRay(verdict, result?.request, result?.firewallEvents) : null), [verdict, result]);
 	const shown = new Set<string>();
 
 	return (
@@ -111,11 +126,13 @@ export function RequestTracePage({
 						disabled={loading || !rayInput.trim()}
 						className="rounded-lg bg-cf px-4 py-2 text-sm font-semibold text-white transition hover:bg-cf-hover disabled:opacity-60"
 					>
-						{loading ? "Searching…" : "Trace"}
+						{loading ? "Searching…" : "Investigate"}
 					</button>
 				</div>
 				<p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-					The Ray ID from a response header or the browser's network tab. A colo suffix such as
+					For a false positive (a user blocked who shouldn't be) or a false negative (a request that got through and
+					shouldn't have). The Ray ID is on Cloudflare's block page, in the <code className="font-mono">cf-ray</code>{" "}
+					response header, or in the browser's network tab; a colo suffix such as
 					<code className="mx-1 font-mono">-BKK</code> is ignored.
 				</p>
 			</form>
@@ -143,24 +160,84 @@ export function RequestTracePage({
 						Searched {result.zonesSearched.length} zone{result.zonesSearched.length === 1 ? "" : "s"} from{" "}
 						{new Date(result.window.since).toLocaleString()}. This does not prove the request never happened:
 						Cloudflare samples <code className="font-mono">httpRequestsAdaptive</code> adaptively, so an individual
-						request can be absent from the data while having been served normally. Widen the window, or confirm the
-						Ray ID and zone.
+						request can be absent from the data while having been served normally — and a wider window can miss a
+						request a narrower one finds (on a live zone, a Ray ID found with 26 days came back empty with 28). Try a
+						window that just covers when it happened, pick the zone, and confirm the Ray ID.
 					</p>
 				</div>
 			)}
 
 			{result?.foundIn && (
 				<>
-					<div className={`${CARD} mb-4`}>
-						<div className="flex flex-wrap items-baseline justify-between gap-2">
-							<h2 className={SECTION_TITLE}>
-								Ray <code className="font-mono">{result.rayId}</code>
-							</h2>
-							<span className="text-xs text-zinc-500 dark:text-zinc-400">
-								found in <strong>{result.foundIn.name}</strong>
-							</span>
+					{verdict && review ? (
+						<div className="mb-4 space-y-4">
+							<Verdict verdict={verdict} trace={result} />
+							<ReviewPanel review={review} />
+							<RulesTopDown verdict={verdict} />
 						</div>
-					</div>
+					) : (
+						<div className={`${CARD} mb-4`}>
+							<div className="flex flex-wrap items-baseline justify-between gap-2">
+								<h2 className={SECTION_TITLE}>
+									Ray <code className="font-mono">{result.rayId}</code>
+								</h2>
+								<span className="text-xs text-zinc-500 dark:text-zinc-400">
+									found in <strong>{result.foundIn.name}</strong>
+								</span>
+							</div>
+							{rulesError && (
+								<p role="status" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+									The WAF rules could not be read, so there is no rule-by-rule verdict — only the request record below.{" "}
+									{rulesError}
+								</p>
+							)}
+						</div>
+					)}
+
+					<section className={`${CARD} mb-4`}>
+						<h3 className={`mb-3 ${SECTION_TITLE}`}>
+							Firewall events {result.firewallEvents.length > 0 && `(${result.firewallEvents.length})`}
+						</h3>
+						{result.firewallEvents.length === 0 ? (
+							<p className="py-4 text-sm text-zinc-500 dark:text-zinc-400">
+								No WAF or firewall rule recorded a match for this Ray ID.
+							</p>
+						) : (
+							<div className="overflow-x-auto">
+								<table className="w-full min-w-[720px] text-sm">
+									<thead className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+										<tr>
+											{["Time", "Action", "Source", "Rule", "Host", "Path"].map((h) => (
+												<th key={h} className="px-2 py-2 text-left font-medium">{h}</th>
+											))}
+										</tr>
+									</thead>
+									<tbody>
+										{result.firewallEvents.map((event, index) => (
+											<tr key={index} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
+												<td className="whitespace-nowrap px-2 py-2">{formatValue("datetime", event.datetime)}</td>
+												<td className={`px-2 py-2 ${valueTone("securityAction", event.action)}`}>{formatValue("action", event.action)}</td>
+												<td className="px-2 py-2">{event.source ? sourceLabel(String(event.source)) : "—"}</td>
+												<td className="max-w-[18rem] truncate px-2 py-2" title={String(event.description ?? "")}>
+													{formatValue("description", event.description ?? event.ruleId)}
+												</td>
+												<td className="px-2 py-2">{formatValue("host", event.clientRequestHTTPHost)}</td>
+												<td className="max-w-[14rem] truncate px-2 py-2" title={String(event.clientRequestPath ?? "")}>
+													{formatValue("path", event.clientRequestPath)}
+												</td>
+											</tr>
+										))}
+									</tbody>
+								</table>
+							</div>
+						)}
+						{verdict && verdict.outside.length > 0 && (
+							<p className={`mt-2 text-xs ${MUTED}`}>
+								{verdict.outside.length === 1 ? "One of these comes" : `${verdict.outside.length} of these come`} from outside
+								the WAF rulesets, so {verdict.outside.length === 1 ? "it isn't" : "they aren't"} placed in the rule order above.
+							</p>
+						)}
+					</section>
 
 					<div className="mb-4 grid gap-4 lg:grid-cols-2">
 						{FIELD_GROUPS.map((group) => {
@@ -243,45 +320,6 @@ export function RequestTracePage({
 							})}
 						</section>
 					)}
-
-					<section className={CARD}>
-						<h3 className={`mb-3 ${SECTION_TITLE}`}>
-							Firewall events {result.firewallEvents.length > 0 && `(${result.firewallEvents.length})`}
-						</h3>
-						{result.firewallEvents.length === 0 ? (
-							<p className="py-4 text-sm text-zinc-500 dark:text-zinc-400">
-								No WAF or firewall rule recorded a match for this Ray ID.
-							</p>
-						) : (
-							<div className="overflow-x-auto">
-								<table className="w-full min-w-[720px] text-sm">
-									<thead className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-										<tr>
-											{["Time", "Action", "Source", "Rule", "Host", "Path"].map((h) => (
-												<th key={h} className="px-2 py-2 text-left font-medium">{h}</th>
-											))}
-										</tr>
-									</thead>
-									<tbody>
-										{result.firewallEvents.map((event, index) => (
-											<tr key={index} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800/60">
-												<td className="whitespace-nowrap px-2 py-2">{formatValue("datetime", event.datetime)}</td>
-												<td className={`px-2 py-2 ${valueTone("securityAction", event.action)}`}>{formatValue("action", event.action)}</td>
-												<td className="px-2 py-2">{formatValue("source", event.source)}</td>
-												<td className="max-w-[18rem] truncate px-2 py-2" title={String(event.description ?? "")}>
-													{formatValue("description", event.description ?? event.ruleId)}
-												</td>
-												<td className="px-2 py-2">{formatValue("host", event.clientRequestHTTPHost)}</td>
-												<td className="max-w-[14rem] truncate px-2 py-2" title={String(event.clientRequestPath ?? "")}>
-													{formatValue("path", event.clientRequestPath)}
-												</td>
-											</tr>
-										))}
-									</tbody>
-								</table>
-							</div>
-						)}
-					</section>
 
 					{result.unavailableFields.length > 0 && (
 						<p className="mt-4 text-xs text-zinc-500 dark:text-zinc-400">

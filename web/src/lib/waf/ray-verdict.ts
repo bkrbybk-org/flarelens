@@ -19,6 +19,13 @@ import type { RuleMetaMap } from "./types";
 
 const TERMINATING = new Set(["block", "challenge", "managed_challenge", "js_challenge", "jschallenge", "managedchallenge"]);
 
+/**
+ * A request outcome that stopped the request. Cloudflare also reports "log" and "skip" as a
+ * request's security action; neither blocked anything.
+ */
+const BLOCKING = new Set([...TERMINATING, "connection_close", "forceconnectionclose"]);
+export const isBlocking = (action: string) => BLOCKING.has(action.toLowerCase());
+
 export interface RayHit {
 	ruleId: string;
 	rulesetId: string;

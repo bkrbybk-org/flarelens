@@ -70,7 +70,6 @@ describe("app shell height chain", () => {
 			"features/dns/DnsPage.tsx",
 			"features/shields/ShieldsPage.tsx",
 			"features/audit/AuditLogPage.tsx",
-			"features/why/WhyBlockedPage.tsx",
 			"features/bots/BotsPage.tsx",
 		];
 		for (const page of pages) {

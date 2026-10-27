@@ -279,20 +279,11 @@ export function CommandPalette({
 		if (RAY_ID_RE.test(trimmedQuery)) {
 			out.push({
 				id: "ray:trace",
-				label: `Trace Ray ID "${trimmedQuery}"`,
+				label: `Investigate Ray ID "${trimmedQuery}" — why blocked or let through`,
 				group: "Actions",
 				icon: SearchIcon,
 				run: () => {
 					window.location.hash = `/request?ray=${encodeURIComponent(trimmedQuery)}`;
-				},
-			});
-			out.push({
-				id: "ray:why",
-				label: `Explain why "${trimmedQuery}" was blocked`,
-				group: "Actions",
-				icon: SearchIcon,
-				run: () => {
-					window.location.hash = `/why?ray=${encodeURIComponent(trimmedQuery)}`;
 				},
 			});
 		}

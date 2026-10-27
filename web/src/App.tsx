@@ -22,7 +22,6 @@ import { ZoneHealthPage } from "./features/zone-health/ZoneHealthPage";
 import { DnsPage } from "./features/dns/DnsPage";
 import { BotsPage } from "./features/bots/BotsPage";
 import { RequestTracePage } from "./features/request/RequestTracePage";
-import { WhyBlockedPage } from "./features/why/WhyBlockedPage";
 import { CostPage } from "./features/cost/CostPage";
 import { AuditLogPage } from "./features/audit/AuditLogPage";
 import { AiSecurityPage } from "./features/ai-security/AiSecurityPage";
@@ -69,7 +68,7 @@ const PAGE_TITLES: Record<Route, string> = {
 	"access-usage": "Access Usage",
 	"workers-ai": "Workers AI",
 	"ai-gateway": "AI Gateway",
-	request: "Request Trace",
+	request: "Investigate a Request",
 	tunnels: "Tunnel Map",
 	gateway: "Gateway Usage",
 	"gateway-policies": "Gateway Policies",
@@ -81,7 +80,6 @@ const PAGE_TITLES: Record<Route, string> = {
 	findings: "Findings",
 	audit: "Audit Log",
 	"access-tester": "Access Policy Tester",
-	why: "Why Was This Blocked?",
 	shields: "Page & API Shield",
 };
 
@@ -194,7 +192,7 @@ export default function App() {
 	// Zone list is only needed by zone-scoped features; fetch on first visit
 	const ensureZones = zones.ensureLoaded;
 	useEffect(() => {
-		if (sessionAccountId && (route === "waf" || route === "cache" || route === "ai-security" || route === "request" || route === "why" || route === "bots")) {
+		if (sessionAccountId && (route === "waf" || route === "cache" || route === "ai-security" || route === "request" || route === "bots")) {
 			ensureZones(sessionToken || "", sessionAccountId);
 		}
 	}, [route, sessionToken, sessionAccountId, ensureZones]);
@@ -484,7 +482,6 @@ export default function App() {
 					{route === "workers-ai" && <WorkersAiPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "ai-gateway" && <AiGatewayPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "request" && <RequestTracePage session={session} zones={zones.zones} onAuthError={handleDisconnect} />}
-					{route === "why" && <WhyBlockedPage session={session} zones={zones.zones} onAuthError={handleDisconnect} />}
 					{route === "tunnels" && <TunnelMapPage session={session} onAuthError={handleDisconnect} />}
 					{route === "gateway" && <GatewayPage session={session} timeRange={timeRange} onAuthError={handleDisconnect} />}
 					{route === "gateway-policies" && <GatewayPoliciesPage session={session} onAuthError={handleDisconnect} />}

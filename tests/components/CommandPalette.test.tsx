@@ -150,21 +150,21 @@ describe("CommandPalette", () => {
 		const user = userEvent.setup();
 		render(<Harness open />);
 		await user.type(screen.getByRole("combobox"), "a3633412999ba62b");
-		expect(screen.getByRole("option", { name: /Trace Ray ID/ })).toBeInTheDocument();
+		expect(screen.getByRole("option", { name: /Investigate Ray ID/ })).toBeInTheDocument();
 	});
 
 	it("also accepts a Ray ID with a colo suffix", async () => {
 		const user = userEvent.setup();
 		render(<Harness open />);
 		await user.type(screen.getByRole("combobox"), "a3633412999ba62b-BKK");
-		expect(screen.getByRole("option", { name: /Trace Ray ID/ })).toBeInTheDocument();
+		expect(screen.getByRole("option", { name: /Investigate Ray ID/ })).toBeInTheDocument();
 	});
 
 	it("does not offer a Ray ID trace for ordinary search text", async () => {
 		const user = userEvent.setup();
 		render(<Harness open />);
 		await user.type(screen.getByRole("combobox"), "cache rules");
-		expect(screen.queryByRole("option", { name: /Trace Ray ID/ })).not.toBeInTheDocument();
+		expect(screen.queryByRole("option", { name: /Investigate Ray ID/ })).not.toBeInTheDocument();
 	});
 
 	it("only offers account switching when there is more than one account", async () => {

@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-27** against a full read of the tree, t
 live probe of every route on the deployed Worker. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-three sections, 27 API routes (25 under `/api/*`, plus `/health` and `/docs`), 1,205 tests green across 86 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-two sections, 27 API routes (25 under `/api/*`, plus `/health` and `/docs`), 1,213 tests green across 88 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `c044627c`, deployed 2026-10-27 (added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
+Running version `fc809574`, deployed 2026-10-27 (Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -37,7 +37,7 @@ Twenty-three sections, grouped in the sidebar by Cloudflare product area:
 | Group | Routes |
 |---|---|
 | Zero Trust | `#/access`, `#/groups`, `#/access-tester`, `#/access-usage`, `#/tunnels`, `#/gateway`, `#/gateway-policies` |
-| Security | `#/waf`, `#/ai-security`, `#/request`, `#/why`, `#/pqc`, `#/zone-health`, `#/dns`, `#/bots`, `#/shields` |
+| Security | `#/waf`, `#/ai-security`, `#/request`, `#/pqc`, `#/zone-health`, `#/dns`, `#/bots`, `#/shields` |
 | Performance | `#/cache` |
 | Developer Platform | `#/workers`, `#/workers-ai`, `#/ai-gateway`, `#/cost` |
 | Audit | `#/findings`, `#/audit` |
@@ -243,7 +243,7 @@ Disconnect clears the store.
 | `cf_zt_prefs` | localStorage | `PREFS_VERSION = 3`; a version bump discards saved column order/visibility so new defaults apply. The policies table keeps its own `policyColumnVisibility` / `policyColumnOrder` keys: it shares column ids (`name`, `updated_at`, `id`) with the applications table, so one saved order would scramble the other |
 | `flarelens_saved_views` | localStorage | Saved views: name + hash + account, listed only for the current account, capped at 50 each |
 | `flarelens_recent_commands` | localStorage | Command palette's recently used commands |
-| `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (20 keys in all, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
+| `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (19 keys in all, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
 
 ### Tests
 
@@ -393,6 +393,20 @@ files behind.
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **One page for a Ray ID: false positives and false negatives (2026-10-27, `fc809574`).** Why
+  Was This Blocked? merged into Request Trace (`#/request`); `#/why` links redirect with their
+  query. The page now leads with the verdict and the rules top-down, then a review
+  (`web/src/lib/waf/ray-review.ts`): a block asks "false positive?" — deciding rule, `matched_vars`,
+  scores for and against, and a draft fix (the rule narrowed with `and not (host and path)`, or a
+  skip exception for a managed rule); a let-through asks "false negative?" — skips, log-only rules
+  (and the override that set them), disabled rules, flagging scores with a draft rule on the score,
+  and a draft block rule. The request record follows. A token without WAF read still gets the
+  record. Default window is now 7 days. Live: the blocked ray gets mixed signals (attack score 84
+  clean, bot score 17 automated) and a narrowed geo rule; the logged ray names both log-only rules
+  (one set by a ruleset override) and 2 disabled rules. Found while verifying: a 28–30 day window
+  returned the ray as not found while 26 days found it — wide ranges read more heavily sampled
+  data — so the not-found card no longer says "widen the window".
 
 - **More accounts, and why a request was blocked (2026-10-27, `c044627c`).**
   - *Added accounts.* The deployment's token reaches one account. **+ Add account** takes a pasted
