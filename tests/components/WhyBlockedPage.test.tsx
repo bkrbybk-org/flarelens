@@ -53,4 +53,19 @@ describe("WhyBlockedPage", () => {
 		expect(await screen.findByRole("alert")).toHaveTextContent("No request with this Ray ID was found");
 		expect(fetchWafRulesets).not.toHaveBeenCalled();
 	});
+
+	it("does not call a logged request blocked", async () => {
+		vi.mocked(traceRequest).mockResolvedValue({
+			foundIn: { id: "z1", name: "example.com" },
+			request: { securityAction: "log", securitySource: "firewallManaged", edgeResponseStatus: 200 },
+			firewallEvents: [{ ruleId: "after", rulesetId: "root", action: "log", source: "firewallCustom", description: "Block bad paths", matchIndex: 0 }],
+			zonesSearched: [],
+			errors: [],
+		});
+		const user = userEvent.setup();
+		render(<WhyBlockedPage session={session} zones={[]} onAuthError={vi.fn()} />);
+		await user.type(screen.getByLabelText("Ray ID"), "a51198c5d9cf8941");
+		await user.click(screen.getByRole("button", { name: "Explain" }));
+		expect(await screen.findByText("Not blocked or challenged — 1 rule only logged or skipped it")).toBeInTheDocument();
+	});
 });

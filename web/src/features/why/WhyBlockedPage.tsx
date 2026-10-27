@@ -64,7 +64,11 @@ function StateBadge({ state, hit }: { state: ItemState; hit?: RayHit }) {
 function Verdict({ verdict, trace }: { verdict: RayVerdict; trace: Trace }) {
 	const req = trace.request ?? {};
 	const status = req.edgeResponseStatus;
-	const { decidedBy, outcome } = verdict;
+	const { decidedBy } = verdict;
+	// Only an outcome that stopped the request is a verdict. Cloudflare also reports "log" (and
+	// "skip") as the request's security action; neither blocked anything.
+	const outcome = verdict.outcome && BLOCKING.has(verdict.outcome.action.toLowerCase()) ? verdict.outcome : null;
+	const logged = verdict.hits.filter((h) => !h.terminating).length;
 	const outsideDecider = !decidedBy && outcome ? verdict.outside.find((h) => h.source === outcome.source) : undefined;
 	let headline: string;
 	let tone: string;
@@ -75,7 +79,7 @@ function Verdict({ verdict, trace }: { verdict: RayVerdict; trace: Trace }) {
 		headline = `${titleCase(outcome.action)} by ${sourceLabel(outcome.source)}${outsideDecider ? ` — "${outsideDecider.description || outsideDecider.ruleId}"` : ""}`;
 		tone = "border-red-500/40 bg-red-500/5";
 	} else {
-		headline = "No rule blocked or challenged this request";
+		headline = logged ? `Not blocked or challenged — ${logged} ${logged === 1 ? "rule" : "rules"} only logged or skipped it` : "No rule blocked or challenged this request";
 		tone = "border-emerald-500/40 bg-emerald-500/5";
 	}
 	return (
@@ -107,6 +111,8 @@ function Verdict({ verdict, trace }: { verdict: RayVerdict; trace: Trace }) {
 }
 
 const str = (v: unknown) => (v === null || v === undefined ? "" : String(v));
+
+const BLOCKING = new Set(["block", "challenge", "managed_challenge", "js_challenge", "jschallenge", "managedchallenge", "connection_close", "forceconnectionclose"]);
 
 function RulesTopDown({ verdict }: { verdict: RayVerdict }) {
 	const phases: [string, RayVerdict["stages"]][] = [];
@@ -140,7 +146,7 @@ function RulesTopDown({ verdict }: { verdict: RayVerdict }) {
 												<span className={`w-7 shrink-0 text-right font-mono text-xs ${MUTED}`}>#{item.position}</span>
 												<span className="min-w-0 flex-1">
 													{item.target ? `Runs ${item.target.name}` : item.row.name}
-													{item.target && <span className={`ml-1 text-xs ${MUTED}`}>({item.target.items.length} rules)</span>}
+													{item.target && <span className={`ml-1 text-xs ${MUTED}`}>({item.target.items.length} {item.target.items.length === 1 ? "rule" : "rules"})</span>}
 												</span>
 												{!item.row.enabled && <span className={BADGE_NEUTRAL}>Disabled</span>}
 												{item.target ? (state === "not-reached" ? <StateBadge state={state} /> : null) : <StateBadge state={state} hit={hit} />}

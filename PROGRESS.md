@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-27** against a full read of the tree, t
 live probe of every route on the deployed Worker. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-two sections, 27 API routes (25 under `/api/*`, plus `/health` and `/docs`), 1,192 tests green across 83 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-three sections, 27 API routes (25 under `/api/*`, plus `/health` and `/docs`), 1,205 tests green across 86 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `c2170fc9`, deployed 2026-09-28 (full WAF counts from the groups dataset; before it the same day: timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester). Each earlier deploy, and what
+Running version `c044627c`, deployed 2026-10-27 (added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -32,12 +32,12 @@ pull request; there is no deploy job, deliberately — see the note under Recent
 
 ## Sections
 
-Twenty-two sections, grouped in the sidebar by Cloudflare product area:
+Twenty-three sections, grouped in the sidebar by Cloudflare product area:
 
 | Group | Routes |
 |---|---|
 | Zero Trust | `#/access`, `#/groups`, `#/access-tester`, `#/access-usage`, `#/tunnels`, `#/gateway`, `#/gateway-policies` |
-| Security | `#/waf`, `#/ai-security`, `#/request`, `#/pqc`, `#/zone-health`, `#/dns`, `#/bots`, `#/shields` |
+| Security | `#/waf`, `#/ai-security`, `#/request`, `#/why`, `#/pqc`, `#/zone-health`, `#/dns`, `#/bots`, `#/shields` |
 | Performance | `#/cache` |
 | Developer Platform | `#/workers`, `#/workers-ai`, `#/ai-gateway`, `#/cost` |
 | Audit | `#/findings`, `#/audit` |
@@ -238,11 +238,12 @@ Disconnect clears the store.
 
 | Key | Store | Notes |
 |---|---|---|
+| `flarelens_extra_accounts` | sessionStorage | Accounts added in this tab with their own token (id, name, token). Wiped on disconnect; never written to disk |
 | `cf_api_token`, `cf_account_id`, `cf_account_name` | sessionStorage | Cleared on tab close; never persisted to disk |
 | `cf_zt_prefs` | localStorage | `PREFS_VERSION = 3`; a version bump discards saved column order/visibility so new defaults apply. The policies table keeps its own `policyColumnVisibility` / `policyColumnOrder` keys: it shares column ids (`name`, `updated_at`, `id`) with the applications table, so one saved order would scramble the other |
 | `flarelens_saved_views` | localStorage | Saved views: name + hash + account, listed only for the current account, capped at 50 each |
 | `flarelens_recent_commands` | localStorage | Command palette's recently used commands |
-| `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (19 keys in all, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
+| `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (20 keys in all, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
 
 ### Tests
 
@@ -392,6 +393,24 @@ files behind.
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **More accounts, and why a request was blocked (2026-10-27, `c044627c`).**
+  - *Added accounts.* The deployment's token reaches one account. **+ Add account** takes a pasted
+    read-only token, lists the accounts it reaches, and adds the chosen ones to the switcher. The
+    token stays in this tab's session storage and travels as a Bearer header, which the Worker
+    already prefers over its own; nothing is stored server-side, and disconnect wipes it. Chosen
+    over a deploy-time secret per account, which would have shared the accounts with everyone
+    behind Access. Switching to an added account deliberately does not replace the stored sign-in, so
+    a reload comes back to the primary account, and the account list keeps coming from the primary
+    credential. Also fixed in passing: the palette's account switch did not reset the Bots zone.
+  - *Why Was This Blocked? (`#/why`).* Composes the existing trace and rulesets routes — no new
+    endpoint. Live: a request blocked on certs.example zone shows "Block by Geography-based rule",
+    rule #3 of the zone's custom rules, in red, account rules above it, and the zone's later rules
+    greyed as not reached. Two things found while testing on real requests: `matchIndex` does not
+    follow phase order (a managed-phase match had index 0, a custom one index 3), so hits are placed
+    by evaluation order; and Cloudflare reports `log` as a request's security action, which the
+    first build turned into "Log by WAF managed rule" — a logged request is now said not to be
+    blocked.
 
 - **WAF counts were sampled (2026-09-28, `c2170fc9`).** WAF Analytics counted `firewallEventsAdaptive`
   rows, which are adaptively sampled — the rows carry no `sampleInterval`, which is why the
