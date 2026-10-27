@@ -1,6 +1,8 @@
 export interface CfAccount {
 	id: string;
 	name?: string;
+	/** Added in this tab with its own token (lib/extraAccounts.ts), not one the deployment provides. */
+	added?: boolean;
 }
 
 export interface CfZone {

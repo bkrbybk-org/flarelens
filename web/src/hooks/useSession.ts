@@ -40,13 +40,24 @@ function readSession(): Session | null {
 export function useSession() {
 	const [session, setSession] = useState<Session | null>(readSession);
 
-	const connect = useCallback((next: Session) => {
+	/**
+	 * `persist: false` switches the view without replacing the stored sign-in — used for accounts
+	 * added with their own token, so a reload comes back to the account the operator connected
+	 * with rather than to whichever added account they last looked at.
+	 */
+	const connect = useCallback((next: Session, options: { persist?: boolean } = {}) => {
+		const persist = options.persist ?? true;
 		// A server-mode session is derived from /api/config on every load and must not outlive
-		// the Access session that produced it, so it is never written to storage.
-		if (next.mode === "byot") {
+		// the Access session that produced it, so it is never written to storage — and a token
+		// stored earlier in this tab must not linger behind it.
+		if (persist && next.mode === "byot") {
 			storageSet("session", TOKEN_KEY, next.token);
 			storageSet("session", ACCOUNT_ID_KEY, next.accountId);
 			storageSet("session", ACCOUNT_NAME_KEY, next.accountName);
+		} else if (persist && next.mode === "server") {
+			storageRemove("session", TOKEN_KEY);
+			storageRemove("session", ACCOUNT_ID_KEY);
+			storageRemove("session", ACCOUNT_NAME_KEY);
 		}
 		setSession(next);
 	}, []);

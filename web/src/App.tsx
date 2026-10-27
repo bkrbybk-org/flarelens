@@ -30,11 +30,13 @@ import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
 import { Topbar } from "./components/shell/Topbar";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { NameDialog } from "./components/shell/NameDialog";
+import { AddAccountDialog } from "./components/shell/AddAccountDialog";
+import { addExtraAccounts, clearExtraAccounts, listExtraAccounts, removeExtraAccount, type ExtraAccount } from "./lib/extraAccounts";
 import { useHashSyncedState } from "./hooks/useHashParams";
 import { usePrefs, type Theme } from "./hooks/usePrefs";
 import { TIME_RANGE_ROUTES, useTimeRange } from "./hooks/useTimeRange";
 import { useRoute, type Route } from "./hooks/useRoute";
-import { useSession, type Session } from "./hooks/useSession";
+import { useSession, type Session, type SessionMode } from "./hooks/useSession";
 import { useZeroTrustData } from "./hooks/useZeroTrustData";
 import { useZones } from "./hooks/useZones";
 import type { RuleContext } from "./lib/rules";
@@ -105,10 +107,22 @@ export default function App() {
 		setSectionRefresh((prev) => (next === null && prev === null ? prev : next));
 	}, []);
 
-	// Disconnecting must not leave one customer's telemetry in memory for
-	// whoever connects next on this browser.
+	// The credential the operator signed in with — the deployment's own (server mode) or the
+	// token pasted on the connect screen. Accounts added later carry their own token; switching to
+	// one changes the session, never this, so switching back always has the original to return to.
+	const [primary, setPrimary] = useState<{ token: string; mode: SessionMode } | null>(() =>
+		session ? { token: session.token, mode: session.mode } : null,
+	);
+	const [extraAccounts, setExtraAccounts] = useState<ExtraAccount[]>(listExtraAccounts);
+	const [addingAccount, setAddingAccount] = useState(false);
+
+	// Disconnecting must not leave one customer's telemetry — or any added account's token — in
+	// memory for whoever connects next on this browser.
 	const handleDisconnect = useCallback(() => {
 		clearSectionSnapshots();
+		clearExtraAccounts();
+		setExtraAccounts([]);
+		setPrimary(null);
 		disconnect();
 	}, [disconnect]);
 
@@ -142,6 +156,7 @@ export default function App() {
 					const allowed = config.accounts || [];
 					setServerAccounts(allowed);
 					if (allowed.length === 1) {
+						setPrimary({ token: "", mode: "server" });
 						connect({ token: "", accountId: allowed[0].id, accountName: allowed[0].name, mode: "server" });
 					} else if (allowed.length === 0) {
 						setBootstrapError(
@@ -187,18 +202,51 @@ export default function App() {
 	// serverAccounts above) — calling fetchAccounts there too would be a second, redundant
 	// upstream round trip for data the bootstrap call already returned. Only BYOT needs to ask.
 	const [accounts, setAccounts] = useState<CfAccount[]>([]);
+	// Listed with the primary credential, not the session's: while an added account is open the
+	// session carries that account's token, and the list must not shrink to what it can see.
+	const primaryToken = primary?.token;
+	const primaryMode = primary?.mode;
 	useEffect(() => {
-		if (!sessionAccountId || session?.mode === "server") return;
+		if (!primaryMode || primaryMode === "server") return;
 		let cancelled = false;
-		fetchAccounts(sessionToken || "")
+		fetchAccounts(primaryToken || "")
 			.then((result) => !cancelled && setAccounts(result))
 			.catch(() => !cancelled && setAccounts([]));
 		return () => {
 			cancelled = true;
 		};
-	}, [sessionToken, sessionAccountId, session?.mode]);
+	}, [primaryToken, primaryMode]);
 
-	const sidebarAccounts = session?.mode === "server" ? serverAccounts : accounts;
+	const baseAccounts: CfAccount[] = primaryMode === "server" ? serverAccounts : accounts;
+	const sidebarAccounts = useMemo<CfAccount[]>(() => {
+		const known = new Set(baseAccounts.map((a) => a.id));
+		return [...baseAccounts, ...extraAccounts.filter((a) => !known.has(a.id)).map((a) => ({ id: a.id, name: a.name, added: true }))];
+	}, [baseAccounts, extraAccounts]);
+
+	/** One switch for the sidebar and the palette: an added account uses its own token. */
+	const switchAccount = useCallback(
+		(account: CfAccount) => {
+			const extra = extraAccounts.find((a) => a.id === account.id);
+			const isBase = baseAccounts.some((a) => a.id === account.id);
+			if (extra && !isBase) {
+				connect({ token: extra.token, accountId: extra.id, accountName: extra.name, mode: "byot" }, { persist: false });
+			} else if (primary) {
+				connect({ token: primary.token, accountId: account.id, accountName: account.name || account.id, mode: primary.mode });
+			}
+			zones.reset();
+			updatePrefs({ wafZone: "", cacheZone: "", aiSecZone: "", botsZone: "" });
+		},
+		[extraAccounts, baseAccounts, primary, connect, zones, updatePrefs],
+	);
+
+	const removeAccount = useCallback(
+		(id: string) => {
+			setExtraAccounts(removeExtraAccount(id));
+			// Leaving the account being viewed: go back to the first one the operator signed in with.
+			if (session?.accountId === id && baseAccounts[0]) switchAccount(baseAccounts[0]);
+		},
+		[session?.accountId, baseAccounts, switchAccount],
+	);
 
 	// Deep-linkable zone for zone-scoped routes: #/waf?zone=… / #/cache?zone=…
 	const activeZone =
@@ -266,6 +314,7 @@ export default function App() {
 	);
 
 	const handleConnect = useCallback((next: Session) => {
+		setPrimary({ token: next.token, mode: next.mode });
 		connect(next);
 	}, [connect]);
 
@@ -283,9 +332,10 @@ export default function App() {
 				onConnect={handleConnect}
 				serverAccounts={serverAccounts}
 				serverError={bootstrapError}
-				onPickServerAccount={(account) =>
-					connect({ token: "", accountId: account.id, accountName: account.name, mode: "server" })
-				}
+				onPickServerAccount={(account) => {
+					setPrimary({ token: "", mode: "server" });
+					connect({ token: "", accountId: account.id, accountName: account.name, mode: "server" });
+				}}
 			/>
 		);
 	}
@@ -296,16 +346,9 @@ export default function App() {
 			<Sidebar
 				accountId={session.accountId}
 				accounts={sidebarAccounts}
-				onSwitchAccount={(account) => {
-					connect({
-						token: session.token,
-						accountId: account.id,
-						accountName: account.name || account.id,
-						mode: session.mode,
-					});
-					zones.reset();
-					updatePrefs({ wafZone: "", cacheZone: "", aiSecZone: "", botsZone: "" });
-				}}
+				onSwitchAccount={switchAccount}
+				onAddAccount={() => setAddingAccount(true)}
+				onRemoveAccount={removeAccount}
 				route={route}
 				onNavigate={navigate}
 				collapsed={prefs.sidebarCollapsed}
@@ -475,6 +518,24 @@ export default function App() {
 				</main>
 			</div>
 		</div>
+		{addingAccount && (
+			<AddAccountDialog
+				knownIds={new Set(sidebarAccounts.map((a) => a.id))}
+				onCancel={() => setAddingAccount(false)}
+				onAdd={(added) => {
+					setExtraAccounts(addExtraAccounts(added));
+					setAddingAccount(false);
+					// Opened straight from what was just added: switchAccount reads the list from state,
+					// which has not caught up yet, and would fall back to the primary token.
+					const first = added.find((a) => !baseAccounts.some((b) => b.id === a.id));
+					if (first) {
+						connect({ token: first.token, accountId: first.id, accountName: first.name, mode: "byot" }, { persist: false });
+						zones.reset();
+						updatePrefs({ wafZone: "", cacheZone: "", aiSecZone: "", botsZone: "" });
+					}
+				}}
+			/>
+		)}
 		<CommandPalette
 			open={paletteOpen}
 			onOpenChange={setPaletteOpen}
@@ -482,16 +543,7 @@ export default function App() {
 			onNavigate={navigate}
 			accounts={sidebarAccounts}
 			accountId={session.accountId}
-			onSwitchAccount={(account) => {
-				connect({
-					token: session.token,
-					accountId: account.id,
-					accountName: account.name || account.id,
-					mode: session.mode,
-				});
-				zones.reset();
-				updatePrefs({ wafZone: "", cacheZone: "", aiSecZone: "" });
-			}}
+			onSwitchAccount={switchAccount}
 			theme={prefs.theme}
 			onSetTheme={(theme) => updatePrefs({ theme })}
 			collapsed={prefs.sidebarCollapsed}

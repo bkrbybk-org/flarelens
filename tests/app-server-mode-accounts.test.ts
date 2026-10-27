@@ -17,15 +17,17 @@ const APP_SOURCE = readFileSync(new URL("../web/src/App.tsx", import.meta.url), 
 
 describe("App bootstrap: server mode reuses config.accounts", () => {
 	it("guards the fetchAccounts effect on BYOT mode", () => {
-		const effectStart = APP_SOURCE.indexOf("fetchAccounts(sessionToken");
+		// Keyed on the primary credential (the one signed in with), not the session's: an account
+		// added with its own token must not shrink the list to what that token can see.
+		const effectStart = APP_SOURCE.indexOf("fetchAccounts(primaryToken");
 		expect(effectStart).toBeGreaterThan(-1);
 		// The guard clause immediately preceding the fetchAccounts call must bail out in server mode.
 		const before = APP_SOURCE.slice(Math.max(0, effectStart - 300), effectStart);
-		expect(before).toMatch(/session\?\.mode === "server"/);
+		expect(before).toMatch(/primaryMode === "server"/);
 	});
 
 	it("feeds the sidebar switcher from serverAccounts in server mode", () => {
-		expect(APP_SOURCE).toMatch(/const sidebarAccounts = session\?\.mode === "server" \? serverAccounts : accounts;/);
+		expect(APP_SOURCE).toMatch(/const baseAccounts: CfAccount\[\] = primaryMode === "server" \? serverAccounts : accounts;/);
 		expect(APP_SOURCE).toMatch(/accounts=\{sidebarAccounts\}/);
 	});
 });

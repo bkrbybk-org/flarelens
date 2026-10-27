@@ -28,6 +28,10 @@ interface SidebarProps {
 	accountId: string;
 	accounts: CfAccount[];
 	onSwitchAccount: (account: CfAccount) => void;
+	/** Opens the add-account dialog. */
+	onAddAccount: () => void;
+	/** Forgets an account added in this tab, and its token. */
+	onRemoveAccount: (id: string) => void;
 	route: Route;
 	onNavigate: (route: Route) => void;
 	collapsed: boolean;
@@ -58,6 +62,8 @@ type ContentProps = Pick<
 	| "accountId"
 	| "accounts"
 	| "onSwitchAccount"
+	| "onAddAccount"
+	| "onRemoveAccount"
 	| "route"
 	| "onNavigate"
 	| "collapsed"
@@ -70,6 +76,8 @@ function SidebarContent({
 	accountId,
 	accounts,
 	onSwitchAccount,
+	onAddAccount,
+	onRemoveAccount,
 	route,
 	onNavigate,
 	collapsed,
@@ -228,7 +236,7 @@ function SidebarContent({
 
 			<div className={`border-t border-zinc-200 py-3 dark:border-zinc-800 ${collapsed ? "px-2" : "px-4"}`}>
 				{/* The account switcher only appears when there is a choice to make; a single-account
-				    deployment has nothing to switch between. */}
+				    deployment has nothing to switch between. Adding an account is always offered. */}
 				{!collapsed && accounts.length > 1 && (
 					<select
 						value={accountId}
@@ -240,9 +248,29 @@ function SidebarContent({
 						className={`mb-2 w-full truncate rounded-md border border-zinc-200 bg-transparent px-1.5 py-1 text-xs outline-none focus:border-cf dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`}
 					>
 						{accounts.map((a) => (
-							<option key={a.id} value={a.id}>{a.name || a.id}</option>
+							<option key={a.id} value={a.id}>
+								{a.name || a.id}
+								{a.added ? " (added)" : ""}
+							</option>
 						))}
 					</select>
+				)}
+				{!collapsed && (
+					<div className="mb-2 flex items-center gap-2 text-xs">
+						<button type="button" onClick={onAddAccount} className={`rounded text-cf hover:underline ${FOCUS_RING}`}>
+							+ Add account
+						</button>
+						{accounts.find((a) => a.id === accountId)?.added && (
+							<button
+								type="button"
+								onClick={() => onRemoveAccount(accountId)}
+								className={`ml-auto rounded text-zinc-500 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 ${FOCUS_RING}`}
+								title="Forget this account and its token in this tab"
+							>
+								Remove
+							</button>
+						)}
+					</div>
 				)}
 
 				{version ? (
@@ -319,6 +347,8 @@ export function Sidebar({
 	accountId,
 	accounts,
 	onSwitchAccount,
+	onAddAccount,
+	onRemoveAccount,
 	route,
 	onNavigate,
 	collapsed,
@@ -333,6 +363,8 @@ export function Sidebar({
 			accountId={accountId}
 			accounts={accounts}
 			onSwitchAccount={onSwitchAccount}
+			onAddAccount={onAddAccount}
+			onRemoveAccount={onRemoveAccount}
 			route={route}
 			onNavigate={(r) => {
 				onNavigate(r);
