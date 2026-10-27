@@ -2,6 +2,8 @@ import { BADGE, CARD, MUTED, SECTION_TITLE, BADGE_NEUTRAL } from "../../lib/ui";
 import { titleCase } from "../../lib/waf/format";
 import { isBlocking, type ItemState, type RayHit, type RayVerdict } from "../../lib/waf/ray-verdict";
 import type { RayReview } from "../../lib/waf/ray-review";
+import { explainExpression } from "../../lib/waf/explain-expr";
+import { ExpressionExplain, RuleExplainChip } from "./RayInsights";
 import type { RequestTraceResult } from "./types";
 
 /**
@@ -45,26 +47,34 @@ function StateBadge({ state, hit }: { state: ItemState; hit?: RayHit }) {
 	return null;
 }
 
+/** The verdict in one line, and whether it stopped the request. */
+export function verdictHeadline(verdict: RayVerdict): { headline: string; blocked: boolean } {
+	const { decidedBy } = verdict;
+	// Only an outcome that stopped the request is a verdict (see isBlocking).
+	const outcome = verdict.outcome && isBlocking(verdict.outcome.action) ? verdict.outcome : null;
+	if (decidedBy) return { headline: `${titleCase(decidedBy.hit.action)} by "${decidedBy.item.row.name}"`, blocked: true };
+	if (outcome) {
+		const outside = verdict.outside.find((h) => h.source === outcome.source);
+		return {
+			headline: `${titleCase(outcome.action)} by ${sourceLabel(outcome.source)}${outside ? ` — "${outside.description || outside.ruleId}"` : ""}`,
+			blocked: true,
+		};
+	}
+	const logged = verdict.hits.filter((h) => !h.terminating).length;
+	return {
+		headline: logged ? `Not blocked or challenged — ${logged} ${logged === 1 ? "rule" : "rules"} only logged or skipped it` : "No rule blocked or challenged this request",
+		blocked: false,
+	};
+}
+
 export function Verdict({ verdict, trace }: { verdict: RayVerdict; trace: RequestTraceResult }) {
 	const req = trace.request ?? {};
 	const status = req.edgeResponseStatus;
 	const { decidedBy } = verdict;
-	// Only an outcome that stopped the request is a verdict (see isBlocking).
 	const outcome = verdict.outcome && isBlocking(verdict.outcome.action) ? verdict.outcome : null;
-	const logged = verdict.hits.filter((h) => !h.terminating).length;
 	const outsideDecider = !decidedBy && outcome ? verdict.outside.find((h) => h.source === outcome.source) : undefined;
-	let headline: string;
-	let tone: string;
-	if (decidedBy) {
-		headline = `${titleCase(decidedBy.hit.action)} by "${decidedBy.item.row.name}"`;
-		tone = "border-red-500/40 bg-red-500/5";
-	} else if (outcome) {
-		headline = `${titleCase(outcome.action)} by ${sourceLabel(outcome.source)}${outsideDecider ? ` — "${outsideDecider.description || outsideDecider.ruleId}"` : ""}`;
-		tone = "border-red-500/40 bg-red-500/5";
-	} else {
-		headline = logged ? `Not blocked or challenged — ${logged} ${logged === 1 ? "rule" : "rules"} only logged or skipped it` : "No rule blocked or challenged this request";
-		tone = "border-emerald-500/40 bg-emerald-500/5";
-	}
+	const { headline, blocked } = verdictHeadline(verdict);
+	const tone = blocked ? "border-red-500/40 bg-red-500/5" : "border-emerald-500/40 bg-emerald-500/5";
 	return (
 		<section className={`rounded-xl border p-4 ${tone}`} aria-live="polite">
 			<div className={`text-xs ${MUTED}`}>
@@ -82,7 +92,11 @@ export function Verdict({ verdict, trace }: { verdict: RayVerdict; trace: Reques
 					{decidedBy.stage.phaseLabel} · {decidedBy.stage.scope}
 					{decidedBy.item.row.ruleset ? ` · ruleset "${decidedBy.item.row.ruleset}"` : ""} · rule #{decidedBy.item.position}
 					{decidedBy.item.row.expression && (
-						<code className="mt-2 block break-all rounded bg-zinc-100 px-2 py-1 text-xs dark:bg-zinc-950">{decidedBy.item.row.expression}</code>
+						<>
+							<code className="mt-2 block break-all rounded bg-zinc-100 px-2 py-1 text-xs dark:bg-zinc-950">{decidedBy.item.row.expression}</code>
+							<h3 className="mt-3 mb-1 text-xs font-semibold">Why it matched</h3>
+							<ExpressionExplain explanation={explainExpression(decidedBy.item.row.expression, req, trace.foundIn)} />
+						</>
 					)}
 				</div>
 			)}
@@ -98,7 +112,17 @@ export function Verdict({ verdict, trace }: { verdict: RayVerdict; trace: Reques
 
 const str = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 
-export function RulesTopDown({ verdict }: { verdict: RayVerdict }) {
+const STOPS = new Set(["block", "challenge", "managed_challenge", "js_challenge"]);
+
+export function RulesTopDown({
+	verdict,
+	request = {},
+	zone,
+}: {
+	verdict: RayVerdict;
+	request?: Record<string, unknown>;
+	zone?: { name?: string; plan?: string };
+}) {
 	const phases: [string, RayVerdict["stages"]][] = [];
 	for (const s of verdict.stages) {
 		const last = phases[phases.length - 1];
@@ -110,8 +134,9 @@ export function RulesTopDown({ verdict }: { verdict: RayVerdict }) {
 			<h2 className={`mb-1 ${SECTION_TITLE}`}>Rules, in the order Cloudflare evaluated them</h2>
 			<p className={`mb-3 text-xs ${MUTED}`}>
 				Top to bottom: custom rules, rate limiting, managed rules; account before zone. Highlighted rules matched this request;
-				red is where evaluation stopped. Rules with no highlight recorded no match. Rulesets that run hundreds of managed rules
-				show only the ones that matched.
+				red is where evaluation stopped. For a rule with no event, its expression is checked against the request: open the line to
+				see each condition. "Can't tell" means a condition needs a field the request record does not carry. Rulesets that run
+				hundreds of managed rules show only the ones that matched.
 			</p>
 			<div className="space-y-4">
 				{phases.map(([label, stages], i) => (
@@ -135,6 +160,14 @@ export function RulesTopDown({ verdict }: { verdict: RayVerdict }) {
 												{!item.row.enabled && <span className={BADGE_NEUTRAL}>Disabled</span>}
 												{item.target ? (state === "not-reached" ? <StateBadge state={state} /> : null) : <StateBadge state={state} hit={hit} />}
 											</div>
+											{(state === "no-match" || state === "not-reached") && item.row.expression && (
+												<RuleExplainChip
+													explanation={explainExpression(item.row.expression, request, zone)}
+													reached={state === "no-match"}
+													terminating={!item.target && STOPS.has(item.effective.action.toLowerCase())}
+													deployment={Boolean(item.target)}
+												/>
+											)}
 											{innerHits.length > 0 && (
 												<ul className="mt-1 ml-9 space-y-1 border-l-2 border-zinc-200 pl-2 dark:border-zinc-800">
 													{innerHits.map((h) => (
@@ -198,10 +231,20 @@ export function ReviewPanel({ review }: { review: RayReview }) {
 								<dd>{s.where}</dd>
 								<dt className={MUTED}>Action</dt>
 								<dd>{s.action}</dd>
-								<dt className={MUTED}>Expression</dt>
-								<dd>
-									<code className="block select-all break-all rounded bg-zinc-100 px-2 py-1 dark:bg-zinc-950">{s.expression}</code>
-								</dd>
+								{s.expression && (
+									<>
+										<dt className={MUTED}>Expression</dt>
+										<dd>
+											<code className="block select-all break-all rounded bg-zinc-100 px-2 py-1 dark:bg-zinc-950">{s.expression}</code>
+										</dd>
+									</>
+								)}
+								{s.caution && (
+									<>
+										<dt className={MUTED}>Reach</dt>
+										<dd className="text-amber-700 dark:text-amber-400">{s.caution}</dd>
+									</>
+								)}
 							</dl>
 						</div>
 					))}

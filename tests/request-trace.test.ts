@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
-import { normaliseRayId } from "../src/lib/request-trace";
+import { MAX_SLICE_MINUTES, normaliseRayId, windowSlices } from "../src/lib/request-trace";
 import { ctx } from "./helpers/execution-context";
 
 /** Cover for Ray ID forensics: input handling, the cross-zone search, and honest absence. */
@@ -242,5 +242,50 @@ describe("POST /api/request/trace", () => {
 			ctx(),
 		);
 		expect(res.status).toBe(401);
+	});
+});
+
+describe("searching a wide window a week at a time", () => {
+	it("cuts the window into slices of at most 7 days, newest first, covering it exactly", () => {
+		const until = new Date("2026-10-27T00:00:00Z");
+		const since = new Date(until.getTime() - 30 * 86_400_000);
+		const slices = windowSlices(since, until);
+		expect(slices).toHaveLength(5);
+		expect(slices[0].until).toBe(until.toISOString());
+		expect(slices[slices.length - 1].since).toBe(since.toISOString());
+		for (let i = 0; i < slices.length; i++) {
+			const width = Date.parse(slices[i].until) - Date.parse(slices[i].since);
+			expect(width).toBeLessThanOrEqual(MAX_SLICE_MINUTES * 60_000);
+			if (i > 0) expect(slices[i].until).toBe(slices[i - 1].since);
+		}
+		expect(windowSlices(new Date(until.getTime() - 3_600_000), until)).toHaveLength(1);
+	});
+
+	it("finds a request in an older slice, and stops there", async () => {
+		// A request 10 days old: absent from the newest slice, present in the one before it.
+		const tenDaysAgo = Date.now() - 10 * 86_400_000;
+		const windows: { since: string; until: string }[] = [];
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input instanceof Request ? input.url : input);
+			const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+			if (url.includes("/graphql")) {
+				const parsed = JSON.parse(String(init?.body ?? "{}"));
+				if (String(parsed.query).includes("__type")) return json({ data: probeResponse(String(parsed.query), parsed.variables ?? {}) });
+				const { since, until } = parsed.variables;
+				windows.push({ since, until });
+				const inside = Date.parse(since) <= tenDaysAgo && tenDaysAgo <= Date.parse(until);
+				return json({ data: { viewer: { zones: [inside ? { request: [{ rayName: RAY }] } : {}] } } });
+			}
+			if (url.includes("/zones")) {
+				return json({ success: true, result: [{ id: ZONE_A, name: "example.com", plan: { legacy_id: "enterprise" } }], result_info: { total_pages: 1 } });
+			}
+			return json({ success: true, result: [], result_info: { total_pages: 1 } });
+		}) as typeof fetch;
+		const { result } = (await (await trace({ accountId: ACCOUNT, rayId: RAY, minutes: 43_200 })).json()) as {
+			result: { foundIn?: { name: string; plan?: string }; slicesSearched: number };
+		};
+		expect(result.foundIn).toEqual({ id: ZONE_A, name: "example.com", plan: "ENT" });
+		expect(result.slicesSearched).toBe(2);
+		expect(windows).toHaveLength(2);
 	});
 });

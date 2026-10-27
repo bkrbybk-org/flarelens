@@ -35,6 +35,8 @@ export interface AiSecEnv {
 export interface Zone {
 	id: string;
 	name: string;
+	/** The plan as the Rules language names it (`cf.zone.plan`): ENT, BIZ, PRO or FREE. */
+	plan?: string;
 }
 
 export interface GraphQLError {

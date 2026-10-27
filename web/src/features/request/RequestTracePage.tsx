@@ -6,8 +6,14 @@ import type { Session } from "../../hooks/useSession";
 import type { CfZone } from "../../types";
 import { getHashParams, setHashParam } from "../../hooks/useHashParams";
 import { buildRayVerdict } from "../../lib/waf/ray-verdict";
-import { reviewRay } from "../../lib/waf/ray-review";
-import { ReviewPanel, RulesTopDown, Verdict, sourceLabel } from "./RayVerdictView";
+import { botSummary, owaspBreakdown, reviewRay } from "../../lib/waf/ray-review";
+import { explainExpression } from "../../lib/waf/explain-expr";
+import { buildRayReport, downloadMarkdown } from "../../lib/waf/ray-report";
+import { fetchRequestContext, isSessionError } from "../../api/client";
+import { BTN_SECONDARY_SM } from "../../lib/ui";
+import { ReviewPanel, RulesTopDown, Verdict, sourceLabel, verdictHeadline } from "./RayVerdictView";
+import { BotPanel, ContextPanel, OwaspPanel } from "./RayInsights";
+import type { RequestContext } from "./types";
 import { useRequestTrace } from "./useRequestTrace";
 import {
 	FIELD_GROUPS,
@@ -75,7 +81,79 @@ export function RequestTracePage({
 		() => (result?.foundIn && ruleMeta ? buildRayVerdict(result.firewallEvents, result.request, ruleMeta) : null),
 		[result, ruleMeta],
 	);
-	const review = useMemo(() => (verdict ? reviewRay(verdict, result?.request, result?.firewallEvents) : null), [verdict, result]);
+	const review = useMemo(
+		() => (verdict ? reviewRay(verdict, result?.request, result?.firewallEvents, ruleMeta ?? undefined) : null),
+		[verdict, result, ruleMeta],
+	);
+	const owasp = useMemo(() => (verdict && result ? owaspBreakdown(verdict, result.firewallEvents, ruleMeta ?? undefined) : null), [verdict, result, ruleMeta]);
+	const bot = useMemo(() => botSummary(result?.request ?? {}), [result]);
+	const windowLabel = (LOOKBACKS.find(([value]) => value === minutes)?.[1] ?? "window").toLowerCase();
+
+	// The request's surroundings, read once the verdict says which rule and which question.
+	// Keyed by the verdict it belongs to: anything else is stale, and "loading" is simply "no answer
+	// for this verdict yet" — no state to flip inside the effect.
+	const [contextState, setContextState] = useState<{ for: unknown; data: RequestContext | null; error: string | null }>({ for: null, data: null, error: null });
+	const contextCurrent = contextState.for === verdict && verdict !== null;
+	const context = {
+		data: contextCurrent ? contextState.data : null,
+		error: contextCurrent ? contextState.error : null,
+		loading: verdict !== null && !contextCurrent,
+	};
+	useEffect(() => {
+		if (!verdict || !review || !result?.foundIn) return;
+		const req = result.request ?? {};
+		const ruleId = verdict.decidedBy?.hit.ruleId ?? verdict.hits.find((h) => /^[0-9a-f]{32}$/.test(h.ruleId))?.ruleId;
+		let live = true;
+		fetchRequestContext<RequestContext>(session.token, {
+			accountId: session.accountId,
+			zoneId: result.foundIn.id,
+			minutes,
+			around: typeof req.datetime === "string" ? req.datetime : undefined,
+			ruleId: ruleId && /^[0-9a-f]{32}$/.test(ruleId) ? ruleId : undefined,
+			clientIP: typeof req.clientIP === "string" ? req.clientIP : undefined,
+			host: typeof req.clientRequestHTTPHost === "string" ? req.clientRequestHTTPHost : undefined,
+			path: typeof req.clientRequestPath === "string" ? req.clientRequestPath : undefined,
+			impactIncludesIp: review.question === "false-negative",
+		})
+			.then((data) => {
+				if (live) setContextState({ for: verdict, data, error: null });
+			})
+			.catch((err) => {
+				if (!live) return;
+				if (isSessionError(err)) {
+					onAuthError();
+					return;
+				}
+				setContextState({ for: verdict, data: null, error: err instanceof Error ? err.message : "Could not read the surrounding traffic" });
+			});
+		return () => {
+			live = false;
+		};
+		// The window and session are read as of this verdict; a new search makes a new verdict.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [verdict]);
+
+	const contextRuleName = verdict?.decidedBy?.item.row.name ?? verdict?.hits.find((h) => h.ruleId === context.data?.rule?.ruleId)?.description;
+
+	function report(): string | null {
+		if (!verdict || !review || !result) return null;
+		return buildRayReport({
+			rayId: result.rayId,
+			zone: result.foundIn?.name,
+			request: result.request ?? {},
+			headline: verdictHeadline(verdict).headline,
+			verdict,
+			review,
+			decidedExplanation: verdict.decidedBy?.item.row.expression
+				? explainExpression(verdict.decidedBy.item.row.expression, result.request ?? {}, result.foundIn)
+				: undefined,
+			owasp,
+			bot,
+			context: context.data ? { impact: context.data.impact, rule: context.data.rule, timelineRows: context.data.timeline?.rows.length } : null,
+			windowLabel,
+		});
+	}
+	const [copied, setCopied] = useState(false);
 	const shown = new Set<string>();
 
 	return (
@@ -133,7 +211,7 @@ export function RequestTracePage({
 					For a false positive (a user blocked who shouldn't be) or a false negative (a request that got through and
 					shouldn't have). The Ray ID is on Cloudflare's block page, in the <code className="font-mono">cf-ray</code>{" "}
 					response header, or in the browser's network tab; a colo suffix such as
-					<code className="mx-1 font-mono">-BKK</code> is ignored.
+					<code className="mx-1 font-mono">-BKK</code> is ignored. Searched a week at a time, newest first.
 				</p>
 			</form>
 
@@ -173,7 +251,45 @@ export function RequestTracePage({
 						<div className="mb-4 space-y-4">
 							<Verdict verdict={verdict} trace={result} />
 							<ReviewPanel review={review} />
-							<RulesTopDown verdict={verdict} />
+							<ContextPanel
+								context={context.data}
+								loading={context.loading}
+								error={context.error}
+								question={review.question}
+								ruleName={contextRuleName}
+								rayId={result.rayId}
+								windowLabel={windowLabel}
+							/>
+							{owasp && <OwaspPanel breakdown={owasp} />}
+							{bot.length > 0 && <BotPanel lines={bot} />}
+							<RulesTopDown verdict={verdict} request={result.request} zone={result.foundIn} />
+							<div className="flex flex-wrap items-center gap-2">
+								<button
+									type="button"
+									className={BTN_SECONDARY_SM}
+									onClick={() => {
+										const md = report();
+										if (md) downloadMarkdown(`ray-${result.rayId}.md`, md);
+									}}
+								>
+									Download case report (.md)
+								</button>
+								<button
+									type="button"
+									className={BTN_SECONDARY_SM}
+									onClick={() => {
+										const md = report();
+										if (!md) return;
+										void navigator.clipboard?.writeText(md).then(() => {
+											setCopied(true);
+											setTimeout(() => setCopied(false), 2000);
+										});
+									}}
+								>
+									{copied ? "Copied" : "Copy as Markdown"}
+								</button>
+								<span className={`text-xs ${MUTED}`}>Includes the client's IP and the request path — share it where those belong.</span>
+							</div>
 						</div>
 					) : (
 						<div className={`${CARD} mb-4`}>

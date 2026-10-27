@@ -80,9 +80,12 @@ export async function graphqlSafe<T>(
 	}
 }
 
+/** Zone plan ids, as `cf.zone.plan` spells them. */
+const RULES_PLAN: Record<string, string> = { enterprise: "ENT", business: "BIZ", pro: "PRO", free: "FREE" };
+
 interface ZoneListResponse {
 	success: boolean;
-	result: { id: string; name: string }[];
+	result: { id: string; name: string; plan?: { legacy_id?: string } }[];
 	result_info?: { page: number; total_pages: number };
 	errors?: { message: string }[];
 }
@@ -107,7 +110,7 @@ export async function listZones(env: AiSecEnv): Promise<Zone[]> {
 		if (!body.success) {
 			throw new CfApiError(`Zone list failed: ${body.errors?.map((e) => e.message).join('; ') ?? 'unknown'}`, 502, body.errors);
 		}
-		zones.push(...body.result.map((z) => ({ id: z.id, name: z.name })));
+		zones.push(...body.result.map((z) => ({ id: z.id, name: z.name, plan: RULES_PLAN[z.plan?.legacy_id ?? ""] })));
 		totalPages = body.result_info?.total_pages ?? 1;
 		page++;
 	} while (page <= totalPages);

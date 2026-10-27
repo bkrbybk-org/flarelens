@@ -1,6 +1,7 @@
 import type { EvalItem } from "./evaluation";
 import { titleCase } from "./format";
 import { isBlocking, type RayHit, type RayVerdict } from "./ray-verdict";
+import type { RuleMetaMap } from "./types";
 
 /**
  * The second opinion on one request: was the verdict right?
@@ -25,7 +26,10 @@ export interface ReviewSuggestion {
 	/** Where the change goes, in dashboard terms. */
 	where: string;
 	action: string;
+	/** The match expression; empty for a change that has none (a deployment override). */
 	expression: string;
+	/** What else the change reaches, when that is more than requests like this one. */
+	caution?: string;
 }
 
 export interface RayReview {
@@ -54,14 +58,88 @@ export function requestExpression(request: Record<string, unknown>): string {
 }
 
 /** matched_vars from the event a rule recorded, when payload logging captured it. */
-function matchedFields(events: Record<string, unknown>[], ruleId: string): string | null {
+const matchedFields = (events: Record<string, unknown>[], ruleId: string) => eventMetadata(events, "matched_vars", ruleId);
+
+/** One metadata value from the first event that carries it. */
+function eventMetadata(events: Record<string, unknown>[], key: string, ruleId?: string): string | null {
 	for (const event of events) {
-		if (str(event.ruleId) !== ruleId || !Array.isArray(event.metadata)) continue;
+		if (ruleId && str(event.ruleId) !== ruleId) continue;
+		if (!Array.isArray(event.metadata)) continue;
 		for (const entry of event.metadata as { key?: string; value?: unknown }[]) {
-			if (entry?.key === "matched_vars" && typeof entry.value === "string") return entry.value;
+			if (entry?.key === key && typeof entry.value === "string") return entry.value;
 		}
 	}
 	return null;
+}
+
+export interface OwaspBreakdown {
+	/** The scoring rule's event (949110 and friends). */
+	ruleId: string;
+	action: string;
+	total: number;
+	/** The deployment's threshold, when an override sets one. */
+	threshold?: number;
+	/** Rules that added to the score, named from the ruleset where it knows them. */
+	contributors: { id: string; name: string; categories: string[] }[];
+}
+
+/**
+ * The OWASP Core Ruleset blocks on a total, not on one rule: each matching rule adds to an anomaly
+ * score and a scoring rule acts once it crosses the threshold. Cloudflare records that scoring
+ * rule's event with `score_total` and `score_rules` (the contributing rule ids) in its metadata —
+ * enough to name the contributors, though not each one's share.
+ */
+export function owaspBreakdown(verdict: RayVerdict, events: Record<string, unknown>[], ruleMeta: RuleMetaMap = {}): OwaspBreakdown | null {
+	for (const event of events) {
+		const ruleId = str(event.ruleId);
+		const total = Number(eventMetadata([event], "score_total"));
+		if (!ruleId || !Number.isFinite(total) || eventMetadata([event], "score_total") === null) continue;
+		let ids: string[] = [];
+		try {
+			const parsed = JSON.parse(eventMetadata([event], "score_rules") ?? "[]");
+			if (Array.isArray(parsed)) ids = parsed.filter((id): id is string => typeof id === "string");
+		} catch {
+			// Unreadable list: the total still stands on its own.
+		}
+		let threshold: number | undefined;
+		for (const { items } of verdict.stages) {
+			for (const { item } of items) {
+				const inner = item.target?.items.find((i) => i.row.id === ruleId);
+				if (inner?.effective.scoreThreshold !== undefined) threshold = inner.effective.scoreThreshold;
+			}
+		}
+		return {
+			ruleId,
+			action: str(event.action),
+			total,
+			threshold,
+			contributors: ids.map((id) => ({ id, name: ruleMeta[id]?.name || id, categories: ruleMeta[id]?.categories ?? [] })),
+		};
+	}
+	return null;
+}
+
+/** Bot management's view of the request, in sentences. Empty when the plan has no bot data. */
+export function botSummary(request: Record<string, unknown>): string[] {
+	const out: string[] = [];
+	const score = num(request.botScore);
+	const source = str(request.botScoreSrcName);
+	if (score !== null && score > 0) {
+		const band = score === 1 ? "automated" : score < 30 ? "likely automated" : "likely human";
+		out.push(`Bot score ${score} — ${band}${source ? `, from ${source}` : ""}.`);
+	}
+	const verified = str(request.verifiedBotCategory);
+	if (verified) out.push(`A verified bot: ${verified}. Rules can let these through with cf.bot_management.verified_bot.`);
+	const decision = str(request.botManagementDecision);
+	if (decision && decision !== "other") out.push(`Bot management decision: ${decision}.`);
+	const js = str(request.jsDetectionPassed);
+	// "Unknown" is what a zone without JavaScript detections reports for every request.
+	if (js && js.toLowerCase() !== "unknown") out.push(`JavaScript detection: ${js}.`);
+	const ids = Array.isArray(request.botDetectionIds) ? request.botDetectionIds : [];
+	if (ids.length) out.push(`Detection IDs: ${ids.join(", ")} — what rules match with cf.bot_management.detection_ids.`);
+	const tags = Array.isArray(request.botDetectionTags) ? request.botDetectionTags : [];
+	if (tags.length) out.push(`Detection tags: ${tags.join(", ")}.`);
+	return out;
 }
 
 /** Every rule in the evaluation order by id, with where it sits. */
@@ -90,7 +168,7 @@ function scoreSignals(request: Record<string, unknown>) {
 	}
 	const bot = num(request.botScore);
 	if (bot !== null && bot > 0) {
-		if (bot < 30) bad.push({ text: `Bot score ${bot} — likely automated (under 30).`, field: "cf.bot_management.score", expression: "cf.bot_management.score lt 30" });
+		if (bot < 30) bad.push({ text: `Bot score ${bot} — ${bot === 1 ? "automated" : "likely automated (under 30)"}.`, field: "cf.bot_management.score", expression: "cf.bot_management.score lt 30" });
 		else if (bot >= 50) clean.push(`Bot score ${bot} — likely human.`);
 	}
 	const injection = num(request.firewallForAiInjectionScore);
@@ -108,7 +186,12 @@ function scoreSignals(request: Record<string, unknown>) {
 	return { bad, clean };
 }
 
-export function reviewRay(verdict: RayVerdict, request: Record<string, unknown> = {}, events: Record<string, unknown>[] = []): RayReview {
+export function reviewRay(
+	verdict: RayVerdict,
+	request: Record<string, unknown> = {},
+	events: Record<string, unknown>[] = [],
+	ruleMeta: RuleMetaMap = {},
+): RayReview {
 	const { bad, clean } = scoreSignals(request);
 	const like = requestExpression(request);
 	const outcome = verdict.outcome && isBlocking(verdict.outcome.action) ? verdict.outcome : null;
@@ -124,12 +207,54 @@ export function reviewRay(verdict: RayVerdict, request: Record<string, unknown> 
 			const fields = matchedFields(events, hit.ruleId);
 			if (fields) points.push({ kind: "cause", text: `It matched on: ${fields}.` });
 			if (stage.phase === "http_request_firewall_managed") {
-				suggestions.push({
-					title: "Exempt requests like this one from this managed rule",
-					where: `${stage.scope} managed rules — an exception placed above the deployment that runs "${item.row.ruleset}"`,
-					action: `Skip → specific rules: ${item.row.name} (${item.row.id})`,
-					expression: like,
-				});
+				const where = `${stage.scope} managed rules — an exception placed above the deployment that runs "${item.row.ruleset}"`;
+				const owasp = owaspBreakdown(verdict, events, ruleMeta);
+				if (owasp && owasp.ruleId === hit.ruleId) {
+					points.push({
+						kind: "cause",
+						text: `OWASP anomaly score ${owasp.total}${owasp.threshold !== undefined ? ` against the deployment's threshold of ${owasp.threshold}` : " — over the deployment's threshold (not overridden, so the ruleset default applies)"}, from ${owasp.contributors.length} contributing ${owasp.contributors.length === 1 ? "rule" : "rules"}. No single rule blocked it.`,
+					});
+					if (owasp.contributors.length) {
+						suggestions.push({
+							title: "Exempt requests like this one from the rules that scored it",
+							where,
+							action: `Skip → specific rules: ${owasp.contributors.slice(0, 10).map((c) => c.id).join(", ")}${owasp.contributors.length > 10 ? "…" : ""}`,
+							expression: like,
+						});
+					}
+					suggestions.push({
+						title: "Raise the anomaly score threshold",
+						where: `${stage.scope} managed rules — configure the OWASP deployment`,
+						action: `Score threshold above ${owasp.total} (for example a lower sensitivity level)`,
+						expression: "",
+						caution: "Applies to all traffic the deployment covers, not just requests like this one.",
+					});
+				} else {
+					suggestions.push({ title: "Exempt requests like this one from this managed rule", where, action: `Skip → specific rules: ${item.row.name} (${item.row.id})`, expression: like });
+					suggestions.push({
+						title: `Exempt requests like this one from the whole "${item.row.ruleset}" ruleset`,
+						where,
+						action: `Skip → specific managed rulesets: ${item.row.ruleset}`,
+						expression: like,
+						caution: "Broader: no rule of this ruleset runs on these requests.",
+					});
+					suggestions.push({
+						title: "Set this rule to Log in the deployment",
+						where: `${stage.scope} managed rules — configure the deployment that runs "${item.row.ruleset}", rule override`,
+						action: `${item.row.name} → Log`,
+						expression: "",
+						caution: "Applies to all traffic: the rule stops blocking anything, anywhere this deployment runs.",
+					});
+					for (const category of (item.row.categories ?? []).slice(0, 3)) {
+						suggestions.push({
+							title: `Turn off the "${category}" category`,
+							where: `${stage.scope} managed rules — configure the deployment that runs "${item.row.ruleset}", category override`,
+							action: `Category ${category} → disabled`,
+							expression: "",
+							caution: "Only where the application does not use what the category protects (a WordPress rule on a site with no WordPress, say). Applies to all traffic.",
+						});
+					}
+				}
 			} else if (item.row.expression) {
 				suggestions.push({
 					title: "Narrow the rule so requests like this one no longer match",
@@ -148,6 +273,11 @@ export function reviewRay(verdict: RayVerdict, request: Record<string, unknown> 
 				text: `Decided outside the WAF rules, by ${outcome.source}${outside ? ` (${describeHit(outside)})` : ""}. Tune that feature — security level, IP access rules, Bot Fight Mode — rather than a WAF rule.`,
 			});
 		}
+		const verifiedBot = str(request.verifiedBotCategory);
+		if (verifiedBot) {
+			points.push({ kind: "signal", text: `A verified bot (${verifiedBot}). If it should be allowed, exempt verified bots rather than this one client.` });
+			suggestions.push({ title: "Let verified bots through", where: "Zone custom rules — a skip rule above the one that blocked", action: "Skip", expression: "cf.bot_management.verified_bot" });
+		}
 		for (const c of clean) points.push({ kind: "signal", text: `${c} Supports a false positive.` });
 		for (const b of bad) points.push({ kind: "signal", text: `${b.text} The block may well be right.` });
 		const title = clean.length && !bad.length ? "Blocked, though Cloudflare's scores call it legitimate — likely a false positive" : "Blocked — is this a false positive?";
@@ -158,7 +288,10 @@ export function reviewRay(verdict: RayVerdict, request: Record<string, unknown> 
 	for (const hit of verdict.hits) {
 		const at = placed.get(hit.ruleId);
 		const where = at ? ` (${at.where})` : "";
-		if (hit.action.toLowerCase() === "skip") {
+		if (!at && hit.action.toLowerCase() !== "skip") {
+			// AI Labyrinth, security level, IP access rules: not a WAF rule whose action can be changed.
+			points.push({ kind: "note", text: `${describeHit(hit)} acted outside the WAF rules with "${hit.action}" (${hit.source}).` });
+		} else if (hit.action.toLowerCase() === "skip") {
 			const expr = at?.item.row.expression;
 			points.push({ kind: "cause", text: `${describeHit(hit)}${where} skipped later rules for this request — the first place to look if it should have been stopped.${expr ? ` Its expression: ${expr}` : ""}` });
 		} else if (!hit.terminating) {

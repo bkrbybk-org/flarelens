@@ -54,6 +54,11 @@ const WANTED_FIELDS = [
 	"securityRuleDescription",
 	"botScore",
 	"botScoreSrcName",
+	"botManagementDecision",
+	"verifiedBotCategory",
+	"botDetectionIds",
+	"botDetectionTags",
+	"jsDetectionPassed",
 	"wafAttackScore",
 	"wafSqliAttackScore",
 	"wafXssAttackScore",
@@ -101,6 +106,26 @@ const FIREWALL_FIELDS = [
 	"metadata",
 ] as const;
 
+/**
+ * The widest single window a search asks for. Measured 2026-10-27 on a live zone: a Ray ID found
+ * with a 26-day window came back empty — no error — with 28 or 30 days, because Cloudflare answers
+ * a wide range from more heavily sampled data. Seven-day slices, newest first, keep every query
+ * in the range that finds it.
+ */
+export const MAX_SLICE_MINUTES = 7 * 24 * 60;
+
+/** [since, until] pairs covering the window, newest first, none wider than MAX_SLICE_MINUTES. */
+export function windowSlices(since: Date, until: Date): { since: string; until: string }[] {
+	const slices: { since: string; until: string }[] = [];
+	let end = until.getTime();
+	while (end > since.getTime()) {
+		const start = Math.max(since.getTime(), end - MAX_SLICE_MINUTES * 60_000);
+		slices.push({ since: new Date(start).toISOString(), until: new Date(end).toISOString() });
+		end = start;
+	}
+	return slices;
+}
+
 export class RequestTraceError extends Error {
 	constructor(message: string, readonly status: number) {
 		super(message);
@@ -138,7 +163,7 @@ export interface RequestTraceResult {
 	rayId: string;
 	window: { since: string; until: string };
 	zonesSearched: { id: string; name: string }[];
-	foundIn?: { id: string; name: string };
+	foundIn?: { id: string; name: string; plan?: string };
 	/** The request row, restricted to fields this schema exposes. */
 	request?: Record<string, unknown>;
 	firewallEvents: Record<string, unknown>[];
@@ -154,6 +179,8 @@ export interface RequestTraceResult {
 	droppedFields: string[];
 	/** Per-zone failures; a zone that errors does not fail the search. */
 	errors: { zone: string; message: string }[];
+	/** How many slices of the window were searched before the request turned up (or all of them). */
+	slicesSearched: number;
 }
 
 /**
@@ -230,7 +257,9 @@ export async function traceRequest(
 
 	const errors: { zone: string; message: string }[] = [];
 	const droppedFields: string[] = [];
-	let found: { zone: { id: string; name: string }; request?: Record<string, unknown>; firewallEvents: Record<string, unknown>[] } | null = null;
+	type Found = { zone: { id: string; name: string; plan?: string }; request?: Record<string, unknown>; firewallEvents: Record<string, unknown>[] };
+	// Assigned inside searchZone, which control-flow narrowing cannot see — hence the widening cast.
+	let found = null as Found | null;
 
 	/**
 	 * A field can exist in the schema and still be refused for a zone that is not entitled to it
@@ -243,12 +272,30 @@ export async function traceRequest(
 		return match ? match[1].toLowerCase() : null;
 	}
 
-	// Zones are searched in order and the search stops at the first hit: a Ray ID belongs to one
-	// request, so a second match would mean the id was reused, not that there is more to show.
-	for (const zone of zones) {
+	// Newest slice first, every zone within it, stopping at the first hit: a Ray ID belongs to one
+	// request, so a second match would mean the id was reused, not that there is more to show. A
+	// zone that fails is reported once and not asked again; a field it refused stays dropped.
+	const slices = windowSlices(since, until);
+	const selections = new Map(zones.map((z) => [z.id, [...requestSelection]]));
+	const failed = new Set<string>();
+	let slicesSearched = 0;
+	for (const slice of slices) {
 		if (found) break;
+		slicesSearched++;
+		for (const zone of zones) {
+			if (found) break;
+			if (failed.has(zone.id)) continue;
+			await searchZone(zone, slice, selections, failed);
+		}
+	}
 
-		let selection = [...requestSelection];
+	async function searchZone(
+		zone: { id: string; name: string; plan?: string },
+		slice: { since: string; until: string },
+		selections: Map<string, string[]>,
+		failed: Set<string>,
+	): Promise<void> {
+		let selection = selections.get(zone.id) ?? [...requestSelection];
 		let lastError = "";
 
 		// Bounded: each attempt removes exactly one refused field, and a zone that keeps
@@ -286,13 +333,13 @@ query RequestTrace($zoneTag: string!, $ray: string!, $since: Time!, $until: Time
 			try {
 				const data = await graphql<{
 					viewer?: { zones?: { request?: Record<string, unknown>[]; firewall?: Record<string, unknown>[] }[] };
-				}>(env, query, { zoneTag: zone.id, ray: options.rayId, since: window.since, until: window.until });
+				}>(env, query, { zoneTag: zone.id, ray: options.rayId, since: slice.since, until: slice.until });
 
 				const result = data.viewer?.zones?.[0];
 				const request = result?.request?.[0];
 				const firewallEvents = result?.firewall ?? [];
 				if (request || firewallEvents.length) {
-					found = { zone: { id: zone.id, name: zone.name }, request, firewallEvents };
+					found = { zone: { id: zone.id, name: zone.name, plan: zone.plan }, request, firewallEvents };
 				}
 				lastError = "";
 				break;
@@ -317,7 +364,11 @@ query RequestTrace($zoneTag: string!, $ray: string!, $since: Time!, $until: Time
 			}
 		}
 
-		if (lastError) errors.push({ zone: zone.name, message: lastError });
+		selections.set(zone.id, selection);
+		if (lastError) {
+			failed.add(zone.id);
+			errors.push({ zone: zone.name, message: lastError });
+		}
 	}
 
 	return {
@@ -331,5 +382,6 @@ query RequestTrace($zoneTag: string!, $ray: string!, $since: Time!, $until: Time
 		extraFields,
 		droppedFields,
 		errors,
+		slicesSearched,
 	};
 }

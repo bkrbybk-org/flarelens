@@ -7,6 +7,11 @@ import { CF_API_BASE, upstreamFetch } from "./cf-rest";
 
 const MANAGED_RULESET_KIND = "managed";
 const CUSTOM_FIREWALL_PHASE = "http_request_firewall_custom";
+/**
+ * Cloudflare caps a rule expression at 4,096 characters, so whole expressions are kept: Request
+ * Trace evaluates them condition by condition, and a cut-off one cannot be parsed.
+ */
+const MAX_EXPRESSION = 4096;
 
 export interface RuleMetaEntry {
 	name: string;
@@ -213,7 +218,7 @@ function addRuleEntry(meta: RuleMetaMap, rule: CfRule, context: RulesetContext, 
 		kind: context.kind,
 		action: rule.action || "",
 		enabled: rule.enabled !== false,
-		expression: typeof rule.expression === "string" ? rule.expression.slice(0, 500) : "",
+		expression: typeof rule.expression === "string" ? rule.expression.slice(0, MAX_EXPRESSION) : "",
 		position,
 		executes: rule.action === "execute" ? rule.action_parameters?.id : undefined,
 		overrides: rule.action === "execute" ? toOverrides(rule.action_parameters?.overrides) : undefined,
@@ -230,7 +235,7 @@ function addExecuteTargetEntry(meta: RuleMetaMap, rule: CfRule, context: Ruleset
 		entrypointId: context.rulesetId,
 		position,
 		enabled: rule.enabled !== false,
-		expression: typeof rule.expression === "string" ? rule.expression.slice(0, 500) : "",
+		expression: typeof rule.expression === "string" ? rule.expression.slice(0, MAX_EXPRESSION) : "",
 	};
 	const existing = meta[targetId];
 	// The ruleset's own entry, once read, is the authority on its name and kind — an execute

@@ -503,7 +503,8 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 				post: {
 					tags: ["Request Trace"],
 					summary: "Per-request forensics by Ray ID",
-					description: "Looks a single request up by its 16-hex-character Ray ID within a lookback window (`minutes`, clamped to 30–43200; default 1440 = 24h).",
+					description:
+						"Looks a single request up by its 16-hex-character Ray ID within a lookback window (`minutes`, clamped to 30–43200; default 1440 = 24h). The window is searched in 7-day slices, newest first: a single wide query can miss a request a narrower one finds.",
 					requestBody: jsonBody({
 						type: "object",
 						required: ["accountId", "rayId"],
@@ -520,6 +521,35 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 						401: response401,
 						403: response403,
 						502: response502,
+					},
+				},
+			},
+			"/api/request/context": {
+				post: {
+					tags: ["Request Trace"],
+					summary: "A traced request's surroundings",
+					description:
+						"For one zone over a lookback window (`minutes`, clamped to 60–43200; default 10080 = 7 days): how many requests match `host` + `path` (plus `clientIP` when `impactIncludesIp`), their outcomes and distinct clients, and how many of `ruleId`'s events they cover; where `ruleId` fired (totals, this client, this path, top hosts/paths/countries/networks); and `clientIP`'s sampled requests an hour either side of `around`. Each part fails on its own and is named in `errors`.",
+					requestBody: jsonBody({
+						type: "object",
+						required: ["accountId", "zoneId"],
+						properties: {
+							accountId: HEX_ID_SCHEMA,
+							zoneId: HEX_ID_SCHEMA,
+							minutes: { type: "number", minimum: 60, maximum: 43200, default: 10080 },
+							around: { type: "string", format: "date-time" },
+							ruleId: HEX_ID_SCHEMA,
+							clientIP: { type: "string", maxLength: 45 },
+							host: { type: "string", maxLength: 255 },
+							path: { type: "string", maxLength: 2048 },
+							impactIncludesIp: { type: "boolean", default: false },
+						},
+					}),
+					responses: {
+						200: okJson(successEnvelope(genericObject)),
+						400: response400,
+						401: response401,
+						403: response403,
 					},
 				},
 			},

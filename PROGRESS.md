@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-27** against a full read of the tree, t
 live probe of every route on the deployed Worker. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-two sections, 27 API routes (25 under `/api/*`, plus `/health` and `/docs`), 1,213 tests green across 88 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,234 tests green across 91 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `fc809574`, deployed 2026-10-27 (Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
+Running version `62f72dcb`, deployed 2026-10-27 (Request Trace: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -97,7 +97,8 @@ of the calling token — see the P2 entry below.
 | `GET /api/config` | — | SPA bootstrap: credential mode, allowlisted accounts, running version. Answers `byot` rather than 401 when the Access gate does not pass, so an unauthenticated caller learns nothing about the deployment |
 | `POST /api/ai-security/analyze` | account or zone | AI Security (one fan-out builds every panel) |
 | `POST /api/access/usage` | account | Access Usage. Upstream caps this dataset at 1 week |
-| `POST /api/request/trace` | account or zone | Request Trace — Ray ID lookup across zones, schema-driven field selection |
+| `POST /api/request/trace` | account or zone | Request Trace — Ray ID lookup across zones in 7-day slices, schema-driven field selection |
+| `POST /api/request/context` | zone | Request Trace — a draft's reach, the deciding rule across the zone, the client's ±1 h timeline |
 | `GET /api/pqc/report` | account (optional zone) | PQC Readiness — zones, their TLS settings, and every A/AAAA/CNAME record classified per TLS leg. Underscore-prefixed validation records are excluded and counted. Edge-cached |
 | `GET /api/dns/records` | account (optional zone) | DNS Records — every record across the account's zones, with `origin-exposed` (public IP, DNS-only, proxiable) and `internal-address` (private IP, DNS-only) flags; a zone whose read fails is listed with its reason. Edge-cached |
 | `GET /api/bots/report` | account (optional zone) | Rate Limits & Bots — `http_ratelimit` entrypoint rules (account + zones; 404 is a real zero, 403 is unknown) and per-zone `bot_management` settings with inferred plan tier and findings. Edge-cached |
@@ -393,6 +394,30 @@ files behind.
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **Request Trace, past "which rule" (2026-10-27, `62f72dcb`).**
+  - *7-day slices.* A 30-day search now runs newest-first in week-long slices and stops at the
+    hit. Live: the Ray ID a single 30-day query missed is found in the first slice.
+  - *Why it matched, why not.* `explain-expr.ts` evaluates each rule's expression against the
+    request record. Live, the blocked request's geo rule is proven by `ip.src.continent = "EU"
+    (from country NL)`; account deployments read "did not run: http.host …" or "ran this ruleset —
+    none of its rules recorded a match". Two things this needed: rule expressions were cut to 500
+    characters by `waf-meta.ts` (now 4,096, Cloudflare's cap — the longest live one is 567), and
+    `cf.zone.plan` — which Cloudflare adds to every account-level deployment — needed the zone's
+    plan, now carried in the trace result.
+  - *Surroundings* (`POST /api/request/context`). Live, blocked request: the drafted exception
+    covers 152 requests from 66 clients, 109 of them stopped by the geo rule; that rule fired
+    22,212 times in 7 days, 289 from this client; the client's hour either side is 52 sampled
+    rows of WordPress probing. Request values travel as GraphQL variables, never in query text.
+  - *OWASP.* The scoring rule's event carries `score_total` and `score_rules`; live: 131 against
+    the deployment's threshold of 60, with the contributing rules named.
+  - *Bot detection.* Detection IDs and tags, verified-bot category, decision and JS detection are
+    now always selected; live: score 1, tags `chrome_imitator, header_format, scraper`.
+  - *Managed-rule options.* A rule skip, a ruleset skip, a Log override and category overrides,
+    each with what else it reaches. *Case report:* Markdown download or copy.
+  - Fixed while verifying: AI Labyrinth was told to "Block or Managed Challenge" like a rule; a
+    deployment with no event read as "matched but no event". Not verified in a browser — the pane's
+    Access session had lapsed — so the page was rendered in jsdom against the live responses.
 
 - **One page for a Ray ID: false positives and false negatives (2026-10-27, `fc809574`).** Why
   Was This Blocked? merged into Request Trace (`#/request`); `#/why` links redirect with their

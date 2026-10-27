@@ -2,13 +2,41 @@ export interface RequestTraceResult {
 	rayId: string;
 	window: { since: string; until: string };
 	zonesSearched: { id: string; name: string }[];
-	foundIn?: { id: string; name: string };
+	foundIn?: { id: string; name: string; plan?: string };
 	request?: Record<string, unknown>;
 	firewallEvents: Record<string, unknown>[];
 	unavailableFields: string[];
 	extraFields: string[];
 	droppedFields: string[];
 	errors: { zone: string; message: string }[];
+	/** Seven-day slices searched, newest first, before the request turned up. */
+	slicesSearched?: number;
+}
+
+/** Mirrors src/lib/request-context.ts. */
+export interface RequestContext {
+	window: { since: string; until: string };
+	impact?: {
+		filter: { host?: string; path?: string; clientIP?: string };
+		requests: number;
+		byAction: Record<string, number>;
+		distinctClients: number;
+		distinctCapped: boolean;
+		ruleEvents?: number;
+	};
+	rule?: {
+		ruleId: string;
+		total: number;
+		byAction: Record<string, number>;
+		sameClient: number;
+		samePath: number;
+		topHosts: { value: string; count: number }[];
+		topPaths: { value: string; count: number }[];
+		topCountries: { value: string; count: number }[];
+		topNetworks: { value: string; count: number }[];
+	};
+	timeline?: { since: string; until: string; rows: Record<string, unknown>[] };
+	errors: { part: string; message: string }[];
 }
 
 /** Metadata is a key/value list; these two carry the matched fields and the encrypted body. */
@@ -70,10 +98,6 @@ export const FIELD_GROUPS: { title: string; fields: [string, string][] }[] = [
 			["securitySource", "Source"],
 			["securityRuleId", "Rule id"],
 			["securityRuleDescription", "Rule"],
-			["botScore", "Bot score"],
-			["botScoreSrcName", "Bot score source"],
-			["botManagementDecision", "Bot decision"],
-			["botTags", "Bot tags"],
 			["wafAttackScore", "WAF attack score"],
 			["wafSqliAttackScore", "WAF SQLi score"],
 			["wafXssAttackScore", "WAF XSS score"],
@@ -85,6 +109,19 @@ export const FIELD_GROUPS: { title: string; fields: [string, string][] }[] = [
 			["contentScanNumMaliciousObj", "Malicious objects"],
 			["contentScanHasFailed", "Content scan failed"],
 			["apiGatewayMatchedEndpoint", "API Shield endpoint"],
+		],
+	},
+	{
+		title: "Bot detection",
+		fields: [
+			["botScore", "Bot score"],
+			["botScoreSrcName", "Bot score source"],
+			["botManagementDecision", "Bot decision"],
+			["verifiedBotCategory", "Verified bot"],
+			["botDetectionIds", "Detection IDs"],
+			["botDetectionTags", "Detection tags"],
+			["botTags", "Bot tags"],
+			["jsDetectionPassed", "JS detection"],
 		],
 	},
 	{

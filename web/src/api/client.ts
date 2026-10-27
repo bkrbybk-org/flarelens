@@ -285,6 +285,23 @@ export function fetchBotsReport<T>(
 	return apiFetchCached<T>(`/api/bots/report?${params.toString()}`, token, opts?.fresh);
 }
 
+export function fetchRequestContext<T>(
+	token: string,
+	body: {
+		accountId: string;
+		zoneId: string;
+		minutes: number;
+		around?: string;
+		ruleId?: string;
+		clientIP?: string;
+		host?: string;
+		path?: string;
+		impactIncludesIp?: boolean;
+	},
+): Promise<T> {
+	return postJson<T>("/api/request/context", token, body);
+}
+
 export function traceRequest<T>(
 	token: string,
 	body: { accountId: string; rayId: string; zoneId?: string; minutes: number },

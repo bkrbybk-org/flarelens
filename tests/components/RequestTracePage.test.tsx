@@ -7,9 +7,9 @@ import type * as ApiClientModule from "../../web/src/api/client";
 
 vi.mock("../../web/src/api/client", async (importOriginal) => {
 	const actual = await importOriginal<typeof ApiClientModule>();
-	return { ...actual, traceRequest: vi.fn(), fetchWafRulesets: vi.fn() };
+	return { ...actual, traceRequest: vi.fn(), fetchWafRulesets: vi.fn(), fetchRequestContext: vi.fn() };
 });
-import { fetchWafRulesets, traceRequest } from "../../web/src/api/client";
+import { fetchRequestContext, fetchWafRulesets, traceRequest } from "../../web/src/api/client";
 
 const session: Session = { token: "", accountId: "acc1", accountName: "Acme", mode: "server" };
 const meta = {
@@ -28,12 +28,19 @@ beforeEach(() => {
 		extraFields: [],
 		droppedFields: [],
 		foundIn: { id: "z1", name: "example.com" },
-		request: { botScore: 92, securityAction: "block", securitySource: "firewallCustom", edgeResponseStatus: 403, clientRequestHTTPMethodName: "GET", clientRequestHTTPHost: "example.com", clientRequestPath: "/" },
+		request: { botScore: 92, clientIP: "203.0.113.5", clientCountryName: "CN", datetime: "2026-10-26T10:00:00Z", securityAction: "block", securitySource: "firewallCustom", edgeResponseStatus: 403, clientRequestHTTPMethodName: "GET", clientRequestHTTPHost: "example.com", clientRequestPath: "/" },
 		firewallEvents: [{ ruleId: "geo", rulesetId: "root", action: "block", source: "firewallCustom", description: "Geography-based rule", matchIndex: 0 }],
 		zonesSearched: [{ id: "z1", name: "example.com" }],
 		errors: [],
 	});
 	vi.mocked(fetchWafRulesets).mockResolvedValue({ result: meta, cachedAt: null } as never);
+	vi.mocked(fetchRequestContext).mockResolvedValue({
+		window: { since: "", until: "" },
+		impact: { filter: { host: "example.com", path: "/" }, requests: 147, byAction: { block: 115, unknown: 22 }, distinctClients: 66, distinctCapped: false, ruleEvents: 108 },
+		rule: { ruleId: "geo", total: 500, byAction: { block: 500 }, sameClient: 7, samePath: 40, topHosts: [], topPaths: [], topCountries: [{ value: "NL", count: 300 }], topNetworks: [] },
+		timeline: { since: "", until: "", rows: [{ datetime: "2026-10-26T10:00:00Z", rayName: "a511938d1a0dd949", securityAction: "block" }] },
+		errors: [],
+	});
 });
 
 describe("RequestTracePage", () => {
@@ -50,6 +57,15 @@ describe("RequestTracePage", () => {
 		// The false-positive review: the scores say human, and the draft narrows the deciding rule.
 		expect(screen.getByText(/likely a false positive/)).toBeInTheDocument();
 		expect(screen.getByText('(ip.src.country in {"CN"}) and not (http.host eq "example.com" and http.request.uri.path eq "/")')).toBeInTheDocument();
+		// Why it matched, condition by condition; why the rule above it did not.
+		expect(screen.getByText("Why it matched")).toBeInTheDocument();
+		expect(screen.getByText('no match: ip.src in {192.0.2.0/24} (ip.src = "203.0.113.5")')).toBeInTheDocument();
+		// The surroundings: what the exception would release, and the rule elsewhere.
+		expect(await screen.findByText("What the exception would let through")).toBeInTheDocument();
+		expect(screen.getByText("108")).toBeInTheDocument();
+		expect(vi.mocked(fetchRequestContext).mock.calls[0][1]).toMatchObject({ zoneId: "z1", ruleId: undefined, clientIP: "203.0.113.5", impactIncludesIp: false });
+		expect(screen.getByText("this request")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Download case report (.md)" })).toBeInTheDocument();
 		// The request record is on the same page.
 		expect(screen.getByRole("heading", { name: "Firewall events (1)" })).toBeInTheDocument();
 	});
