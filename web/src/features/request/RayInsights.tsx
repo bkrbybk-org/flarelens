@@ -81,42 +81,79 @@ export function explainSummary(explanation: Explanation): string {
  * flagged, since a field the record lacks must have differed (or an earlier skip applied).
  */
 export function RuleExplainChip({
+	expression,
 	explanation,
-	reached,
+	state,
 	terminating,
 	deployment = false,
+	ranRules = false,
+	enabled = true,
 }: {
+	/** The rule's condition as written. */
+	expression: string;
 	explanation: Explanation;
-	reached: boolean;
+	state: "decided" | "matched" | "no-match" | "not-reached";
 	terminating: boolean;
 	/** An execute rule: its expression decides whether the ruleset runs, and it records no event itself. */
 	deployment?: boolean;
+	/** For a deployment: whether any rule inside it recorded a match. */
+	ranRules?: boolean;
+	enabled?: boolean;
 }) {
 	const summary = explainSummary(explanation);
-	const label = deployment
-		? explanation.result === true
-			? reached
-				? "ran this ruleset — none of its rules recorded a match"
-				: "would run this ruleset"
-			: explanation.result === false
-				? `did not run: ${summary.replace(/^no match: /, "")}`
-				: summary
-		: explanation.result === true
-			? reached
-				? "expression matches, but no event was recorded"
-				: terminating
-					? "would also match — a fix above it would hand the request to this rule"
-					: "would also match"
-			: summary;
-	const tone =
-		!deployment && explanation.result === true ? (reached ? "text-amber-700 dark:text-amber-400" : terminating ? "text-red-600 dark:text-red-400" : MUTED) : MUTED;
+	const reached = state !== "not-reached";
+	const recorded = state === "decided" || state === "matched";
+	let label: string;
+	let tone = MUTED;
+	if (!enabled && !recorded) {
+		label = "disabled — never runs";
+	} else if (deployment) {
+		if (ranRules) label = "ran this ruleset — matches shown below";
+		else if (explanation.result === true) label = reached ? "ran this ruleset — none of its rules recorded a match" : "would run this ruleset";
+		else if (explanation.result === false) label = `did not run: ${summary.replace(/^no match: /, "")}`;
+		else label = summary;
+	} else if (recorded) {
+		// Cloudflare saw it match; the record can only fail to show why, never contradict it.
+		label = explanation.result === true ? summary : "matched — on a field the request record does not show";
+	} else if (explanation.result === true) {
+		label = reached ? "expression matches, but no event was recorded" : terminating ? "would also match — a fix above it would hand the request to this rule" : "would also match";
+		tone = reached ? "text-amber-700 dark:text-amber-400" : terminating ? "text-red-600 dark:text-red-400" : MUTED;
+	} else label = summary;
 	return (
 		<details className="mt-0.5 ml-9 text-xs">
-			<summary className={`cursor-pointer ${tone}`}>{label}</summary>
-			<div className="mt-1">
+			<summary className={`cursor-pointer ${tone}`}>
+				<span className="font-medium">Condition</span> · {label}
+			</summary>
+			<div className="mt-1 space-y-2">
+				<code className="block break-all rounded bg-zinc-100 px-2 py-1 dark:bg-zinc-950">{expression}</code>
 				<ExpressionExplain explanation={explanation} />
 			</div>
 		</details>
+	);
+}
+
+const ACTION_TONE: Record<string, string> = {
+	block: "bg-red-500/15 text-red-600 dark:text-red-400",
+	challenge: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+	managed_challenge: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+	js_challenge: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+	log: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+	execute: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+};
+
+/**
+ * What the rule does when it matches, as it actually runs: a deployment's override (rule,
+ * category or ruleset-wide) wins over the rule's own action, and the tooltip says which.
+ */
+export function ActionBadge({ action, overriddenBy, defaultAction }: { action: string; overriddenBy?: string | null; defaultAction?: string }) {
+	const key = action.toLowerCase();
+	const label = key === "execute" ? "Execute" : titleCase(action || "—");
+	const title = overriddenBy && defaultAction ? `Set by the deployment's ${overriddenBy} override; the rule's own action is ${titleCase(defaultAction)}` : undefined;
+	return (
+		<span className={`${BADGE} shrink-0 ${ACTION_TONE[key] ?? BADGE_NEUTRAL}`} title={title}>
+			{label}
+			{overriddenBy ? " *" : ""}
+		</span>
 	);
 }
 

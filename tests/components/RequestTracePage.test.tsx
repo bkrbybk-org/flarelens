@@ -59,7 +59,13 @@ describe("RequestTracePage", () => {
 		expect(screen.getByText('(ip.src.country in {"CN"}) and not (http.host eq "example.com" and http.request.uri.path eq "/")')).toBeInTheDocument();
 		// Why it matched, condition by condition; why the rule above it did not.
 		expect(screen.getByText("Why it matched")).toBeInTheDocument();
-		expect(screen.getByText('no match: ip.src in {192.0.2.0/24} (ip.src = "203.0.113.5")')).toBeInTheDocument();
+		const summaries = [...document.querySelectorAll("summary")].map((s) => s.textContent);
+		expect(summaries).toContain('Condition · no match: ip.src in {192.0.2.0/24} (ip.src = "203.0.113.5")');
+		// The deciding rule shows its condition too, and why it matched.
+		expect(summaries).toContain('Condition · matches: ip.src.country in {"CN"} (ip.src.country = "CN")');
+		// Every rule carries its action: the skip, the deciding block, the block after it.
+		expect(screen.getByText("Allow office").closest("li")).toHaveTextContent("Skip");
+		expect(screen.getByText("Block bad paths").closest("li")).toHaveTextContent("Block");
 		// The surroundings: what the exception would release, and the rule elsewhere.
 		expect(await screen.findByText("What the exception would let through")).toBeInTheDocument();
 		expect(screen.getByText("108")).toBeInTheDocument();

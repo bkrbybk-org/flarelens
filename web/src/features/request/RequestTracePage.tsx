@@ -78,7 +78,7 @@ export function RequestTracePage({
 
 	const request = result?.request;
 	const verdict = useMemo(
-		() => (result?.foundIn && ruleMeta ? buildRayVerdict(result.firewallEvents, result.request, ruleMeta) : null),
+		() => (result?.foundIn && ruleMeta ? buildRayVerdict(result.firewallEvents, result.request, ruleMeta, result.foundIn) : null),
 		[result, ruleMeta],
 	);
 	const review = useMemo(

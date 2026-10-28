@@ -67,4 +67,24 @@ describe("buildRayVerdict", () => {
 		expect(v.stages[2].items[0].innerHits.map((h) => h.state)).toEqual(["matched"]);
 		expect(v.outside).toEqual([]);
 	});
+
+	it("credits a match to the one deployment that ran it, when a ruleset is deployed several times", () => {
+		// The same managed ruleset three times: one for another host, one blocking, one log-only.
+		const many: RuleMetaMap = {
+			"z-man": rs("z-man", "zone", "zone", MANAGED, "zone"),
+			"d-other": rule("d-other", "z-man", 0, "execute", { executes: "cf-ai", phase: MANAGED, expression: 'http.host eq "other.example"' }),
+			"d-block": rule("d-block", "z-man", 1, "execute", { executes: "cf-ai", phase: MANAGED, expression: "true", overrides: { action: "block" } }),
+			"d-log": rule("d-log", "z-man", 2, "execute", { executes: "cf-ai", phase: MANAGED, expression: "true", overrides: { action: "log" } }),
+			"cf-ai": rs("cf-ai", "Firewall for AI", "managed", MANAGED, "zone"),
+			"ai-1": rule("ai-1", "cf-ai", 0, "block", { type: "managed", phase: MANAGED }),
+		};
+		const v = buildRayVerdict([ev("ai-1", "cf-ai", "log", "firewallManaged")], { clientRequestHTTPHost: "app.example" }, many);
+		const owners = v.stages[0].items.map((i) => [i.item.row.id, i.innerHits.length]);
+		// Not the one for another host, not the blocking one: the log-only deployment, matching the recorded action.
+		expect(owners).toEqual([
+			["d-other", 0],
+			["d-block", 0],
+			["d-log", 1],
+		]);
+	});
 });

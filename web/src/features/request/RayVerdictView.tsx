@@ -3,7 +3,7 @@ import { titleCase } from "../../lib/waf/format";
 import { isBlocking, type ItemState, type RayHit, type RayVerdict } from "../../lib/waf/ray-verdict";
 import type { RayReview } from "../../lib/waf/ray-review";
 import { explainExpression } from "../../lib/waf/explain-expr";
-import { ExpressionExplain, RuleExplainChip } from "./RayInsights";
+import { ActionBadge, ExpressionExplain, RuleExplainChip } from "./RayInsights";
 import type { RequestTraceResult } from "./types";
 
 /**
@@ -134,9 +134,11 @@ export function RulesTopDown({
 			<h2 className={`mb-1 ${SECTION_TITLE}`}>Rules, in the order Cloudflare evaluated them</h2>
 			<p className={`mb-3 text-xs ${MUTED}`}>
 				Top to bottom: custom rules, rate limiting, managed rules; account before zone. Highlighted rules matched this request;
-				red is where evaluation stopped. For a rule with no event, its expression is checked against the request: open the line to
-				see each condition. "Can't tell" means a condition needs a field the request record does not carry. Rulesets that run
-				hundreds of managed rules show only the ones that matched.
+				red is where evaluation stopped — only a block or challenge stops it; log and skip let evaluation go on. Each rule shows
+				its action (* where a deployment override sets it) and its condition: open it to see the expression checked against the
+				request, condition by condition. "Can't tell" means a condition needs a field the request record does not carry.
+				Managed rules' conditions are not published by Cloudflare. Rulesets that run hundreds of managed rules show only the
+				ones that matched.
 			</p>
 			<div className="space-y-4">
 				{phases.map(([label, stages], i) => (
@@ -159,14 +161,24 @@ export function RulesTopDown({
 												</span>
 												{!item.row.enabled && <span className={BADGE_NEUTRAL}>Disabled</span>}
 												{item.target ? (state === "not-reached" ? <StateBadge state={state} /> : null) : <StateBadge state={state} hit={hit} />}
+												<ActionBadge
+													action={item.target ? "execute" : item.effective.action}
+													overriddenBy={item.target ? null : item.effective.overriddenBy}
+													defaultAction={item.effective.defaults?.action}
+												/>
 											</div>
-											{(state === "no-match" || state === "not-reached") && item.row.expression && (
+											{item.row.expression ? (
 												<RuleExplainChip
+													expression={item.row.expression}
 													explanation={explainExpression(item.row.expression, request, zone)}
-													reached={state === "no-match"}
+													state={state}
 													terminating={!item.target && STOPS.has(item.effective.action.toLowerCase())}
 													deployment={Boolean(item.target)}
+													ranRules={innerHits.length > 0}
+													enabled={item.row.enabled}
 												/>
+											) : (
+												<div className={`mt-0.5 ml-9 text-xs ${MUTED}`}>Condition · {item.row.known ? "none — runs on every request" : "not available"}</div>
 											)}
 											{innerHits.length > 0 && (
 												<ul className="mt-1 ml-9 space-y-1 border-l-2 border-zinc-200 pl-2 dark:border-zinc-800">
@@ -176,7 +188,19 @@ export function RulesTopDown({
 																<span className={`font-mono text-xs ${MUTED}`}>#{h.item.position}</span>
 																<span className="min-w-0 flex-1">{h.item.row.name}</span>
 																<StateBadge state={h.state} hit={h.hit} />
+																<ActionBadge action={h.item.effective.action} overriddenBy={h.item.effective.overriddenBy} defaultAction={h.item.effective.defaults?.action} />
 															</div>
+															{h.item.row.expression ? (
+																<RuleExplainChip
+																	expression={h.item.row.expression}
+																	explanation={explainExpression(h.item.row.expression, request, zone)}
+																	state={h.state}
+																	terminating={STOPS.has(h.item.effective.action.toLowerCase())}
+																	enabled={h.item.effective.enabled}
+																/>
+															) : (
+																<div className={`mt-0.5 text-xs ${MUTED}`}>Condition · managed rule — Cloudflare does not publish it</div>
+															)}
 														</li>
 													))}
 												</ul>

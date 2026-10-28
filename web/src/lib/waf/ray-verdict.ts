@@ -1,5 +1,6 @@
 import { aggregateRules } from "./aggregate";
 import { buildEvaluationOrder, type EvalItem, type EvalStage } from "./evaluation";
+import { explainExpression } from "./explain-expr";
 import type { RuleMetaMap } from "./types";
 
 /**
@@ -13,8 +14,12 @@ import type { RuleMetaMap } from "./types";
  * What the data does and does not say. A firewall event exists for every rule that matched and
  * acted (including log and skip). A rule with no event either did not match or was never reached;
  * the page calls that "no match recorded", and calls everything after the deciding rule "not
- * reached" — evaluation stops at a terminating action. Which of several deployments of one managed
- * ruleset ran depends on their expressions; the first one in order is credited.
+ * reached" — evaluation stops at a terminating action.
+ *
+ * One managed ruleset is often deployed several times (per host, per plan, a log-only copy), and the
+ * event names the rule, not the deployment. The match is credited to one deployment: those whose
+ * condition the request provably fails, or that are disabled, are ruled out; among the rest, the
+ * one whose action for that rule equals the recorded action; failing that, the first in order.
  */
 
 const TERMINATING = new Set(["block", "challenge", "managed_challenge", "js_challenge", "jschallenge", "managedchallenge"]);
@@ -77,10 +82,34 @@ export function toHits(events: Record<string, unknown>[]): RayHit[] {
 	});
 }
 
-export function buildRayVerdict(events: Record<string, unknown>[], request: Record<string, unknown> | undefined, ruleMeta: RuleMetaMap): RayVerdict {
+export function buildRayVerdict(
+	events: Record<string, unknown>[],
+	request: Record<string, unknown> | undefined,
+	ruleMeta: RuleMetaMap,
+	zone?: { name?: string; plan?: string },
+): RayVerdict {
 	const hits = toHits(events);
 	const hitByRule = new Map(hits.filter((h) => h.ruleId).map((h) => [h.ruleId, h]));
 	const order = buildEvaluationOrder(ruleMeta, aggregateRules([], ruleMeta));
+
+	// Which deployment each hit belongs to, when its ruleset is deployed more than once.
+	const creditedTo = new Map<string, EvalItem>();
+	for (const hit of hitByRule.values()) {
+		const candidates: { deployment: EvalItem; inner: EvalItem }[] = [];
+		for (const stage of order.stages) {
+			for (const deployment of stage.items) {
+				const inner = deployment.target?.items.find((i) => i.row.id === hit.ruleId);
+				if (inner) candidates.push({ deployment, inner });
+			}
+		}
+		if (candidates.length < 2) continue;
+		const viable = candidates.filter(
+			({ deployment }) => deployment.row.enabled && explainExpression(deployment.row.expression, request ?? {}, zone).result !== false,
+		);
+		const pool = viable.length ? viable : candidates;
+		const pick = pool.find(({ inner }) => inner.effective.action.toLowerCase() === hit.action.toLowerCase()) ?? pool[0];
+		creditedTo.set(hit.ruleId, pick.deployment);
+	}
 
 	const placed = new Set<string>();
 	let decidedBy: RayVerdict["decidedBy"] = null;
@@ -101,6 +130,8 @@ export function buildRayVerdict(events: Record<string, unknown>[], request: Reco
 				for (const inner of item.target.items) {
 					const hit = hitByRule.get(inner.row.id);
 					if (!hit) continue;
+					const owner = creditedTo.get(hit.ruleId);
+					if (owner && owner !== item) continue;
 					const state = stateFor(hit);
 					innerHits.push({ item: inner, state, hit });
 					if (state === "decided" || state === "matched") placed.add(hit.ruleId);

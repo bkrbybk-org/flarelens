@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-27** against a full read of the tree, t
 live probe of every route on the deployed Worker. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,234 tests green across 91 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,235 tests green across 91 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `62f72dcb`, deployed 2026-10-27 (Request Trace: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
+Running version `1ba2856c`, deployed 2026-10-28 (Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -394,6 +394,14 @@ files behind.
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **Request Trace: each rule's action and condition (2026-10-28, `1ba2856c`).** Every rule shows its
+  effective action and a collapsible condition, including the rule that matched. Found on the live
+  render: a ruleset deployed three times (OWASP: one deployment per host, a blocking one, a log-only
+  one) had its match shown under all three, including the one whose host condition the request
+  fails. Now credited to one deployment — ruled out if its condition is provably false or it is
+  disabled, then the one whose action equals the recorded action (live: the log-only copy). Disabled
+  rules and deployments no longer read as "no match" or "ran this ruleset".
 
 - **Request Trace, past "which rule" (2026-10-27, `62f72dcb`).**
   - *7-day slices.* A 30-day search now runs newest-first in week-long slices and stops at the
