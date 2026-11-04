@@ -16,6 +16,7 @@ import { buildInsights } from "./insights";
 import {
 	EMPTY_TOTALS,
 	FILTER_ORDER,
+	UNDRILLABLE,
 	GRANULARITY_LABEL,
 	SESSION_FLAG_LABEL,
 	activeDays,
@@ -60,7 +61,7 @@ const CHART_TYPES: { id: ChartType; label: string }[] = [
 	{ id: "line", label: "Line" },
 	{ id: "area", label: "Area" },
 ];
-type DonutDimension = "gateway" | "model" | "provider" | "client" | "source" | "tag";
+type DonutDimension = "gateway" | "model" | "provider" | "client" | "user" | "source" | "tag";
 const SELECT_SM = `rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`;
 
 type Metric = StackMetric;
@@ -70,6 +71,7 @@ const SPLIT_LABEL: Record<Split, string> = {
 	model: "Model",
 	provider: "Provider",
 	client: "Client",
+	user: "User",
 	tag: "Tag",
 	source: "Workers AI vs third-party",
 };
@@ -127,9 +129,17 @@ function UnavailableNote({ status, label }: { status: DatasetStatus; label: stri
 	);
 }
 
-type Dimension = "gateway" | "provider" | "model";
+type Dimension = "gateway" | "provider" | "model" | "user";
 type BreakdownTab = Dimension | "client" | "tag" | "status";
-const TAB_LABEL: Record<BreakdownTab, string> = { gateway: "Gateways", provider: "Providers", model: "Models", client: "Clients", tag: "Tags", status: "Status codes" };
+const TAB_LABEL: Record<BreakdownTab, string> = {
+	gateway: "Gateways",
+	provider: "Providers",
+	model: "Models",
+	user: "Users",
+	client: "Clients",
+	tag: "Tags",
+	status: "Status codes",
+};
 
 function BreakdownTable({
 	rows,
@@ -168,7 +178,7 @@ function BreakdownTable({
 					{rows.map((row) => (
 						<tr key={row.key} className="border-t border-zinc-100 dark:border-zinc-800/60">
 							<td className="max-w-[18rem] py-2 pr-2">
-								{onDrill ? (
+								{onDrill && !UNDRILLABLE.has(row.key) ? (
 									<button
 										type="button"
 										onClick={() => onDrill(row.key)}
@@ -293,6 +303,16 @@ function RecentRequests({ rows, onDrill }: { rows: AiGatewayRequestRow[]; onDril
 														{row.provider ? providerName(row.provider) : "—"}
 													</button>
 												</dd>
+												<dt className={MUTED}>User</dt>
+												<dd className="break-all">
+													{row.user ? (
+														<button type="button" className={`text-cf hover:underline ${FOCUS_RING}`} onClick={() => onDrill("user", row.user)}>
+															{row.user}
+														</button>
+													) : (
+														"not tagged"
+													)}
+												</dd>
 												<dt className={MUTED}>Client</dt>
 												<dd className="break-all">{row.userAgent || "—"}</dd>
 												<dt className={MUTED}>Cache</dt>
@@ -368,7 +388,8 @@ function TagBreakdown({ tags, total, tag, onTag }: { tags: AiGatewayTags | null;
 			</p>
 		);
 	}
-	const blocked = tags.keys.filter((k) => k.sensitive);
+	const blocked = tags.keys.filter((k) => k.sensitive && k.key !== "user");
+	const hasUserKey = tags.keys.some((k) => k.key === "user");
 	return (
 		<div className="pt-3">
 			<label className="mb-3 flex flex-wrap items-center gap-2 text-sm">
@@ -377,7 +398,7 @@ function TagBreakdown({ tags, total, tag, onTag }: { tags: AiGatewayTags | null;
 					<option value="">Choose a tag key…</option>
 					{tags.keys.map((k) => (
 						<option key={k.key} value={k.key} disabled={k.sensitive}>
-							{k.key} ({compact(k.requests)} requests){k.sensitive ? " — identifies people, not shown" : ""}
+							{k.key} ({compact(k.requests)} requests){k.key === "user" ? " — see the Users tab" : k.sensitive ? " — identifies people, not shown" : ""}
 						</option>
 					))}
 				</select>
@@ -387,10 +408,11 @@ function TagBreakdown({ tags, total, tag, onTag }: { tags: AiGatewayTags | null;
 			) : (
 				<p className={`py-4 text-sm ${MUTED}`}>Pick a key — a cost center, team or feature — to see requests and spend for each of its values, and what is not tagged.</p>
 			)}
+			{hasUserKey && <p className={`mt-2 text-xs ${MUTED}`}>The user key has its own breakdown, in the Users tab.</p>}
 			{blocked.length > 0 && (
 				<p className={`mt-2 text-xs ${MUTED}`}>
 					{blocked.map((k) => k.key).join(", ")} {blocked.length === 1 ? "names" : "name"} people or single items, so {blocked.length === 1 ? "it is" : "they are"} not broken
-					down — a per-user view is a separate decision. Email addresses under any other key show as their domain.
+					down. Email addresses under any key other than user show as their domain.
 				</p>
 			)}
 		</div>
@@ -463,7 +485,7 @@ export function AiGatewayPage({
 		for (const key of FILTER_ORDER) setHashParam(key, next[key] ?? null);
 	};
 	const drill = (key: Dimension, value: string) => {
-		if (!value || value === "(unknown)") return;
+		if (!value || UNDRILLABLE.has(value)) return;
 		applyFilter({ ...filter, [key]: value });
 		setTab(null);
 		// Splitting by the dimension just pinned would leave a single bar.
@@ -487,7 +509,9 @@ export function AiGatewayPage({
 						? by?.provider
 						: split === "client"
 							? by?.client
-							: split === "tag"
+							: split === "user"
+								? by?.user
+								: split === "tag"
 								? result?.tags?.series
 								: [];
 		return buildStacks(result?.series ?? [], points ?? [], split, metric, windowBuckets(from, to, shownGranularity));
@@ -515,6 +539,7 @@ export function AiGatewayPage({
 		{ id: "model", label: "Model" },
 		{ id: "provider", label: "Provider" },
 		{ id: "client", label: "Client" },
+		...(result?.byUser ? [{ id: "user" as const, label: "User" }] : []),
 		{ id: "source", label: "Workers AI vs third-party" },
 		...(tag && result?.tags?.selected === tag ? [{ id: "tag" as const, label: `Tag: ${tag}` }] : []),
 	];
@@ -528,7 +553,9 @@ export function AiGatewayPage({
 						? result?.byProvider
 						: dimension === "client"
 							? result?.byClient
-							: result?.tags?.rows;
+							: dimension === "user"
+								? result?.byUser
+								: result?.tags?.rows;
 		const slices = (rows ?? []).map((row) => ({ key: dimension === "source" ? sourceOf(row.key) : row.key, value: measureOf(row) }));
 		if (dimension !== "source") return slices;
 		const folded = new Map<string, number>();
@@ -545,12 +572,19 @@ export function AiGatewayPage({
 	const prompt = totals.promptCache;
 
 	// Tabs for the dimensions not already pinned by the filter — a drilled-in dimension has one row.
-	const tabs: BreakdownTab[] = [...(["gateway", "provider", "model"] as Dimension[]).filter((d) => !filter[d]), "client", "tag", "status"];
+	const tabs: BreakdownTab[] = [
+		...(["gateway", "provider", "model"] as Dimension[]).filter((d) => !filter[d]),
+		...(result?.byUser && !filter.user ? (["user"] as const) : []),
+		"client",
+		"tag",
+		"status",
+	];
 	const activeTab: BreakdownTab = tab && tabs.includes(tab) ? tab : tabs[0];
 	const rowsFor: Record<Exclude<BreakdownTab, "status" | "tag">, BreakdownRow[]> = {
 		gateway: result?.byGateway ?? [],
 		provider: result?.byProvider ?? [],
 		model: result?.byModel ?? [],
+		user: result?.byUser ?? [],
 		client: result?.byClient ?? [],
 	};
 	const prevLabel = result?.previousWindow
@@ -788,7 +822,14 @@ export function AiGatewayPage({
 						<span className={MUTED}>Group by</span>
 						<select value={split} onChange={(e) => setSplit(e.target.value as Split)} className={SELECT_SM}>
 							{(Object.keys(SPLIT_LABEL) as Split[])
-								.filter((k) => !(k === "gateway" && filter.gateway) && !(k === "model" && filter.model) && !(k === "provider" && filter.provider) && !(k === "tag" && !tag))
+								.filter(
+									(k) =>
+										!(k === "gateway" && filter.gateway) &&
+										!(k === "model" && filter.model) &&
+										!(k === "provider" && filter.provider) &&
+										!(k === "user" && (filter.user || !result?.byUser)) &&
+										!(k === "tag" && !tag),
+								)
 								.map((k) => (
 									<option key={k} value={k}>
 										{k === "none" ? "None" : k === "tag" ? `Tag: ${tag}` : SPLIT_LABEL[k]}
@@ -848,7 +889,7 @@ export function AiGatewayPage({
 					mode={chartMode}
 					label={split === "provider" ? providerName : undefined}
 					onPick={
-						split === "gateway" ? (key) => drill("gateway", key) : split === "model" ? (key) => drill("model", key) : split === "provider" ? (key) => drill("provider", key) : undefined
+						split === "gateway" || split === "model" || split === "provider" || split === "user" ? (key) => drill(split, key) : undefined
 					}
 					spendLine={spendLine}
 					budget={budgetLevel}
@@ -874,7 +915,7 @@ export function AiGatewayPage({
 						slices={slicesFor(dimension)}
 						format={metricSpec.format}
 						label={dimension === "provider" ? providerName : undefined}
-						onPick={dimension === "gateway" || dimension === "model" || dimension === "provider" ? (key) => drill(dimension, key) : undefined}
+						onPick={dimension === "gateway" || dimension === "model" || dimension === "provider" || dimension === "user" ? (key) => drill(dimension, key) : undefined}
 					/>
 				))}
 			</div>
@@ -882,8 +923,9 @@ export function AiGatewayPage({
 			<section className={CARD}>
 				<h2 className={`mb-1 ${SECTION_TITLE}`}>Breakdown</h2>
 				<p className={`mb-2 text-xs ${MUTED}`}>
-					Click a name to drill into it; every number on the page then covers only that slice. Clients are named from the user
-					agent, with versions folded together.
+					Click a name to drill into it; every number on the page then covers only that slice. Users are the values of the
+					<code>user</code> key applications send in the <code>cf-aig-metadata</code> header, shown as sent. Clients are named
+					from the user agent, with versions folded together.
 				</p>
 				<Tabs tabs={tabs.map((id) => ({ id, label: TAB_LABEL[id] }))} active={activeTab} onChange={setTab} label="Breakdown by" idPrefix="aig" />
 				<TabPanel id={activeTab} idPrefix="aig">
@@ -897,6 +939,7 @@ export function AiGatewayPage({
 							total={totals.requests}
 							dimension={activeTab}
 							onDrill={activeTab === "client" ? undefined : (value) => drill(activeTab, value)}
+							heading={activeTab === "user" ? "User" : undefined}
 							label={activeTab === "provider" ? providerName : undefined}
 						/>
 					)}

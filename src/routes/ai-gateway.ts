@@ -39,10 +39,11 @@ export function registerAiGatewayRoutes(app: App): void {
 		// The slice to drill into: exact names from the page's own breakdowns, sent upstream as
 		// GraphQL variables. Anything that is not a short string is refused, not ignored.
 		const filter: AiGatewayFilter = {};
-		for (const key of ["gateway", "provider", "model"] as const) {
+		for (const key of ["gateway", "provider", "model", "user"] as const) {
 			const value = body.filter?.[key];
 			if (value === undefined || value === null || value === "") continue;
-			if (typeof value !== "string" || value.length > 256) {
+			// A user is a `user` tag value — an email address, at most 320 characters — with no control characters.
+			if (typeof value !== "string" || value.length > (key === "user" ? 320 : 256) || (key === "user" && /[\u0000-\u001f\u007f]/.test(value))) {
 				return c.json({ success: false, errors: [{ message: `Invalid filter.${key}` }] }, 400);
 			}
 			filter[key] = value;

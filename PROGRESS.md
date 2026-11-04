@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-11-04** against a read of the tree, the ga
 probe of the deployed Worker (running version and response headers). See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,282 tests green across 96 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,287 tests green across 96 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `61d851f8`, deployed 2026-11-04 (AI Gateway cost view: budget, forecast, granularity, chart types, donuts; before it the same day, `72fe6709`: AI Gateway spend by tag; before it the same day, `720c787b`: AI Gateway sessions, clients, provider names, spend line, active days, session health, prompt cache; before it the same day, `a9e33353`: page rotation in presentation mode; before it the same day, `662526be`: full-screen presentation mode on every page; before it the same day, `59db4f87`: AI Gateway timeframe buttons and stacked chart by gateway, model, Workers AI vs third-party; before it the same day, `19bcacaa`: AI Gateway overview and drill-down; before it, 2026-10-28, `1ba2856c`: Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
+Running version `46b2b954`, deployed 2026-11-04 (AI Gateway cost and tokens per user; before it the same day, `61d851f8`: AI Gateway cost view: budget, forecast, granularity, chart types, donuts; before it the same day, `72fe6709`: AI Gateway spend by tag; before it the same day, `720c787b`: AI Gateway sessions, clients, provider names, spend line, active days, session health, prompt cache; before it the same day, `a9e33353`: page rotation in presentation mode; before it the same day, `662526be`: full-screen presentation mode on every page; before it the same day, `59db4f87`: AI Gateway timeframe buttons and stacked chart by gateway, model, Workers AI vs third-party; before it the same day, `19bcacaa`: AI Gateway overview and drill-down; before it, 2026-10-28, `1ba2856c`: Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -115,7 +115,7 @@ of the calling token — see the P2 entry below.
 | `POST /api/audit/logs` | account | Audit Log — Cloudflare's v2 account audit log for a window of up to 30 days, paged by cursor to 5,000 events. Actor IPs and request/response bodies are withheld. Not cached |
 | `GET /api/openapi.json` | — (auth required) | OpenAPI 3.0.3 document for every route, server URL taken from the request |
 | `GET /docs` | — (auth required) | Swagger UI, self-hosted; the one path whose CSP adds `'unsafe-inline'` to `style-src` |
-| `POST /api/ai-gateway/usage` | account | AI Gateway overview and drill-down (requests, tokens, spend, errors, cache, p50/p95, previous window, breakdowns by gateway/provider/model/client/status, sessions and session health, prompt cache, latest requests; optional `filter` and `tag` — a metadata key, refused when it names people or single items, email values reduced to their domain). Field names resolved from the live schema — see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
+| `POST /api/ai-gateway/usage` | account | AI Gateway overview and drill-down (requests, tokens, spend, errors, cache, p50/p95, previous window, breakdowns by gateway/provider/model/user/client/status, sessions and session health, prompt cache, latest requests; optional `filter` (gateway, provider, model, user) and `tag` — a metadata key, refused when it names people or single items, email values reduced to their domain). Field names resolved from the live schema — see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
 | `app.all("*")` | — | static asset fallback |
 
 All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, missing/bad token →
@@ -261,7 +261,7 @@ DOM; and a `component` project, `environment: "jsdom"` + `@testing-library/react
 rendered components — `tests/components/setup.ts` wires jest-dom matchers and RTL's auto-cleanup
 into that project only, so the node project's Workers-shaped globals stay untouched).
 
-96 test files, 1,282 tests. [README.md](README.md#tests) keeps the per-file table by layer (unit,
+96 test files, 1,287 tests. [README.md](README.md#tests) keeps the per-file table by layer (unit,
 component, integration, system, compatibility, security, regression, opt-in E2E) and is the one
 place that list is maintained — this file used to carry a second copy that had fallen a dozen
 files behind.
@@ -400,6 +400,20 @@ files behind.
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **AI Gateway: cost and tokens per user (2026-11-04, `46b2b954`).** The per-user decision, taken
+  for chargeback: users are the values of the `user` key in `cf-aig-metadata`, shown as sent — full
+  email addresses — to anyone the deployment admits. Every other person key stays refused and
+  masked. Cloudflare's own user-id field is empty on this account (`uniq users` = 0), so the tag is
+  the only source. A Users tab (with "(not tagged)"), Group by user on the chart and donuts, a
+  drill-in (`filter.user`), and the user on each recent request. There is no "value of key X"
+  filter in the schema, so one user is `AND: [{ metadataKeys_has: user }, { metadataValues_has:
+  <value> }]` — checked live to select exactly the requests grouping by the key's value does, for
+  every user. The first deploy (`e8eb7030`) put both tests at the top level and Cloudflare refused the
+  drilled query with `duplicate field`, since the per-user breakdown adds its own `metadataKeys_has`;
+  the mock cannot catch that, so a test now pins the shape. Session analysis cannot be narrowed to a
+  user and says so. Live, 29 days: 4 users carry 220 of 554 requests and $3.20 of $3.29; the rows sum
+  to the total and each drill matches its row.
 
 - **`tests/data-fanout.test.ts` no longer depends on timing (2026-11-04).** The concurrency test
   gave the tunnel-side reads a fixed 20ms to reach their gate, so a loaded machine could count
@@ -925,7 +939,7 @@ that need a change in the Cloudflare dashboard are still open above.
 | **CD** — deploy from GitHub Actions (CI already runs `check` + `lint`) | Deploys are local only | S | A way to supply account/zone/Access ids without putting them in the public repo — the reason there is no deploy job today |
 | **Cache range comparison** — current vs previous equivalent window (hit-ratio and volume delta) | Turns a point-in-time number into a trend signal | M | — |
 | **Exact per-rule WAF counts** — `firewallEventsAdaptiveGroups` by `ruleId` + `action` | Totals are now full counts but the rule tables still count sampled rows (~4× low over 24h, ~39× over 30 days), so a rule's count and the headline disagree | S–M | — |
-| **Per-user Access and Gateway breakdowns** | `userUuid`, `email`, `deviceId` are available and deliberately unqueried | S | **A privacy decision, not a technical one** — and under a shared bound token those reads are attributable to nobody |
+| **Per-user Access and Gateway breakdowns** | `userUuid`, `email`, `deviceId` are available and deliberately unqueried. (AI Gateway's per-user view, from its `user` tag, was decided separately on 2026-11-04 and does not extend to these) | S | **A privacy decision, not a technical one** — and under a shared bound token those reads are attributable to nobody |
 | **Snapshot diff / audit trail** — capture policy snapshots, diff them (and diff the newest against live) | Biggest product differentiator; answers "what changed since the last review" | L | Nothing — **designed and ready to build** |
 
 **Snapshot storage decision (2026-08-02):** client-side **IndexedDB**, not Worker KV. KV would

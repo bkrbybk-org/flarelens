@@ -53,6 +53,10 @@ const usage: AiGatewayUsageResult = {
 			{ ts: "2026-11-03", key: "openai", requests: 2, tokens: 20, cost: 0.1, errors: 0 },
 		],
 		client: [{ ts: "2026-11-03", key: "opencode", requests: 10, tokens: 110, cost: 0.5, errors: 0 }],
+		user: [
+			{ ts: "2026-11-03", key: "alice@example.com", requests: 6, tokens: 66, cost: 0.4, errors: 0 },
+			{ ts: "2026-11-03", key: "bob@example.com", requests: 1, tokens: 11, cost: 0.05, errors: 0 },
+		],
 	},
 	totals: {
 		requests: 10,
@@ -76,6 +80,7 @@ const usage: AiGatewayUsageResult = {
 	byModel: [slice("@cf/a", 10)],
 	byStatus: [{ statusCode: "200", rateLimited: false, requests: 10 }],
 	byClient: [slice("opencode", 10)],
+	byUser: [slice("alice@example.com", 6, { cost: 0.4 }), slice("bob@example.com", 1, { cost: 0.05 }), slice("(not tagged)", 3, { cost: 0.05 })],
 	tags: {
 		keys: [
 			{ key: "team", requests: 8, sensitive: false },
@@ -92,7 +97,7 @@ const usage: AiGatewayUsageResult = {
 		flags: { abnormalCost: 1, abnormalDuration: 0, lowCacheHit: 0, highFirstContext: 0, highMcpTools: null, premiumModel: 0, thinkingModel: 0 },
 	},
 	recent: [
-		{ requestId: "r1", datetime: "2026-11-03T10:05:00Z", gateway: "prod", provider: "workers-ai", model: "@cf/a", statusCode: "200", durationMs: 1200, cached: false, rateLimited: false, tokensIn: 10, tokensOut: 1, cost: 0.05, userAgent: "app/1" },
+		{ requestId: "r1", datetime: "2026-11-03T10:05:00Z", gateway: "prod", provider: "workers-ai", model: "@cf/a", statusCode: "200", durationMs: 1200, cached: false, rateLimited: false, tokensIn: 10, tokensOut: 1, cost: 0.05, userAgent: "app/1", user: "alice@example.com" },
 	],
 	previous: { requests: 5, sessions: 2, tokens: 55, cost: 0.25, errorRate: 0, cacheHitRate: 0.6, p50: 1200 },
 	previousWindow: { since: "2026-10-21T00:00:00.000Z", until: "2026-10-28T00:00:00.000Z" },
@@ -150,7 +155,7 @@ describe("AiGatewayPage", () => {
 		const breakdown = (await screen.findByRole("heading", { name: "Breakdown" })).closest("section")!;
 		await user.click(within(breakdown).getByRole("tab", { name: "Tags" }));
 		const picker = within(breakdown).getByRole("combobox", { name: "Break spend down by" });
-		expect(within(picker).getByRole("option", { name: "user (6 requests) — identifies people, not shown" })).toBeDisabled();
+		expect(within(picker).getByRole("option", { name: "user (6 requests) — see the Users tab" })).toBeDisabled();
 		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({
 			...usage,
 			tags: { ...usage.tags!, selected: "team", rows: [slice("search", 7), slice("(not tagged)", 3)], series: [{ ts: "2026-11-03", key: "search", requests: 7, tokens: 0, cost: 0.4, errors: 0 }] },
@@ -163,6 +168,40 @@ describe("AiGatewayPage", () => {
 		// And the chart can be split by the tag's values.
 		await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "tag");
 		expect(screen.getByRole("list", { name: "Legend" })).toHaveTextContent("search");
+	});
+
+	it("breaks usage down per user, groups the chart by user, and drills into one", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const breakdown = (await screen.findByRole("heading", { name: "Breakdown" })).closest("section")!;
+		await user.click(within(breakdown).getByRole("tab", { name: "Users" }));
+		expect(within(breakdown).getByRole("columnheader", { name: "User" })).toBeInTheDocument();
+		expect(within(breakdown).getByRole("button", { name: "alice@example.com" })).toBeInTheDocument();
+		// The remainder names nobody, so it is not a link.
+		expect(within(breakdown).getByText("(not tagged)")).toBeInTheDocument();
+		expect(within(breakdown).queryByRole("button", { name: "(not tagged)" })).toBeNull();
+		// Group the chart by user.
+		await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "user");
+		expect(screen.getByRole("list", { name: "Legend" })).toHaveTextContent("alice@example.com");
+		// Drill in: every figure follows, the slice is in the URL and the breadcrumb, and the Users tab goes.
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, filter: { user: "alice@example.com" }, byUser: [slice("alice@example.com", 6)] });
+		await user.click(within(breakdown).getByRole("button", { name: "alice@example.com" }));
+		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { user: "alice@example.com" } });
+		expect(location.hash).toContain("user=alice%40example.com");
+		const crumbs = screen.getByRole("navigation", { name: "AI Gateway slice" });
+		expect(within(crumbs).getByText("alice@example.com")).toBeInTheDocument();
+		expect(within(breakdown).queryByRole("tab", { name: "Users" })).toBeNull();
+		// Group by user is no longer offered for a single user.
+		expect(within(screen.getByRole("combobox", { name: "Group by" })).queryByRole("option", { name: "User" })).toBeNull();
+	});
+
+	it("shows a recent request's user, drillable", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const recent = (await screen.findByRole("heading", { name: "Recent requests" })).closest("section")!;
+		await user.click(within(recent).getByRole("button", { name: "Details" }));
+		await user.click(within(recent).getByRole("button", { name: "alice@example.com" }));
+		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { user: "alice@example.com" } });
 	});
 
 	it("works like a cost view: granularity, chart type, budget with overage, forecast, donuts", async () => {

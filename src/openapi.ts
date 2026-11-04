@@ -335,7 +335,7 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 					tags: ["AI Gateway"],
 					summary: "AI Gateway overview and drill-down",
 					description:
-						"Window of at most 30 days. Requests, tokens, spend, errors, cache and p50/p95 latency for the window and for the same-length window before it; breakdowns by gateway, provider, model and status code; and the 50 most recent requests. `filter` narrows every figure to one gateway, provider and/or model (exact names). Field names are read from the account's live GraphQL schema; a filter the schema cannot apply is a 400.",
+						"Window of at most 30 days. Requests, tokens, spend, errors, cache and p50/p95 latency for the window and for the same-length window before it; breakdowns by gateway, provider, model, client, user and status code; and the 50 most recent requests. `filter` narrows every figure to one gateway, provider, model and/or user (exact values). Users are the values of the `user` key in the `cf-aig-metadata` header, shown as sent (full email addresses). Field names are read from the account's live GraphQL schema; a filter the schema cannot apply is a 400.",
 					requestBody: jsonBody({
 						type: "object",
 						required: ["accountId", "from", "to"],
@@ -350,13 +350,14 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 									gateway: { type: "string", maxLength: 256 },
 									provider: { type: "string", maxLength: 256 },
 									model: { type: "string", maxLength: 256 },
+									user: { type: "string", maxLength: 320, description: "A value of the `user` metadata key, such as an email address." },
 								},
 							},
 							tag: {
 								type: "string",
 								pattern: "^[\\w.:-]{1,64}$",
 								description:
-									"A custom metadata key (cf-aig-metadata) to break spend down by, such as a team or cost center. Keys naming people or single items (user, email, session, …id) are refused; email-shaped values under any key are reduced to their domain.",
+									"A custom metadata key (cf-aig-metadata) to break spend down by, such as a team or cost center. Keys naming people or single items (user, email, session, …id) are refused here — the `user` key has its own per-user breakdown — email-shaped values under any key are reduced to their domain.",
 							},
 						},
 					}),

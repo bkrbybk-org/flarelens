@@ -60,12 +60,16 @@ export interface AiGatewayRequestRow {
 	tokensOut: number | null;
 	cost: number | null;
 	userAgent: string;
+	/** The `user` tag's value, or "" when the request carries none. */
+	user: string;
 }
 
 export interface AiGatewayFilter {
 	gateway?: string;
 	provider?: string;
 	model?: string;
+	/** One value of the `user` metadata tag (an email address). */
+	user?: string;
 }
 
 /** Mirrors src/lib/ai-gateway.ts's AiGatewayDatasetStatus: a degraded panel carries why. */
@@ -129,7 +133,7 @@ export interface AiGatewayUsageResult {
 	granularity: AiGatewayGranularity;
 	timeDimension: string;
 	series: AiGatewaySeriesPoint[];
-	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[]; client: AiGatewaySplitPoint[] };
+	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[]; client: AiGatewaySplitPoint[]; user: AiGatewaySplitPoint[] };
 	totals: AiGatewayTotals;
 	byGateway: AiGatewayBreakdownRow[];
 	byProvider: AiGatewayBreakdownRow[];
@@ -139,6 +143,8 @@ export interface AiGatewayUsageResult {
 	sessionHealth: AiGatewaySessionHealth;
 	/** Spend by custom metadata tag; null when the schema carries no metadata. */
 	tags: AiGatewayTags | null;
+	/** Per value of the `user` tag, shown as sent (full email addresses), plus "(not tagged)". null without metadata. */
+	byUser: AiGatewayBreakdownRow[] | null;
 	recent: AiGatewayRequestRow[];
 	previous: AiGatewayPrevious | null;
 	previousWindow: { since: string; until: string };
@@ -249,4 +255,7 @@ export function aiGatewayBucketLabel(ts: string, granularity: AiGatewayGranulari
 }
 
 /** The slice's name, outermost first: what the breadcrumb shows. */
-export const FILTER_ORDER: (keyof AiGatewayFilter)[] = ["gateway", "provider", "model"];
+export const FILTER_ORDER: (keyof AiGatewayFilter)[] = ["gateway", "provider", "model", "user"];
+
+/** Rows that stand for no single name: nothing to drill into. */
+export const UNDRILLABLE = new Set(["(unknown)", "(not tagged)", "(empty)"]);

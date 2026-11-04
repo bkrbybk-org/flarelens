@@ -268,7 +268,7 @@ describe("per-dataset degradation", () => {
 });
 
 describe("privacy posture", () => {
-	it("never asks for a per-user, per-device or per-IP dimension", async () => {
+	it("never asks for a user id, device or IP dimension — users come only from the user tag", async () => {
 		await usage({ accountId: ACCOUNT, ...win() });
 		const combined = graphqlBodies.map((b) => b.query).join("\n");
 		for (const field of ["email", "userId", "deviceId", "sourceInternalIp", "srcIpCountry", "ipAddress"]) {
@@ -368,6 +368,7 @@ describe("overview and drill-down", () => {
 			tokensOut: 2,
 			cost: 0.01,
 			userAgent: "app/1",
+			user: "",
 		});
 		// The previous window is the same length, ending where this one starts.
 		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string; variables: Record<string, string> };
@@ -483,6 +484,76 @@ describe("overview and drill-down", () => {
 		expect(query.variables.tagKey).toBe("team");
 		// Nothing in the response carries the address itself.
 		expect(JSON.stringify(result)).not.toContain("a.person");
+	});
+
+	it("breaks usage down per user from the user tag, values as sent, with the untagged remainder", async () => {
+		const ACCT = "66666666666666666666666666666666";
+		mockUpstream({
+			schema: {
+				sums: { aiGatewayRequestsAdaptiveGroupsType: ["tokensIn", "tokensOut", "cost"] },
+				dimensions: { aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "datetime", "requestId", "gateway", "metadataKey", "metadataValue", "metadataKeys", "metadataValues"] },
+			},
+			primary: {
+				series: [],
+				total: [row({}, 10, { tokensIn: 1000, tokensOut: 100, cost: 2 })],
+				byUser: [row({ metadataValue: "alice@example.com" }, 6, { tokensIn: 700, tokensOut: 60, cost: 1.5 }), row({ metadataValue: " bob@example.com " }, 1, { tokensIn: 100, tokensOut: 10, cost: 0.2 })],
+				seriesByUser: [row({ datetimeHour: "2026-09-05T10:00:00Z", metadataValue: "alice@example.com" }, 6, { cost: 1.5 })],
+				recent: [row({ requestId: "r1", datetime: "2026-09-05T10:05:00Z", gateway: "prod", metadataValue: "alice@example.com" }, 1)],
+			},
+		});
+		const res = await usage({ accountId: ACCT, ...win() });
+		expect(res.status).toBe(200);
+		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		// Full addresses, as decided for the user key — unlike any other tag.
+		expect(result.byUser!.map((r) => [r.key, r.requests, r.tokensIn, Math.round((r.cost ?? 0) * 1000) / 1000])).toEqual([
+			["alice@example.com", 6, 700, 1.5],
+			["bob@example.com", 1, 100, 0.2],
+			["(not tagged)", 3, 200, 0.3],
+		]);
+		expect(result.seriesBy.user).toEqual([{ ts: "2026-09-05T10:00:00Z", key: "alice@example.com", requests: 6, tokens: 0, cost: 1.5, errors: null }]);
+		expect(result.recent[0].user).toBe("alice@example.com");
+		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string; variables: Record<string, string> };
+		expect(query.query).toContain("metadataValue(key: $userKey)");
+		expect(query.query).toContain("metadataKeys_has: $userKey");
+		expect(query.query).not.toContain('"user"');
+		expect(query.variables.userKey).toBe("user");
+	});
+
+	it("drills into one user with the value as a variable, and says session analysis cannot follow", async () => {
+		const ACCT = "77777777777777777777777777777777";
+		mockUpstream({
+			datasets: [...DEFAULT_DATASETS],
+			schema: {
+				sums: { aiGatewayRequestsAdaptiveGroupsType: ["cost"], aiGatewaySpendSessionsAdaptiveGroupsType: ["cost"] },
+				dimensions: {
+					aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "gateway", "metadataKey", "metadataValue", "metadataKeys", "metadataValues"],
+					aiGatewaySpendSessionsAdaptiveGroupsType: ["gateway", "flagLowCacheHit"],
+				},
+			},
+			primary: { series: [], total: [row({}, 6, { cost: 1.5 })], byUser: [row({ metadataValue: "alice@example.com" }, 6, { cost: 1.5 })] },
+		});
+		const res = await usage({ accountId: ACCT, ...win(), filter: { user: 'alice@example.com" } evil' } });
+		expect(res.status).toBe(200);
+		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string; variables: Record<string, string> };
+		expect(query.query).not.toContain("evil");
+		expect(query.query).toContain("AND: [{ metadataKeys_has: $f_userKey }, { metadataValues_has: $f_user }]");
+		// The per-user breakdown adds its own key test beside it, never a second field of the same name.
+		expect(query.query).toMatch(/byUser: \w+\(filter: \{[^}]*AND: \[[^\]]*\], metadataKeys_has: \$userKey \}/);
+		expect(query.variables).toMatchObject({ f_user: 'alice@example.com" } evil', f_userKey: "user" });
+		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		expect(result.filter).toEqual({ user: 'alice@example.com" } evil' });
+		expect(result.sessionHealth).toEqual({ available: false, reason: "Session analysis cannot be narrowed to one user" });
+		// The sessions dataset was never asked: it would have answered for everyone.
+		expect(graphqlBodies.some((b) => b.query.includes("AiGatewaySessions"))).toBe(false);
+	});
+
+	it("refuses a user filter the schema cannot apply, and a malformed one", async () => {
+		const res = await usage({ accountId: RICH, ...win(), filter: { user: "alice@example.com" } });
+		expect(res.status).toBe(400);
+		expect(((await res.json()) as { errors: { message: string }[] }).errors[0].message).toContain("cannot be filtered by user");
+		expect((await usage({ accountId: RICH, ...win(), filter: { user: "a\nb@example.com" } })).status).toBe(400);
+		expect((await usage({ accountId: RICH, ...win(), filter: { user: "x".repeat(321) } })).status).toBe(400);
+		expect((await usage({ accountId: RICH, ...win(), filter: { user: 5 } })).status).toBe(400);
 	});
 
 	it("refuses a tag that identifies people, and a malformed one", async () => {
