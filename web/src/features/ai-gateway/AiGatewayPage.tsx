@@ -1,9 +1,10 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
 import { TabPanel, Tabs } from "../../components/Tabs";
-import { ALERT_ERROR, BADGE, BADGE_NEUTRAL, CARD, FOCUS_RING, MUTED, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, BADGE, BADGE_NEUTRAL, CARD, CARD_FLUSH, FOCUS_RING, MUTED, SECTION_TITLE } from "../../lib/ui";
+import { ChevronDownIcon } from "../../components/Icons";
 import { getHashParams, setHashParam } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
 import { TIME_PRESETS, type TimeRange } from "../../hooks/useTimeRange";
@@ -39,6 +40,49 @@ import {
 } from "./types";
 
 const ACCENT = "#f6821f";
+/** A model as a donut legend has room for it: "@cf/meta/llama-3.3-70b" reads as "llama-3.3-70b". The full id stays in the tooltip. */
+const shortModel = (id: string) => id.replace(/^@cf\/[^/]+\//, "");
+
+/** "At a glance" opens with this many lines; the rest are one click away. */
+const INSIGHTS_SHOWN = 3;
+
+/** One figure in the health strip: label, value, and what it is measured against. */
+function HealthItem({ label, value, hint, tone, note }: { label: string; value: string; hint: ReactNode; tone?: string; note?: ReactNode }) {
+	return (
+		<div className="min-w-0">
+			<div className={`text-xs font-medium uppercase tracking-wide ${MUTED}`}>{label}</div>
+			<div className={`text-lg font-semibold tabular-nums ${tone ?? ""}`}>{value}</div>
+			<div className={`text-xs ${MUTED}`}>{hint}</div>
+			{note}
+		</div>
+	);
+}
+
+/**
+ * A section that starts closed: the detail a demo does not open on, one click away. The heading
+ * names the section; the summary beside it says what is inside without opening it.
+ */
+function Collapsible({ id, title, summary, children }: { id: string; title: string; summary: ReactNode; children: ReactNode }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<section className={CARD_FLUSH} aria-labelledby={`${id}-title`}>
+			<div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
+				<h3 id={`${id}-title`} className={SECTION_TITLE}>
+					<button type="button" aria-expanded={open} aria-controls={`${id}-panel`} onClick={() => setOpen((v) => !v)} className={`flex items-center gap-2 ${FOCUS_RING}`}>
+						<ChevronDownIcon size={16} className={`transition-transform ${open ? "rotate-180" : "-rotate-90"}`} />
+						{title}
+					</button>
+				</h3>
+				<span className={`min-w-0 truncate text-xs ${MUTED}`}>{summary}</span>
+			</div>
+			{open && (
+				<div id={`${id}-panel`} className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+					{children}
+				</div>
+			)}
+		</section>
+	);
+}
 
 /** Granularity, as a cost view offers it: one column per group, a running total, or a bucket size. */
 type GranularityChoice = "none" | "accumulated" | AiGatewayGranularity;
@@ -458,7 +502,10 @@ export function AiGatewayPage({
 	const [tab, setTab] = useState<BreakdownTab | null>(null);
 	const [granChoice, setGranChoice] = useState<GranularityChoice | null>(null);
 	const [chartType, setChartType] = useState<ChartType>("stacked");
-	const [donuts, setDonuts] = useState<DonutDimension[]>(["gateway", "model", "provider"]);
+	// Who, what and where — a user donut falls back to gateways on an account that tags no users.
+	const [donuts, setDonuts] = useState<DonutDimension[]>(["user", "model", "provider"]);
+	const [showAllInsights, setShowAllInsights] = useState(false);
+	const [chartOptions, setChartOptions] = useState(false);
 	// A monthly budget, per account and per browser: a convenience, not shared state.
 	const budgetKey = `flarelens_aig_budget:${session.accountId}`;
 	const [budgetText, setBudgetText] = useState(() => storageGet("local", budgetKey) ?? "");
@@ -592,10 +639,66 @@ export function AiGatewayPage({
 		: "";
 	const pinned = FILTER_ORDER.filter((k) => filter[k]);
 
+	// People behind the traffic: the `user` tag's named values, without the untagged remainder.
+	const userRows = (result?.byUser ?? []).filter((r) => !UNDRILLABLE.has(r.key));
+	const taggedShare = result?.byUser && totals.requests ? userRows.reduce((n, r) => n + r.requests, 0) / totals.requests : null;
+	const budgetStatus =
+		monthlyBudget && forecast !== null
+			? {
+					over: forecast > monthlyBudget,
+					text:
+						forecast > monthlyBudget
+							? `Over budget: forecast ${formatRate(forecast / monthlyBudget)} of ${formatCost(monthlyBudget)}`
+							: `On track: forecast ${formatRate(forecast / monthlyBudget)} of ${formatCost(monthlyBudget)}`,
+				}
+			: null;
+	const shownInsights = showAllInsights ? insights : insights.slice(0, INSIGHTS_SHOWN);
+	const flaggedSessions =
+		result?.sessionHealth.available === true ? Object.values(result.sessionHealth.flags).reduce<number>((n, v) => n + (v ?? 0), 0) : null;
+	// A donut asked for users on an account that sends none shows gateways instead.
+	const donutShown = (d: DonutDimension): DonutDimension => (d === "user" && !result?.byUser ? "gateway" : d);
+	const chartTitle = `${metricSpec.label}${
+		chartMode === "none" ? " for the window" : chartMode === "accumulated" ? ", accumulated" : ` by ${shownGranularity === "daily" ? "day" : shownGranularity === "hourly" ? "hour" : "15 minutes"}`
+	}${split !== "none" ? `, split by ${split === "tag" ? `tag ${tag}` : splitPhrase(split)}` : ""}`;
+
 	return (
 		<PageShell progress={progress}>
-			<div className="flex flex-wrap items-center gap-2">
-				<div className="flex gap-1 rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-800" role="group" aria-label="Timeframe">
+			<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+				<nav aria-label="AI Gateway slice" className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+					<button
+						type="button"
+						onClick={() => applyFilter({})}
+						className={`rounded-full px-3 py-1 ${pinned.length ? "text-cf hover:underline" : "bg-zinc-200 font-medium dark:bg-zinc-800"} ${FOCUS_RING}`}
+						aria-current={pinned.length ? undefined : "page"}
+					>
+						All AI Gateway traffic
+					</button>
+					{pinned.map((key, i) => {
+						const last = i === pinned.length - 1;
+						return (
+							<Fragment key={key}>
+								<span className={MUTED}>›</span>
+								<span className={`flex items-center gap-1 rounded-full px-3 py-1 ${last ? "bg-zinc-200 font-medium dark:bg-zinc-800" : ""}`}>
+									<span className={`text-xs ${MUTED}`}>{key}</span>
+									<span className="max-w-[20rem] truncate">{filter[key]}</span>
+									<button
+										type="button"
+										aria-label={`Remove ${key} filter`}
+										className={`ml-1 rounded px-1 ${MUTED} hover:text-zinc-900 dark:hover:text-zinc-100 ${FOCUS_RING}`}
+										onClick={() => {
+											const next = { ...filter };
+											delete next[key];
+											applyFilter(next);
+										}}
+									>
+										×
+									</button>
+								</span>
+							</Fragment>
+						);
+					})}
+				</nav>
+				<div className="ml-auto flex gap-1 rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-800" role="group" aria-label="Timeframe">
 					{TIME_PRESETS.map((preset) => (
 						<button
 							key={preset.key}
@@ -604,50 +707,11 @@ export function AiGatewayPage({
 							onClick={() => timeRange.setPreset(preset.key)}
 							className={`rounded-md px-2.5 py-1 text-xs ${timeRange.preset === preset.key ? "bg-zinc-200 font-medium dark:bg-zinc-800" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"} ${FOCUS_RING}`}
 						>
-							{preset.label.replace("Last ", "")}
+							{preset.label.replace("Last ", "").replace(/^hour$/, "1 hour")}
 						</button>
 					))}
 				</div>
-				<span className={`text-xs ${MUTED}`}>{GRANULARITY_LABEL[shownGranularity]} buckets</span>
 			</div>
-
-			<nav aria-label="AI Gateway slice" className="flex flex-wrap items-center gap-2 text-sm">
-				<button
-					type="button"
-					onClick={() => applyFilter({})}
-					className={`rounded-full px-3 py-1 ${pinned.length ? "text-cf hover:underline" : "bg-zinc-200 font-medium dark:bg-zinc-800"} ${FOCUS_RING}`}
-					aria-current={pinned.length ? undefined : "page"}
-				>
-					All AI Gateway traffic
-				</button>
-				{pinned.map((key, i) => {
-					const last = i === pinned.length - 1;
-					return (
-						<Fragment key={key}>
-							<span className={MUTED}>›</span>
-							<span className={`flex items-center gap-1 rounded-full px-3 py-1 ${last ? "bg-zinc-200 font-medium dark:bg-zinc-800" : ""}`}>
-								<span className={`text-xs ${MUTED}`}>{key}</span>
-								<span className="max-w-[20rem] truncate">{filter[key]}</span>
-								<button
-									type="button"
-									aria-label={`Remove ${key} filter`}
-									className={`ml-1 rounded px-1 ${MUTED} hover:text-zinc-900 dark:hover:text-zinc-100 ${FOCUS_RING}`}
-									onClick={() => {
-										const next = { ...filter };
-										delete next[key];
-										applyFilter(next);
-									}}
-								>
-									×
-								</button>
-							</span>
-						</Fragment>
-					);
-				})}
-				<span className={`ml-auto text-xs ${MUTED}`}>
-					{prevLabel ? `Changes ${prevLabel}` : ""}
-				</span>
-			</nav>
 
 			{error && (
 				<div role="alert" className={ALERT_ERROR}>
@@ -655,64 +719,97 @@ export function AiGatewayPage({
 				</div>
 			)}
 
-			<StatGrid cols={3}>
+			{/* The four numbers a demo opens on: money, volume, tokens, people. */}
+			<StatGrid cols={4}>
+				<StatCard
+					label="Spend"
+					value={formatCost(totals.cost)}
+					hint={
+						<>
+							{forecast !== null ? `${formatCost(forecast)} forecast this month · ` : ""}
+							<Delta value={change(totals.cost, previous?.cost)} />
+						</>
+					}
+					detail={
+						<>
+							{budgetStatus && (
+								<p role="status" className={`text-xs font-medium ${budgetStatus.over ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400"}`}>
+									{budgetStatus.text}
+								</p>
+							)}
+							{datasets && <UnavailableNote status={datasets.spend} label="Spend" />}
+						</>
+					}
+				/>
 				<StatCard label="Requests" value={compact(totals.requests)} hint={<Delta value={change(totals.requests, previous?.requests)} />} />
 				<StatCard
 					label="Tokens"
 					value={compact(tokens)}
 					hint={
 						<>
-							{/* With prompt caching, tokensIn excludes cache reads — "fresh" keeps it from contradicting the Prompt cache card. */}
+							{/* With prompt caching, tokensIn excludes cache reads — "fresh" keeps it from contradicting the prompt-cache figure. */}
 							{compact(totals.tokensIn)} {totals.promptCache ? "fresh in" : "in"} / {compact(totals.tokensOut)} out · <Delta value={change(tokens, previous?.tokens)} />
 						</>
 					}
 				/>
-				<div>
+				{result?.byUser ? (
 					<StatCard
-						label="Spend"
-						value={formatCost(totals.cost)}
+						label="Users"
+						value={compact(userRows.length)}
+						hint={
+							taggedShare === null
+								? "no requests in this window"
+								: `${formatRate(taggedShare)} of requests name a user · ${compact(totals.sessions)} ${totals.sessions === 1 ? "session" : "sessions"}`
+						}
+					/>
+				) : (
+					<StatCard
+						label="Sessions"
+						value={compact(totals.sessions)}
 						hint={
 							<>
-								{totals.cost !== null && totals.requests ? `${formatCost(totals.cost / totals.requests)} per request · ` : ""}
-								<Delta value={change(totals.cost, previous?.cost)} />
+								{totals.users === null ? "" : totals.users ? `${compact(totals.users)} ${totals.users === 1 ? "user" : "users"} · ` : "no user ids sent · "}
+								<Delta value={change(totals.sessions, previous?.sessions)} />
 							</>
 						}
 					/>
-					{datasets && <UnavailableNote status={datasets.spend} label="Spend" />}
-				</div>
-				<div>
-					<StatCard
-						label="Error rate"
-						value={formatRate(totals.errorRate)}
-						tone={totals.errorRate ? "text-red-600 dark:text-red-400" : undefined}
-						hint={
-							<>
-								{totals.errors !== null ? `${compact(totals.errors)} ${totals.errors === 1 ? "error" : "errors"}` : ""}
-								{totals.rateLimited ? ` · ${compact(totals.rateLimited)} rate limited` : ""} ·{" "}
-								<RateDelta current={totals.errorRate} previous={previous?.errorRate} upIs="bad" />
-							</>
-						}
-					/>
-					{datasets && <UnavailableNote status={datasets.errors} label="Errors" />}
-				</div>
-				<div>
-					<StatCard
-						label="Cache hit rate"
-						value={formatRate(totals.cacheHitRate)}
-						hint={<RateDelta current={totals.cacheHitRate} previous={previous?.cacheHitRate} upIs="good" />}
-					/>
-					{datasets && <UnavailableNote status={datasets.cache} label="Cache" />}
-				</div>
-				<StatCard
-					label="Latency p50"
+				)}
+			</StatGrid>
+
+			{/* Health in one line: the rates that say whether the traffic is going well. */}
+			<section aria-label="Health" className={`${CARD} grid grid-cols-2 gap-x-6 gap-y-3 lg:grid-cols-4`}>
+				<HealthItem
+					label="Error rate"
+					value={formatRate(totals.errorRate)}
+					tone={totals.errorRate ? "text-red-600 dark:text-red-400" : undefined}
+					hint={
+						<>
+							{totals.errors !== null ? `${compact(totals.errors)} ${totals.errors === 1 ? "error" : "errors"}${totals.rateLimited ? `, ${compact(totals.rateLimited)} rate limited` : ""} · ` : ""}
+							<RateDelta current={totals.errorRate} previous={previous?.errorRate} upIs="bad" />
+						</>
+					}
+					note={datasets && <UnavailableNote status={datasets.errors} label="Errors" />}
+				/>
+				<HealthItem
+					label="Gateway cache"
+					value={formatRate(totals.cacheHitRate)}
+					hint={
+						<>
+							hit rate · <RateDelta current={totals.cacheHitRate} previous={previous?.cacheHitRate} upIs="good" />
+						</>
+					}
+					note={datasets && <UnavailableNote status={datasets.cache} label="Cache" />}
+				/>
+				<HealthItem
+					label="Latency"
 					value={formatDuration(totals.p50)}
 					hint={
 						<>
-							p95 {formatDuration(totals.p95)} · <Delta value={change(totals.p50, previous?.p50)} upIs="bad" />
+							p50 · p95 {formatDuration(totals.p95)} · <Delta value={change(totals.p50, previous?.p50)} upIs="bad" />
 						</>
 					}
 				/>
-				<StatCard
+				<HealthItem
 					label="Prompt cache"
 					value={prompt && prompt.inputTokens ? formatRate(prompt.readTokens / prompt.inputTokens) : "—"}
 					hint={
@@ -721,32 +818,13 @@ export function AiGatewayPage({
 							: "no input tokens recorded"
 					}
 				/>
-				<StatCard
-					label="Sessions"
-					value={compact(totals.sessions)}
-					hint={
-						<>
-							{totals.users === null ? "" : totals.users ? `${compact(totals.users)} ${totals.users === 1 ? "user" : "users"} · ` : "no user ids sent · "}
-							<Delta value={change(totals.sessions, previous?.sessions)} />
-						</>
-					}
-				/>
-				<StatCard
-					label="Active days"
-					value={`${days.active} of ${days.of}`}
-					hint={
-						days.active
-							? `${totals.cost !== null ? `${formatCost(totals.cost / days.active)} and ` : ""}${compact(Math.round(totals.requests / days.active))} requests per active day`
-							: "no requests in this window"
-					}
-				/>
-			</StatGrid>
+			</section>
 
 			{insights.length > 0 && (
 				<section className={CARD} aria-labelledby="aig-insights">
 					<h2 id="aig-insights" className={`mb-2 ${SECTION_TITLE}`}>At a glance</h2>
 					<ul className="space-y-1 text-sm">
-						{insights.map((item) => (
+						{shownInsights.map((item) => (
 							<li key={item.text} className="flex gap-2">
 								<span aria-hidden className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${item.tone === "warn" ? "bg-amber-500" : item.tone === "bad" ? "bg-red-500" : "bg-zinc-400"}`} />
 								<span>
@@ -763,60 +841,33 @@ export function AiGatewayPage({
 							</li>
 						))}
 					</ul>
+					{insights.length > INSIGHTS_SHOWN && (
+						<button type="button" className={`mt-2 text-xs text-cf hover:underline ${FOCUS_RING}`} onClick={() => setShowAllInsights((v) => !v)}>
+							{showAllInsights ? "Show fewer" : `Show ${insights.length - INSIGHTS_SHOWN} more`}
+						</button>
+					)}
 				</section>
 			)}
 
 			<section className={CARD} aria-labelledby="aig-chart-title">
-				{/* The cost header a cost view opens with: what was spent, where the month is heading, against what budget. */}
-				<div className="mb-4 flex flex-wrap items-end gap-x-10 gap-y-3">
-					<div>
-						<div className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`}>Actual spend</div>
-						<div className="text-3xl font-semibold tabular-nums">{formatCost(totals.cost)}</div>
+				<div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+					<h2 id="aig-chart-title" className={SECTION_TITLE}>
+						{chartTitle}
+					</h2>
+					<div className="ml-auto flex gap-1" role="group" aria-label="Chart metric">
+						{METRICS.map((m) => (
+							<button
+								key={m.id}
+								type="button"
+								aria-pressed={metric === m.id}
+								onClick={() => setMetric(m.id)}
+								className={`rounded-md px-2.5 py-1 text-xs ${metric === m.id ? "bg-cf text-white" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"} ${FOCUS_RING}`}
+							>
+								{m.label}
+							</button>
+						))}
 					</div>
-					<div>
-						<div className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`} title="This calendar month at the window's daily run rate">
-							Forecast this month
-						</div>
-						<div className="text-3xl font-semibold tabular-nums">{forecast === null ? "--" : formatCost(forecast)}</div>
-					</div>
-					<div>
-						<label htmlFor="aig-budget" className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`}>
-							Budget
-						</label>
-						<div className="flex items-baseline gap-1">
-							<span className="text-3xl font-semibold">$</span>
-							<input
-								id="aig-budget"
-								type="number"
-								min={0}
-								step="1"
-								inputMode="decimal"
-								placeholder="none"
-								value={budgetText}
-								onChange={(e) => saveBudget(e.target.value)}
-								className={`w-28 rounded-md border border-transparent bg-transparent text-3xl font-semibold tabular-nums hover:border-zinc-300 focus:border-cf dark:hover:border-zinc-700 ${FOCUS_RING}`}
-							/>
-							<span className={`text-sm ${MUTED}`}>/mo</span>
-						</div>
-					</div>
-					{monthlyBudget && forecast !== null && (
-						<div className={`text-sm ${forecast > monthlyBudget ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400"}`} role="status">
-							{forecast > monthlyBudget
-								? `Forecast ${formatRate(forecast / monthlyBudget)} of budget — over by ${formatCost(forecast - monthlyBudget)}`
-								: `On track: forecast ${formatRate(forecast / monthlyBudget)} of budget`}
-						</div>
-					)}
 				</div>
-
-				<h2 id="aig-chart-title" className={`mb-2 ${SECTION_TITLE}`}>
-					{metricSpec.label}
-					{chartMode === "none"
-						? " for the window"
-						: chartMode === "accumulated"
-							? ", accumulated"
-							: ` by ${shownGranularity === "daily" ? "day" : shownGranularity === "hourly" ? "hour" : "15 minutes"}`}
-					{split !== "none" ? `, split by ${split === "tag" ? `tag ${tag}` : splitPhrase(split)}` : ""}
-				</h2>
 				<div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
 					<label className="flex items-center gap-1.5 text-xs">
 						<span className={MUTED}>Group by</span>
@@ -837,48 +888,68 @@ export function AiGatewayPage({
 								))}
 						</select>
 					</label>
-					<label className="flex items-center gap-1.5 text-xs">
-						<span className={MUTED}>Granularity</span>
-						<select
-							value={chartMode === "buckets" ? shownGranularity : chartMode}
-							onChange={(e) => setGranChoice(e.target.value as GranularityChoice)}
-							className={SELECT_SM}
-						>
-							{GRANULARITY_CHOICES.map((g) => (
-								<option key={g.id} value={g.id} disabled={g.id !== "none" && g.id !== "accumulated" && !bucketFits(g.id as AiGatewayGranularity, timeRange.minutes)}>
-									{g.label}
-								</option>
-							))}
-						</select>
-					</label>
-					<label className="flex items-center gap-1.5 text-xs">
-						<span className={MUTED}>Chart</span>
-						<select value={chartMode === "none" ? "stacked" : chartType} disabled={chartMode === "none"} onChange={(e) => setChartType(e.target.value as ChartType)} className={SELECT_SM}>
-							{CHART_TYPES.map((t) => (
-								<option key={t.id} value={t.id}>{t.label}</option>
-							))}
-						</select>
-					</label>
-					{metric !== "cost" && chartMode === "buckets" && (
-						<label className="flex items-center gap-1.5 text-xs">
-							<input type="checkbox" checked={showSpend} onChange={(e) => setShowSpend(e.target.checked)} />
-							<span className={MUTED}>Spend line</span>
-						</label>
-					)}
-					<div className="ml-auto flex gap-1" role="group" aria-label="Chart metric">
-						{METRICS.map((m) => (
-							<button
-								key={m.id}
-								type="button"
-								aria-pressed={metric === m.id}
-								onClick={() => setMetric(m.id)}
-								className={`rounded-md px-2.5 py-1 text-xs ${metric === m.id ? "bg-cf text-white" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"} ${FOCUS_RING}`}
-							>
-								{m.label}
-							</button>
-						))}
-					</div>
+					<button
+						type="button"
+						aria-expanded={chartOptions}
+						aria-controls="aig-chart-options"
+						onClick={() => setChartOptions((v) => !v)}
+						className={`flex items-center gap-1 text-xs ${MUTED} hover:text-zinc-900 dark:hover:text-zinc-100 ${FOCUS_RING}`}
+					>
+						<ChevronDownIcon size={14} className={`transition-transform ${chartOptions ? "rotate-180" : ""}`} />
+						Chart options
+					</button>
+					<span className={`ml-auto text-xs ${MUTED}`}>{GRANULARITY_LABEL[shownGranularity]} buckets</span>
 				</div>
+				{chartOptions && (
+					<div id="aig-chart-options" className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg bg-zinc-50 px-3 py-2 dark:bg-zinc-950/40">
+						<label className="flex items-center gap-1.5 text-xs">
+							<span className={MUTED}>Granularity</span>
+							<select
+								value={chartMode === "buckets" ? shownGranularity : chartMode}
+								onChange={(e) => setGranChoice(e.target.value as GranularityChoice)}
+								className={SELECT_SM}
+							>
+								{GRANULARITY_CHOICES.map((g) => (
+									<option key={g.id} value={g.id} disabled={g.id !== "none" && g.id !== "accumulated" && !bucketFits(g.id as AiGatewayGranularity, timeRange.minutes)}>
+										{g.label}
+									</option>
+								))}
+							</select>
+						</label>
+						<label className="flex items-center gap-1.5 text-xs">
+							<span className={MUTED}>Chart</span>
+							<select value={chartMode === "none" ? "stacked" : chartType} disabled={chartMode === "none"} onChange={(e) => setChartType(e.target.value as ChartType)} className={SELECT_SM}>
+								{CHART_TYPES.map((t) => (
+									<option key={t.id} value={t.id}>{t.label}</option>
+								))}
+							</select>
+						</label>
+						{metric !== "cost" && chartMode === "buckets" && (
+							<label className="flex items-center gap-1.5 text-xs">
+								<input type="checkbox" checked={showSpend} onChange={(e) => setShowSpend(e.target.checked)} />
+								<span className={MUTED}>Spend line</span>
+							</label>
+						)}
+						<div className="flex items-center gap-1.5 text-xs">
+							<label htmlFor="aig-budget" className={MUTED}>
+								Budget
+							</label>
+							<span aria-hidden className={MUTED}>$</span>
+							<input
+								id="aig-budget"
+								type="number"
+								min={0}
+								step="1"
+								inputMode="decimal"
+								placeholder="none"
+								value={budgetText}
+								onChange={(e) => saveBudget(e.target.value)}
+								className={`w-20 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs tabular-nums dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`}
+							/>
+							<span className={MUTED}>/month</span>
+						</div>
+					</div>
+				)}
 				<UsageChart
 					stacks={shownStacks}
 					split={split}
@@ -888,9 +959,7 @@ export function AiGatewayPage({
 					chartType={chartType}
 					mode={chartMode}
 					label={split === "provider" ? providerName : undefined}
-					onPick={
-						split === "gateway" || split === "model" || split === "provider" || split === "user" ? (key) => drill(split, key) : undefined
-					}
+					onPick={split === "gateway" || split === "model" || split === "provider" || split === "user" ? (key) => drill(split, key) : undefined}
 					spendLine={spendLine}
 					budget={budgetLevel}
 				/>
@@ -898,33 +967,37 @@ export function AiGatewayPage({
 					{metric === "cost"
 						? monthlyBudget
 							? `Budget ${formatCost(monthlyBudget)}/month, pro-rated ${chartMode === "accumulated" ? "to this window" : "to each bar"}; anything above it shows red.`
-							: "Set a monthly budget above to draw it on the chart, with overage in red."
+							: "Set a monthly budget under Chart options to draw it on the chart, with overage in red."
 						: "Switch to Spend to see the budget line."}
 					{split === "source" ? " Workers AI is Cloudflare's own inference; every other provider counts as third-party." : ""}
 				</p>
 			</section>
 
 			<div className="grid gap-4 lg:grid-cols-3">
-				{donuts.map((dimension, i) => (
-					<DonutPanel
-						key={i}
-						idPrefix={`aig-donut-${i}`}
-						dimension={dimension}
-						dimensions={donutDims}
-						onDimension={(next) => setDonuts((prev) => prev.map((d, j) => (j === i ? next : d)))}
-						slices={slicesFor(dimension)}
-						format={metricSpec.format}
-						label={dimension === "provider" ? providerName : undefined}
-						onPick={dimension === "gateway" || dimension === "model" || dimension === "provider" || dimension === "user" ? (key) => drill(dimension, key) : undefined}
-					/>
-				))}
+				{donuts.map((wanted, i) => {
+					const dimension = donutShown(wanted);
+					return (
+						<DonutPanel
+							key={i}
+							idPrefix={`aig-donut-${i}`}
+							dimension={dimension}
+							dimensions={donutDims}
+							onDimension={(next) => setDonuts((prev) => prev.map((d, j) => (j === i ? next : d)))}
+							slices={slicesFor(dimension)}
+							format={metricSpec.format}
+							label={dimension === "provider" ? providerName : dimension === "model" ? shortModel : undefined}
+							onPick={dimension === "gateway" || dimension === "model" || dimension === "provider" || dimension === "user" ? (key) => drill(dimension, key) : undefined}
+						/>
+					);
+				})}
 			</div>
 
-			<section className={CARD}>
-				<h2 className={`mb-1 ${SECTION_TITLE}`}>Breakdown</h2>
+			<h2 className={`pt-2 text-xs font-semibold uppercase tracking-wide ${MUTED}`}>More detail</h2>
+
+			<Collapsible id="aig-breakdown" title="Breakdown" summary={`By ${tabs.map((t) => TAB_LABEL[t].toLowerCase()).join(", ")}`}>
 				<p className={`mb-2 text-xs ${MUTED}`}>
 					Click a name to drill into it; every number on the page then covers only that slice. Users are the values of the
-					<code>user</code> key applications send in the <code>cf-aig-metadata</code> header, shown as sent. Clients are named
+					<code> user</code> key applications send in the <code>cf-aig-metadata</code> header, shown as sent. Clients are named
 					from the user agent, with versions folded together.
 				</p>
 				<Tabs tabs={tabs.map((id) => ({ id, label: TAB_LABEL[id] }))} active={activeTab} onChange={setTab} label="Breakdown by" idPrefix="aig" />
@@ -944,27 +1017,39 @@ export function AiGatewayPage({
 						/>
 					)}
 				</TabPanel>
-			</section>
+			</Collapsible>
 
 			{result?.sessionHealth && (
-				<section className={CARD} aria-labelledby="aig-sessions">
-					<h2 id="aig-sessions" className={`mb-1 ${SECTION_TITLE}`}>Session health</h2>
+				<Collapsible
+					id="aig-sessions"
+					title="Session health"
+					summary={
+						flaggedSessions === null
+							? "unavailable for this slice"
+							: `${compact(totals.sessions)} ${totals.sessions === 1 ? "session" : "sessions"} · ${flaggedSessions ? `${compact(flaggedSessions)} ${flaggedSessions === 1 ? "flag" : "flags"} raised` : "nothing flagged"}`
+					}
+				>
+					<p className={`mb-3 text-sm ${MUTED}`}>
+						Active {days.active} of {days.of} days
+						{days.active
+							? ` · ${totals.cost !== null ? `${formatCost(totals.cost / days.active)} and ` : ""}${compact(Math.round(totals.requests / days.active))} requests per active day`
+							: ""}
+						{` · ${compact(totals.sessions)} ${totals.sessions === 1 ? "session" : "sessions"}`} (<Delta value={change(totals.sessions, previous?.sessions)} />)
+					</p>
 					<SessionHealthPanel health={result.sessionHealth} />
-				</section>
+				</Collapsible>
 			)}
 
-			<section className={CARD}>
-				<h2 className={`mb-1 ${SECTION_TITLE}`}>Recent requests</h2>
+			<Collapsible id="aig-recent" title="Recent requests" summary={`${result?.recent.length ?? 0} latest, newest first`}>
 				<p className={`mb-2 text-xs ${MUTED}`}>
-					The latest {result?.recent.length ?? 0} requests in this slice, newest first. Analytics rows can be sampled on busy
-					gateways, so this is a picture of the traffic rather than a complete log.
+					Analytics rows can be sampled on busy gateways, so this is a picture of the traffic rather than a complete log.
 				</p>
 				<RecentRequests rows={result?.recent ?? []} onDrill={drill} />
-			</section>
+			</Collapsible>
 
 			<p className={`text-xs ${MUTED}`}>
-				Aggregate analytics from the account's AI Gateway datasets, with field names read from the live schema. Change figures
-				compare with the window of the same length just before this one.
+				Aggregate analytics from the account's AI Gateway datasets, with field names read from the live schema. Changes
+				compare with the window of the same length just before this one{prevLabel ? ` (${prevLabel.replace(/^vs /, "")})` : ""}.
 			</p>
 		</PageShell>
 	);

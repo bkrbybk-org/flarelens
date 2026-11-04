@@ -106,6 +106,13 @@ const usage: AiGatewayUsageResult = {
 	datasets: { errors: { available: true }, cache: { available: true }, spend: { available: true } },
 };
 
+/** Open one of the sections that start closed, and return it. */
+async function openSection(user: ReturnType<typeof userEvent.setup>, title: string): Promise<HTMLElement> {
+	const toggle = await screen.findByRole("button", { name: title });
+	if (toggle.getAttribute("aria-expanded") === "false") await user.click(toggle);
+	return screen.getByRole("heading", { name: title }).closest("section")!;
+}
+
 beforeEach(() => {
 	history.replaceState(null, "", "#/ai-gateway");
 	vi.mocked(fetchAiGatewayUsage).mockReset();
@@ -117,24 +124,34 @@ describe("AiGatewayPage", () => {
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
 		const requests = (await screen.findByText("Requests", { selector: "div" })).closest("div[class*='rounded-xl']")!;
 		expect(requests).toHaveTextContent("▲ 2.0×");
-		// A rate changes by points, coloured by direction: the cache hit rate fell 40 points.
-		expect(screen.getByText("Cache hit rate").closest("div[class*='rounded-xl']")).toHaveTextContent("▼ 40.0 pts");
+		// A rate changes by points, coloured by direction: the gateway cache hit rate fell 40 points.
+		const health = screen.getByRole("region", { name: "Health" });
+		expect(health).toHaveTextContent("Gateway cache20.0%hit rate · ▼ 40.0 pts");
+		expect(health).toHaveTextContent("Latency1.2 sp50 · p95 5.0 s");
 		expect(screen.getByText("Cache hit rate fell from 60% to 20% since the previous window", { exact: false })).toBeInTheDocument();
 	});
 
-	it("adds prompt cache, sessions, active days, a spend line, clients, provider names and session health", async () => {
+	it("opens on four headline cards and a health strip, with the detail closed below", async () => {
 		const user = userEvent.setup();
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
 		const card = (label: string) => screen.getByText(label, { selector: "div" }).closest("div[class*='rounded-xl']")!;
-		expect(await screen.findByText("Prompt cache", { selector: "div" })).toBeInTheDocument();
-		expect(card("Prompt cache")).toHaveTextContent("28.6%");
-		expect(card("Prompt cache")).toHaveTextContent("40 of 140 input tokens read from the provider's cache · 50.0% of requests");
-		expect(card("Sessions")).toHaveTextContent("4no user ids sent · ▲ 2.0×");
-		expect(card("Active days")).toHaveTextContent("1 of 7");
-		expect(card("Active days")).toHaveTextContent("$0.50 and 10 requests per active day");
+		expect(await screen.findByText("Users", { selector: "div" })).toBeInTheDocument();
+		expect(card("Spend")).toHaveTextContent("$0.50");
+		expect(card("Spend")).toHaveTextContent("forecast this month");
+		// Two named users carry 7 of the 10 requests; "(not tagged)" is not a user.
+		expect(card("Users")).toHaveTextContent("270.0% of requests name a user · 4 sessions");
+		const health = screen.getByRole("region", { name: "Health" });
+		expect(health).toHaveTextContent("Prompt cache28.6%40 of 140 input tokens read from the provider's cache · 50.0% of requests");
 		expect(screen.getByRole("list", { name: "Legend" })).toHaveTextContent("Spend (right axis)$0.50");
+		// The detail starts closed: no breakdown tabs, no request rows until asked for.
+		expect(screen.queryByRole("tablist", { name: "Breakdown by" })).toBeNull();
+		expect(screen.getByRole("button", { name: "Recent requests" })).toHaveAttribute("aria-expanded", "false");
+		expect(screen.queryByText("app/1")).toBeNull();
+		// Activity and session health live together, one click down.
+		const sessions = await openSection(user, "Session health");
+		expect(sessions).toHaveTextContent("Active 1 of 7 days · $0.50 and 10 requests per active day · 4 sessions (▲ 2.0×)");
 		// Clients: named, not drillable.
-		const breakdown = screen.getByRole("heading", { name: "Breakdown" }).closest("section")!;
+		const breakdown = await openSection(user, "Breakdown");
 		await user.click(within(breakdown).getByRole("tab", { name: "Clients" }));
 		expect(within(breakdown).getByText("opencode")).toBeInTheDocument();
 		expect(within(breakdown).queryByRole("button", { name: "opencode" })).toBeNull();
@@ -142,17 +159,26 @@ describe("AiGatewayPage", () => {
 		await user.click(within(breakdown).getByRole("tab", { name: "Providers" }));
 		await user.click(within(breakdown).getByRole("button", { name: "Workers AI" }));
 		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { provider: "workers-ai" } });
-		const health = screen.getByRole("heading", { name: "Session health" }).closest("section")!;
-		expect(health).toHaveTextContent("4 sessions analysed by AI Gateway");
-		expect(health).toHaveTextContent("Unusually expensive1 (25.0%)");
+		expect(sessions).toHaveTextContent("4 sessions analysed by AI Gateway");
+		expect(sessions).toHaveTextContent("Unusually expensive1 (25.0%)");
 		// A flag the schema lacks is left out, not shown as zero.
-		expect(health).not.toHaveTextContent("Heavy MCP tool use");
+		expect(sessions).not.toHaveTextContent("Heavy MCP tool use");
+	});
+
+	it("shows sessions instead of users on an account that tags no users", async () => {
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, byUser: null });
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const card = (await screen.findByText("Sessions", { selector: "div" })).closest("div[class*='rounded-xl']")!;
+		expect(card).toHaveTextContent("4no user ids sent · ▲ 2.0×");
+		expect(screen.queryByText("Users", { selector: "div" })).toBeNull();
+		// The user donut falls back to gateways.
+		expect(screen.getAllByRole("img", { name: /^Share by / })[0]).toHaveAttribute("aria-label", "Share by Gateway");
 	});
 
 	it("breaks spend down by a chosen tag key, and will not offer one that names people", async () => {
 		const user = userEvent.setup();
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
-		const breakdown = (await screen.findByRole("heading", { name: "Breakdown" })).closest("section")!;
+		const breakdown = await openSection(user, "Breakdown");
 		await user.click(within(breakdown).getByRole("tab", { name: "Tags" }));
 		const picker = within(breakdown).getByRole("combobox", { name: "Break spend down by" });
 		expect(within(picker).getByRole("option", { name: "user (6 requests) — see the Users tab" })).toBeDisabled();
@@ -173,7 +199,7 @@ describe("AiGatewayPage", () => {
 	it("breaks usage down per user, groups the chart by user, and drills into one", async () => {
 		const user = userEvent.setup();
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
-		const breakdown = (await screen.findByRole("heading", { name: "Breakdown" })).closest("section")!;
+		const breakdown = await openSection(user, "Breakdown");
 		await user.click(within(breakdown).getByRole("tab", { name: "Users" }));
 		expect(within(breakdown).getByRole("columnheader", { name: "User" })).toBeInTheDocument();
 		expect(within(breakdown).getByRole("button", { name: "alice@example.com" })).toBeInTheDocument();
@@ -198,7 +224,7 @@ describe("AiGatewayPage", () => {
 	it("shows a recent request's user, drillable", async () => {
 		const user = userEvent.setup();
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
-		const recent = (await screen.findByRole("heading", { name: "Recent requests" })).closest("section")!;
+		const recent = await openSection(user, "Recent requests");
 		await user.click(within(recent).getByRole("button", { name: "Details" }));
 		await user.click(within(recent).getByRole("button", { name: "alice@example.com" }));
 		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { user: "alice@example.com" } });
@@ -210,6 +236,9 @@ describe("AiGatewayPage", () => {
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
 		await screen.findByRole("heading", { name: /^Requests by day/ });
 		await user.click(screen.getByRole("button", { name: "Spend" }));
+		// The finer controls sit behind one toggle.
+		expect(screen.queryByLabelText("Budget")).toBeNull();
+		await user.click(screen.getByRole("button", { name: "Chart options" }));
 		// A $10/month budget against $0.50 in one day of a 7-day window: forecast $0.50/7 × 30 days.
 		await user.type(screen.getByLabelText("Budget"), "10");
 		expect(localStorage.getItem("flarelens_aig_budget:acc1")).toBe("10");
@@ -232,14 +261,15 @@ describe("AiGatewayPage", () => {
 		expect(within(screen.getByRole("combobox", { name: "Granularity" })).getByRole("option", { name: "15 minutes" })).toBeDisabled();
 		// Donuts: share of the charted measure, the dimension picked per panel, a slice drills in.
 		const donuts = screen.getAllByRole("img", { name: /^Share by / });
-		expect(donuts.map((d) => d.getAttribute("aria-label"))).toEqual(["Share by Gateway", "Share by Model", "Share by Provider"]);
+		// Who, what and where by default.
+		expect(donuts.map((d) => d.getAttribute("aria-label"))).toEqual(["Share by User", "Share by Model", "Share by Provider"]);
 		const third = donuts[2].closest("section")!;
 		expect(third).toHaveTextContent("Workers AI$0.50");
 		await user.selectOptions(within(third).getByRole("combobox"), "source");
 		expect(third).toHaveTextContent("Workers AI");
 		const first = donuts[0].closest("section")!;
-		await user.click(within(first).getByRole("button", { name: /prod/ }));
-		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { gateway: "prod" } });
+		await user.click(within(first).getByRole("button", { name: /alice@example\.com/ }));
+		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { user: "alice@example.com" } });
 	});
 
 	it("picks the timeframe on the page, and buckets a week by day", async () => {
@@ -270,7 +300,7 @@ describe("AiGatewayPage", () => {
 	it("drills into a gateway from the breakdown, carries it in the URL, and steps back out", async () => {
 		const user = userEvent.setup();
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
-		const breakdown = (await screen.findByRole("heading", { name: "Breakdown" })).closest("section")!;
+		const breakdown = await openSection(user, "Breakdown");
 		await user.click(await within(breakdown).findByRole("button", { name: "prod" }));
 		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { gateway: "prod" } });
 		expect(location.hash).toBe("#/ai-gateway?gateway=prod");
@@ -289,9 +319,9 @@ describe("AiGatewayPage", () => {
 		const user = userEvent.setup();
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
 		expect(vi.mocked(fetchAiGatewayUsage).mock.calls[0][1]).toMatchObject({ filter: { gateway: "prod" } });
-		await user.click(await screen.findByRole("button", { name: "Details" }));
+		const recent = await openSection(user, "Recent requests");
+		await user.click(within(recent).getByRole("button", { name: "Details" }));
 		expect(screen.getByText("app/1")).toBeInTheDocument();
-		const recent = screen.getByRole("heading", { name: "Recent requests" }).closest("section")!;
 		await user.click(within(recent).getAllByRole("button", { name: "@cf/a" })[0]);
 		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { gateway: "prod", model: "@cf/a" } });
 		expect(location.hash).toBe("#/ai-gateway?gateway=prod&model=%40cf%2Fa");

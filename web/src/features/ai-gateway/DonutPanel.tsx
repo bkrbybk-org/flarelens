@@ -65,8 +65,8 @@ export function DonutPanel<D extends string>({
 			{!total ? (
 				<p className={`py-8 text-center text-sm ${MUTED}`}>Nothing to show for this measure.</p>
 			) : (
-				<div className="flex flex-wrap items-center gap-4">
-					<svg viewBox="0 0 140 140" className="h-32 w-32 shrink-0" role="img" aria-label={`Share by ${dimensions.find((d) => d.id === dimension)?.label ?? dimension}`}>
+				<div className="flex flex-col items-center gap-4">
+					<svg viewBox="0 0 140 140" className="h-36 w-36 shrink-0" role="img" aria-label={`Share by ${dimensions.find((d) => d.id === dimension)?.label ?? dimension}`}>
 						<g transform="rotate(-90 70 70)">
 							{shown.map((s, i) => {
 								const length = (s.value / total) * C;
@@ -86,25 +86,26 @@ export function DonutPanel<D extends string>({
 							})}
 						</g>
 					</svg>
-					<ul className="min-w-0 flex-1 space-y-1.5 text-sm">
+					<ul className="w-full min-w-0 space-y-1 text-sm">
 						{shown.map((s, i) => {
 							const content = (
 								<>
-									<span aria-hidden className="mt-1 h-8 w-1 shrink-0 rounded-full" style={{ background: colorFor(s.key, i, "model") }} />
-									<span className="min-w-0">
-										<span className={`block truncate text-xs ${MUTED}`} title={label(s.key)}>{label(s.key)}</span>
-										<span className="block text-lg font-semibold tabular-nums leading-tight">{format(s.value)}</span>
+									<span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: colorFor(s.key, i, "model") }} />
+									<span className="min-w-0 flex-1 truncate" title={s.key}>
+										{label(s.key)}
 									</span>
+									<span className="shrink-0 font-semibold tabular-nums">{format(s.value)}</span>
+									<span className={`w-10 shrink-0 text-right text-xs tabular-nums ${MUTED}`}>{Math.round((s.value / total) * 100)}%</span>
 								</>
 							);
 							return (
 								<li key={s.key}>
 									{onPick && s.key !== OTHER && s.key !== "(unknown)" && s.key !== "(not tagged)" ? (
-										<button type="button" onClick={() => onPick(s.key)} className={`flex w-full gap-2 text-left hover:underline ${FOCUS_RING}`} title={`Drill into ${label(s.key)}`}>
+										<button type="button" onClick={() => onPick(s.key)} className={`flex w-full items-center gap-2 text-left hover:underline ${FOCUS_RING}`} title={`Drill into ${s.key}`}>
 											{content}
 										</button>
 									) : (
-										<span className="flex gap-2">{content}</span>
+										<span className="flex items-center gap-2">{content}</span>
 									)}
 								</li>
 							);
