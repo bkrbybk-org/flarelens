@@ -16,6 +16,9 @@ import {
 	EMPTY_TOTALS,
 	FILTER_ORDER,
 	GRANULARITY_LABEL,
+	SESSION_FLAG_LABEL,
+	activeDays,
+	providerName,
 	granularityFor,
 	aiGatewayBucketLabel as bucketLabel,
 	change,
@@ -29,6 +32,8 @@ import {
 	type AiGatewayGranularity,
 	type AiGatewayRequestRow,
 	type AiGatewayStatusRow,
+	type AiGatewaySessionHealth,
+	type SessionFlag,
 } from "./types";
 
 const ACCENT = "#f6821f";
@@ -47,7 +52,14 @@ function niceMax(value: number): number {
 }
 
 type Metric = StackMetric;
-const SPLIT_LABEL: Record<Split, string> = { none: "Total", gateway: "Gateway", model: "Model", source: "Workers AI vs third-party" };
+const SPLIT_LABEL: Record<Split, string> = {
+	none: "Total",
+	gateway: "Gateway",
+	model: "Model",
+	provider: "Provider",
+	client: "Client",
+	source: "Workers AI vs third-party",
+};
 /** In running text: "split by gateway", but "Workers AI" keeps its capitals. */
 const splitPhrase = (split: Split) => (split === "source" ? SPLIT_LABEL.source : SPLIT_LABEL[split].toLowerCase());
 const METRICS: { id: Metric; label: string; format: (v: number) => string }[] = [
@@ -65,11 +77,33 @@ function axisLabel(ts: string, granularity: AiGatewayGranularity): string {
 	return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-function StackedChart({ stacks, split, granularity, metric, onPick }: { stacks: Stacks; split: Split; granularity: AiGatewayGranularity; metric: Metric; onPick?: (key: string) => void }) {
+function StackedChart({
+	stacks,
+	split,
+	granularity,
+	metric,
+	onPick,
+	label = (key) => key,
+	spendLine,
+}: {
+	stacks: Stacks;
+	split: Split;
+	granularity: AiGatewayGranularity;
+	metric: Metric;
+	onPick?: (key: string) => void;
+	label?: (key: string) => string;
+	/** Spend per bucket, keyed like the buckets, drawn as a line on its own right-hand axis. */
+	spendLine?: Map<string, number>;
+}) {
 	const spec = METRICS.find((m) => m.id === metric)!;
 	const { buckets, keys } = stacks;
 	const innerH = H - PAD_T - PAD_B;
-	const slot = (W - PAD_L - PAD_R) / Math.max(1, buckets.length);
+	// Room on the right for the spend axis, when there is one.
+	const padR = spendLine ? 56 : PAD_R;
+	const plotRight = W - padR;
+	const slot = (plotRight - PAD_L) / Math.max(1, buckets.length);
+	const spendValues = spendLine ? buckets.map((b) => spendLine.get(b.ts) ?? 0) : [];
+	const spendMax = Math.max(0, ...spendValues) || 1;
 	const barW = Math.max(1, slot * 0.72);
 	const peak = Math.max(0, ...buckets.map((b) => b.total));
 	const max = metric === "cost" ? peak || 1 : niceMax(Math.max(1, peak));
@@ -81,7 +115,7 @@ function StackedChart({ stacks, split, granularity, metric, onPick }: { stacks: 
 		viewWidth: W,
 		viewHeight: H,
 		plotLeft: PAD_L,
-		plotRight: W - PAD_R,
+		plotRight,
 		mode: "slot",
 	});
 
@@ -96,10 +130,15 @@ function StackedChart({ stacks, split, granularity, metric, onPick }: { stacks: 
 						const y = PAD_T + innerH * fraction;
 						return (
 							<g key={fraction}>
-								<line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} className="stroke-zinc-200 dark:stroke-zinc-800" />
+								<line x1={PAD_L} x2={plotRight} y1={y} y2={y} className="stroke-zinc-200 dark:stroke-zinc-800" />
 								<text x={PAD_L - 8} y={y + 4} textAnchor="end" className="fill-zinc-400 text-[10px]">
 									{spec.format(max * (1 - fraction))}
 								</text>
+								{spendLine && (
+									<text x={plotRight + 8} y={y + 4} textAnchor="start" className="fill-amber-500 text-[10px]">
+										{formatCost(spendMax * (1 - fraction))}
+									</text>
+								)}
 							</g>
 						);
 					})}
@@ -121,6 +160,19 @@ function StackedChart({ stacks, split, granularity, metric, onPick }: { stacks: 
 							</g>
 						);
 					})}
+					{spendLine && (
+						<polyline
+							fill="none"
+							stroke={SPEND_COLOR}
+							strokeWidth={2}
+							strokeLinejoin="round"
+							points={spendValues.map((v, i) => `${PAD_L + i * slot + barW / 2},${PAD_T + innerH - (v / spendMax) * innerH}`).join(" ")}
+						/>
+					)}
+					{spendLine &&
+						spendValues.map((v, i) =>
+							v > 0 ? <circle key={i} cx={PAD_L + i * slot + barW / 2} cy={PAD_T + innerH - (v / spendMax) * innerH} r={2.5} fill={SPEND_COLOR} /> : null,
+						)}
 					{hover !== null && <HoverGuide x={PAD_L + slot * (hover.index + 0.5)} top={PAD_T} bottom={PAD_T + innerH} />}
 				</svg>
 				<ChartTooltip
@@ -131,28 +183,29 @@ function StackedChart({ stacks, split, granularity, metric, onPick }: { stacks: 
 							? [
 									...keys
 										.filter((key) => bucket.values[key])
-										.map((key) => ({ label: split === "none" ? spec.label : key, value: spec.format(bucket.values[key]), color: color(key) })),
+										.map((key) => ({ label: split === "none" ? spec.label : label(key), value: spec.format(bucket.values[key]), color: color(key) })),
 									...(split !== "none" ? [{ label: "Total", value: spec.format(bucket.total) }] : []),
+									...(spendLine ? [{ label: "Spend", value: formatCost(spendLine.get(bucket.ts) ?? 0), color: SPEND_COLOR }] : []),
 								]
 							: []
 					}
 				/>
 			</div>
-			{split !== "none" && (
+			{(split !== "none" || spendLine) && (
 				<ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Legend">
-					{keys.map((key) => {
+					{(split === "none" ? [] : keys).map((key) => {
 						const drillable = onPick && key !== OTHER;
 						const content = (
 							<>
 								<span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: color(key) }} />
-								<span className="max-w-[16rem] truncate">{key}</span>
+								<span className="max-w-[16rem] truncate">{label(key)}</span>
 								<span className={`tabular-nums ${MUTED}`}>{spec.format(stacks.totals[key] ?? 0)}</span>
 							</>
 						);
 						return (
 							<li key={key}>
 								{drillable ? (
-									<button type="button" onClick={() => onPick(key)} className={`flex items-center gap-1.5 hover:underline ${FOCUS_RING}`} title={`Drill into ${key}`}>
+									<button type="button" onClick={() => onPick(key)} className={`flex items-center gap-1.5 hover:underline ${FOCUS_RING}`} title={`Drill into ${label(key)}`}>
 										{content}
 									</button>
 								) : (
@@ -161,11 +214,20 @@ function StackedChart({ stacks, split, granularity, metric, onPick }: { stacks: 
 							</li>
 						);
 					})}
+					{spendLine && (
+						<li className="flex items-center gap-1.5">
+							<span aria-hidden className="inline-block h-0.5 w-4" style={{ background: SPEND_COLOR }} />
+							Spend (right axis)
+							<span className={`tabular-nums ${MUTED}`}>{formatCost(spendValues.reduce((a, b) => a + b, 0))}</span>
+						</li>
+					)}
 				</ul>
 			)}
 		</div>
 	);
 }
+
+const SPEND_COLOR = "#d97706";
 
 /**
  * The change since the previous window, coloured by whether up is good. Requests, tokens and
@@ -212,10 +274,23 @@ function UnavailableNote({ status, label }: { status: DatasetStatus; label: stri
 }
 
 type Dimension = "gateway" | "provider" | "model";
-type BreakdownTab = Dimension | "status";
-const TAB_LABEL: Record<BreakdownTab, string> = { gateway: "Gateways", provider: "Providers", model: "Models", status: "Status codes" };
+type BreakdownTab = Dimension | "client" | "status";
+const TAB_LABEL: Record<BreakdownTab, string> = { gateway: "Gateways", provider: "Providers", model: "Models", client: "Clients", status: "Status codes" };
 
-function BreakdownTable({ rows, total, onDrill, dimension }: { rows: BreakdownRow[]; total: number; onDrill: (key: string) => void; dimension: Dimension }) {
+function BreakdownTable({
+	rows,
+	total,
+	onDrill,
+	dimension,
+	label = (key) => key,
+}: {
+	rows: BreakdownRow[];
+	total: number;
+	/** Absent for a breakdown that cannot be drilled into (clients fold many user agents). */
+	onDrill?: (key: string) => void;
+	dimension: Exclude<BreakdownTab, "status">;
+	label?: (key: string) => string;
+}) {
 	if (!rows.length) return <p className={`py-6 text-center text-sm ${MUTED}`}>No traffic in this slice.</p>;
 	const max = Math.max(1, ...rows.map((r) => r.requests));
 	return (
@@ -236,14 +311,18 @@ function BreakdownTable({ rows, total, onDrill, dimension }: { rows: BreakdownRo
 					{rows.map((row) => (
 						<tr key={row.key} className="border-t border-zinc-100 dark:border-zinc-800/60">
 							<td className="max-w-[18rem] py-2 pr-2">
-								<button
-									type="button"
-									onClick={() => onDrill(row.key)}
-									className={`max-w-full truncate text-left font-medium text-cf hover:underline ${FOCUS_RING}`}
-									title={`Drill into ${row.key}`}
-								>
-									{row.key}
-								</button>
+								{onDrill ? (
+									<button
+										type="button"
+										onClick={() => onDrill(row.key)}
+										className={`max-w-full truncate text-left font-medium text-cf hover:underline ${FOCUS_RING}`}
+										title={`Drill into ${label(row.key)}`}
+									>
+										{label(row.key)}
+									</button>
+								) : (
+									<span className="font-medium">{label(row.key)}</span>
+								)}
 							</td>
 							<td className="w-48 px-2 py-2">
 								<div className="flex items-center gap-2">
@@ -354,7 +433,7 @@ function RecentRequests({ rows, onDrill }: { rows: AiGatewayRequestRow[]; onDril
 												<dt className={MUTED}>Provider</dt>
 												<dd>
 													<button type="button" className={`text-cf hover:underline ${FOCUS_RING}`} onClick={() => onDrill("provider", row.provider)}>
-														{row.provider || "—"}
+														{row.provider ? providerName(row.provider) : "—"}
 													</button>
 												</dd>
 												<dt className={MUTED}>Client</dt>
@@ -376,6 +455,43 @@ function RecentRequests({ rows, onDrill }: { rows: AiGatewayRequestRow[]; onDril
 				</tbody>
 			</table>
 		</div>
+	);
+}
+
+/** Sessions the gateway's session analysis flagged, by reason. */
+function SessionHealthPanel({ health }: { health: AiGatewaySessionHealth }) {
+	if (!health.available) {
+		return <p className="text-sm text-amber-700 dark:text-amber-400">Session analysis unavailable: {health.reason}.</p>;
+	}
+	const flags = (Object.keys(SESSION_FLAG_LABEL) as SessionFlag[]).filter((flag) => health.flags[flag] !== null);
+	const flagged = flags.filter((flag) => (health.flags[flag] ?? 0) > 0);
+	return (
+		<>
+			<p className={`mb-2 text-xs ${MUTED}`}>
+				{compact(health.sessions)} {health.sessions === 1 ? "session" : "sessions"} analysed by AI Gateway
+				{health.basis === "primary" ? ", matched by their primary model and provider" : ""}. A session can carry several flags.
+			</p>
+			{!health.sessions ? (
+				<p className={`text-sm ${MUTED}`}>No sessions in this window.</p>
+			) : !flagged.length ? (
+				<p className="text-sm text-emerald-700 dark:text-emerald-400">No session flagged for cost, duration, cache reuse, prompt size or tool use.</p>
+			) : null}
+			{health.sessions > 0 && (
+				<ul className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+					{flags.map((flag) => {
+						const n = health.flags[flag] ?? 0;
+						return (
+							<li key={flag} className="flex items-center justify-between gap-3">
+								<span className={n ? "" : MUTED}>{SESSION_FLAG_LABEL[flag]}</span>
+								<span className={`tabular-nums ${n ? "font-medium text-amber-700 dark:text-amber-400" : MUTED}`}>
+									{n ? `${compact(n)} (${formatRate(n / health.sessions)})` : "0"}
+								</span>
+							</li>
+						);
+					})}
+				</ul>
+			)}
+		</>
 	);
 }
 
@@ -407,6 +523,7 @@ export function AiGatewayPage({
 	const [filter, setFilter] = useState<AiGatewayFilter>(readFilter);
 	const [metric, setMetric] = useState<Metric>("requests");
 	const [split, setSplit] = useState<Split>("source");
+	const [showSpend, setShowSpend] = useState(true);
 	const [tab, setTab] = useState<BreakdownTab | null>(null);
 
 	const granularity: AiGatewayGranularity = granularityFor(timeRange.minutes);
@@ -437,19 +554,33 @@ export function AiGatewayPage({
 	const insights = useMemo(() => (result ? buildInsights(result) : []), [result]);
 	const shownGranularity = result?.granularity ?? granularity;
 	const stacks = useMemo(() => {
-		const points = split === "gateway" ? result?.seriesBy?.gateway : split === "model" ? result?.seriesBy?.model : split === "source" ? result?.seriesBy?.provider : [];
+		const by = result?.seriesBy;
+		const points = split === "gateway" ? by?.gateway : split === "model" ? by?.model : split === "source" || split === "provider" ? by?.provider : split === "client" ? by?.client : [];
 		return buildStacks(result?.series ?? [], points ?? [], split, metric, windowBuckets(from, to, shownGranularity));
 		// from/to move with the clock; the window they describe is keyed by the range and the result.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [result, split, metric, shownGranularity, timeRange.minutes]);
 
+	// Spend per bucket for the line over the bars: messages and money on one chart.
+	const spendLine = useMemo(
+		() => (showSpend && metric !== "cost" && result?.series.some((p) => p.cost !== null) ? new Map(result.series.map((p) => [p.ts, p.cost ?? 0])) : undefined),
+		[showSpend, metric, result],
+	);
+	const days = useMemo(
+		// "of 7" for a 7-day window, though its edges touch 8 calendar dates.
+		() => activeDays(result?.series ?? [], Math.max(1, Math.round(timeRange.minutes / 1440))),
+		[result, timeRange.minutes],
+	);
+	const prompt = totals.promptCache;
+
 	// Tabs for the dimensions not already pinned by the filter — a drilled-in dimension has one row.
-	const tabs: BreakdownTab[] = [...(["gateway", "provider", "model"] as Dimension[]).filter((d) => !filter[d]), "status"];
+	const tabs: BreakdownTab[] = [...(["gateway", "provider", "model"] as Dimension[]).filter((d) => !filter[d]), "client", "status"];
 	const activeTab: BreakdownTab = tab && tabs.includes(tab) ? tab : tabs[0];
-	const rowsFor: Record<Dimension, BreakdownRow[]> = {
+	const rowsFor: Record<Exclude<BreakdownTab, "status">, BreakdownRow[]> = {
 		gateway: result?.byGateway ?? [],
 		provider: result?.byProvider ?? [],
 		model: result?.byModel ?? [],
+		client: result?.byClient ?? [],
 	};
 	const prevLabel = result?.previousWindow
 		? `vs ${new Date(result.previousWindow.since).toLocaleDateString([], { month: "short", day: "numeric" })} – ${new Date(result.previousWindow.until).toLocaleDateString([], { month: "short", day: "numeric" })}`
@@ -526,7 +657,8 @@ export function AiGatewayPage({
 					value={compact(tokens)}
 					hint={
 						<>
-							{compact(totals.tokensIn)} in / {compact(totals.tokensOut)} out · <Delta value={change(tokens, previous?.tokens)} />
+							{/* With prompt caching, tokensIn excludes cache reads — "fresh" keeps it from contradicting the Prompt cache card. */}
+							{compact(totals.tokensIn)} {totals.promptCache ? "fresh in" : "in"} / {compact(totals.tokensOut)} out · <Delta value={change(tokens, previous?.tokens)} />
 						</>
 					}
 				/>
@@ -575,6 +707,34 @@ export function AiGatewayPage({
 						</>
 					}
 				/>
+				<StatCard
+					label="Prompt cache"
+					value={prompt && prompt.inputTokens ? formatRate(prompt.readTokens / prompt.inputTokens) : "—"}
+					hint={
+						prompt && prompt.inputTokens
+							? `${compact(prompt.readTokens)} of ${compact(prompt.inputTokens)} input tokens read from the provider's cache${prompt.requestsWithRead !== null && totals.requests ? ` · ${formatRate(prompt.requestsWithRead / totals.requests)} of requests` : ""}`
+							: "no input tokens recorded"
+					}
+				/>
+				<StatCard
+					label="Sessions"
+					value={compact(totals.sessions)}
+					hint={
+						<>
+							{totals.users === null ? "" : totals.users ? `${compact(totals.users)} ${totals.users === 1 ? "user" : "users"} · ` : "no user ids sent · "}
+							<Delta value={change(totals.sessions, previous?.sessions)} />
+						</>
+					}
+				/>
+				<StatCard
+					label="Active days"
+					value={`${days.active} of ${days.of}`}
+					hint={
+						days.active
+							? `${totals.cost !== null ? `${formatCost(totals.cost / days.active)} and ` : ""}${compact(Math.round(totals.requests / days.active))} requests per active day`
+							: "no requests in this window"
+					}
+				/>
 			</StatGrid>
 
 			{insights.length > 0 && (
@@ -612,7 +772,7 @@ export function AiGatewayPage({
 							<span className={MUTED}>Split by</span>
 							<select value={split} onChange={(e) => setSplit(e.target.value as Split)} className={`rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`}>
 								{(Object.keys(SPLIT_LABEL) as Split[])
-									.filter((k) => !(k === "gateway" && filter.gateway) && !(k === "model" && filter.model))
+									.filter((k) => !(k === "gateway" && filter.gateway) && !(k === "model" && filter.model) && !(k === "provider" && filter.provider))
 									.map((k) => (
 										<option key={k} value={k}>
 											{k === "none" ? "Nothing (total)" : SPLIT_LABEL[k]}
@@ -620,6 +780,12 @@ export function AiGatewayPage({
 									))}
 							</select>
 						</label>
+						{metric !== "cost" && (
+							<label className="flex items-center gap-1.5 text-xs">
+								<input type="checkbox" checked={showSpend} onChange={(e) => setShowSpend(e.target.checked)} />
+								<span className={MUTED}>Spend line</span>
+							</label>
+						)}
 						<div className="flex gap-1" role="group" aria-label="Chart metric">
 							{METRICS.map((m) => (
 								<button
@@ -640,7 +806,11 @@ export function AiGatewayPage({
 					split={split}
 					granularity={shownGranularity}
 					metric={metric}
-					onPick={split === "gateway" ? (key) => drill("gateway", key) : split === "model" ? (key) => drill("model", key) : undefined}
+					onPick={
+						split === "gateway" ? (key) => drill("gateway", key) : split === "model" ? (key) => drill("model", key) : split === "provider" ? (key) => drill("provider", key) : undefined
+					}
+					label={split === "provider" ? providerName : undefined}
+					spendLine={spendLine}
 				/>
 				{split === "source" && (
 					<p className={`mt-2 text-xs ${MUTED}`}>
@@ -651,16 +821,32 @@ export function AiGatewayPage({
 
 			<section className={CARD}>
 				<h2 className={`mb-1 ${SECTION_TITLE}`}>Breakdown</h2>
-				<p className={`mb-2 text-xs ${MUTED}`}>Click a name to drill into it; every number on the page then covers only that slice.</p>
+				<p className={`mb-2 text-xs ${MUTED}`}>
+					Click a name to drill into it; every number on the page then covers only that slice. Clients are named from the user
+					agent, with versions folded together.
+				</p>
 				<Tabs tabs={tabs.map((id) => ({ id, label: TAB_LABEL[id] }))} active={activeTab} onChange={setTab} label="Breakdown by" idPrefix="aig" />
 				<TabPanel id={activeTab} idPrefix="aig">
 					{activeTab === "status" ? (
 						<StatusTable rows={result?.byStatus ?? []} total={totals.requests} />
 					) : (
-						<BreakdownTable rows={rowsFor[activeTab]} total={totals.requests} dimension={activeTab} onDrill={(value) => drill(activeTab, value)} />
+						<BreakdownTable
+							rows={rowsFor[activeTab]}
+							total={totals.requests}
+							dimension={activeTab}
+							onDrill={activeTab === "client" ? undefined : (value) => drill(activeTab, value)}
+							label={activeTab === "provider" ? providerName : undefined}
+						/>
 					)}
 				</TabPanel>
 			</section>
+
+			{result?.sessionHealth && (
+				<section className={CARD} aria-labelledby="aig-sessions">
+					<h2 id="aig-sessions" className={`mb-1 ${SECTION_TITLE}`}>Session health</h2>
+					<SessionHealthPanel health={result.sessionHealth} />
+				</section>
+			)}
 
 			<section className={CARD}>
 				<h2 className={`mb-1 ${SECTION_TITLE}`}>Recent requests</h2>

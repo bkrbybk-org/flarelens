@@ -9,7 +9,7 @@ import type { AiGatewayGranularity, AiGatewaySeriesPoint, AiGatewaySplitPoint } 
  * active days would read as four consecutive busy ones.
  */
 
-export type Split = "none" | "gateway" | "model" | "source";
+export type Split = "none" | "gateway" | "model" | "provider" | "client" | "source";
 export type StackMetric = "requests" | "tokens" | "cost" | "errors";
 
 export const WORKERS_AI = "Workers AI";

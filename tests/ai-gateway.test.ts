@@ -59,6 +59,7 @@ interface MockOpts {
 	cacheFail?: boolean;
 	spendAccount?: Record<string, unknown>;
 	spendFail?: boolean;
+	sessionsAccount?: Record<string, unknown>;
 }
 
 function jsonResponse(body: unknown): Response {
@@ -99,6 +100,7 @@ function mockUpstream(opts: MockOpts) {
 								{ name: "count", type: { name: "uint64", ofType: null } },
 								{ name: "sum", type: { name: `${name}Sum`, ofType: null } },
 								{ name: "dimensions", type: { name: `${name}Dimensions`, ofType: null } },
+								{ name: "uniq", type: { name: `${name}Uniq`, ofType: null } },
 							],
 						},
 					},
@@ -107,7 +109,9 @@ function mockUpstream(opts: MockOpts) {
 			const schema = opts.schema ?? DEFAULT_SCHEMA;
 			const names = name.endsWith("Sum")
 				? schema.sums[name.replace("Sum", "")] ?? []
-				: schema.dimensions[name.replace("Dimensions", "")] ?? [];
+				: name.endsWith("Uniq")
+					? (schema as { uniq?: Record<string, string[]> }).uniq?.[name.replace("Uniq", "")] ?? []
+					: schema.dimensions[name.replace("Dimensions", "")] ?? [];
 			return jsonResponse({ data: { __type: { fields: names.map((n) => ({ name: n, type: { name: "string", ofType: null } })) } } });
 		}
 
@@ -118,6 +122,9 @@ function mockUpstream(opts: MockOpts) {
 		if (q.includes("AiGatewayCache")) {
 			if (opts.cacheFail) return jsonResponse({ errors: [{ message: "unknown field on AiGatewayCacheAdaptiveGroups" }] });
 			return jsonResponse({ data: { viewer: { accounts: [opts.cacheAccount ?? { byStatus: [] }] } } });
+		}
+		if (q.includes("AiGatewaySessions")) {
+			return jsonResponse({ data: { viewer: { accounts: [opts.sessionsAccount ?? {}] } } });
 		}
 		if (q.includes("AiGatewaySpend")) {
 			if (opts.spendFail) return jsonResponse({ errors: [{ message: "unknown field on AiGatewaySpendSessionsAdaptiveGroups" }] });
@@ -338,7 +345,7 @@ describe("overview and drill-down", () => {
 		const res = await usage({ accountId: RICH, ...win() });
 		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
 		expect(result.totals).toMatchObject({ requests: 10, cost: 0.5, errors: 1, cacheHits: 2, rateLimited: 1 });
-		expect(result.previous).toEqual({ requests: 20, tokens: 60, cost: 0.25, errorRate: 0, cacheHitRate: 0.75, p50: null });
+		expect(result.previous).toEqual({ requests: 20, sessions: null, tokens: 60, cost: 0.25, errorRate: 0, cacheHitRate: 0.75, p50: null });
 		expect(result.byStatus).toEqual([
 			{ statusCode: "200", rateLimited: false, requests: 9 },
 			{ statusCode: "429", rateLimited: true, requests: 1 },
@@ -388,6 +395,56 @@ describe("overview and drill-down", () => {
 		expect(query).toContain("dimensions { datetimeHour gateway }");
 		expect(query).toContain("dimensions { datetimeHour model }");
 		expect(query).toContain("dimensions { datetimeHour provider }");
+	});
+
+	it("counts users and sessions, prompt-cache reads, clients by name, and flagged sessions", async () => {
+		const ACCT = "44444444444444444444444444444444";
+		mockUpstream({
+			datasets: [...DEFAULT_DATASETS],
+			schema: {
+				sums: {
+					aiGatewayRequestsAdaptiveGroupsType: ["tokensIn", "tokensOut", "cost", "cacheReadTokens", "contextTokens", "requestsWithCacheRead"],
+					aiGatewaySpendSessionsAdaptiveGroupsType: ["cost"],
+				},
+				dimensions: {
+					aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "gateway", "model", "provider", "userAgent"],
+					aiGatewaySpendSessionsAdaptiveGroupsType: ["gateway", "primaryModel", "flagLowCacheHit", "flagAbnormalCost"],
+				},
+				uniq: { aiGatewayRequestsAdaptiveGroupsType: ["users", "sessions"] },
+			} as never,
+			primary: {
+				series: [],
+				total: [{ count: 10, sum: { tokensIn: 60, tokensOut: 5, cost: 1, cacheReadTokens: 40, contextTokens: 100, requestsWithCacheRead: 7 }, uniq: { users: 0, sessions: 3 } }],
+				byClient: [
+					row({ userAgent: "opencode/1.2.0 (darwin)" }, 4, { cost: 0.4 }),
+					row({ userAgent: "opencode/1.3.1 (linux)" }, 3, { cost: 0.3 }),
+					row({ userAgent: "Mozilla/5.0 (Macintosh)" }, 2, { cost: 0.2 }),
+					row({ userAgent: "pi (linux ; x64)" }, 1, { cost: 0.1 }),
+				],
+			},
+			sessionsAccount: { sessions: [row({}, 12)], lowCacheHit: [row({}, 2)], abnormalCost: [] },
+		});
+		const res = await usage({ accountId: ACCT, ...win(), filter: { gateway: "prod" } });
+		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		expect(result.totals).toMatchObject({ users: 0, sessions: 3, promptCache: { readTokens: 40, inputTokens: 100, requestsWithRead: 7 } });
+		// Client versions fold into one client; their latencies cannot, so they are dropped.
+		expect(result.byClient.map((r) => [r.key, r.requests, r.cost])).toEqual([
+			["opencode", 7, 0.7],
+			["Browser", 2, 0.2],
+			["pi", 1, 0.1],
+		]);
+		expect(result.byClient[0].p50).toBeNull();
+		expect(result.sessionHealth).toEqual({
+			available: true,
+			sessions: 12,
+			basis: "all",
+			flags: { abnormalCost: 0, abnormalDuration: null, lowCacheHit: 2, highFirstContext: null, highMcpTools: null, premiumModel: null, thinkingModel: null },
+		});
+		const sessionsQuery = graphqlBodies.find((b) => b.query.includes("AiGatewaySessions")) as { query: string; variables: Record<string, string> };
+		expect(sessionsQuery.query).toContain("gateway: $f_gateway");
+		expect(sessionsQuery.query).toContain("flagLowCacheHit: 1");
+		expect(sessionsQuery.query).not.toContain("userId");
+		expect(sessionsQuery.variables.f_gateway).toBe("prod");
 	});
 
 	it("drills into a slice with the values as variables, never in the query text", async () => {

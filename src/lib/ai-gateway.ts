@@ -37,6 +37,8 @@ interface DatasetCaps {
 	dimensions: string[];
 	/** Names available inside `quantiles { ... }` — empty when the dataset has none. */
 	quantiles: string[];
+	/** Names available inside `uniq { ... }` (distinct counts). */
+	uniq: string[];
 }
 
 interface ResolvedFields {
@@ -61,6 +63,13 @@ interface ResolvedFields {
 				userAgent: string | null;
 				latencyP50: string | null;
 				latencyP95: string | null;
+				/** Distinct users and sessions — counts only; who they are is never selected. */
+				uniqueUsers: string | null;
+				uniqueSessions: string | null;
+				/** Prompt caching at the provider: input tokens read from cache, of all input. */
+				cacheReadTokens: string | null;
+				contextTokens: string | null;
+				requestsWithCacheRead: string | null;
 		  })
 		| null;
 	errors: DatasetCaps | null;
@@ -148,8 +157,8 @@ async function probeDataset(token: string, accountFields: { name: string; type: 
 		return (type?.__type?.fields ?? []).map((f) => f.name);
 	};
 
-	const [sums, dimensions, quantiles] = await Promise.all([readNames("sum"), readNames("dimensions"), readNames("quantiles")]);
-	return { name: field.name, sums, dimensions, quantiles };
+	const [sums, dimensions, quantiles, uniq] = await Promise.all([readNames("sum"), readNames("dimensions"), readNames("quantiles"), readNames("uniq")]);
+	return { name: field.name, sums, dimensions, quantiles, uniq };
 }
 
 /**
@@ -199,6 +208,12 @@ export async function resolveAiGatewayFields(token: string, cacheKey: string): P
 			userAgent: prefer(requests.dimensions, "userAgent"),
 			latencyP50: prefer(requests.quantiles, "durationMsP50"),
 			latencyP95: prefer(requests.quantiles, "durationMsP95"),
+			uniqueUsers: prefer(requests.uniq, "users"),
+			uniqueSessions: prefer(requests.uniq, "sessions"),
+			cacheReadTokens: prefer(requests.sums, "cacheReadTokens"),
+			// contextTokens = fresh input + cache reads + cache writes: all the input a model saw.
+			contextTokens: prefer(requests.sums, "contextTokens"),
+			requestsWithCacheRead: prefer(requests.sums, "requestsWithCacheRead"),
 		},
 		errors,
 		cache: cache && { ...cache, status: prefer(cache.dimensions, "cacheStatus", "cacheOp") ?? pick(cache.dimensions, /cach/) },
@@ -241,6 +256,7 @@ interface RawRow {
 	dimensions?: Record<string, string | number>;
 	sum?: Record<string, number>;
 	quantiles?: Record<string, number>;
+	uniq?: Record<string, number>;
 }
 
 export interface AiGatewaySeriesPoint {
@@ -275,6 +291,34 @@ export interface AiGatewayBreakdownRow {
 	p95: number | null;
 }
 
+/** What sends the traffic: the client named by its user agent ("pi", "opencode", a browser). */
+export function clientName(userAgent: string): string {
+	const ua = userAgent.trim();
+	if (!ua) return "(unknown)";
+	if (/^Mozilla\//.test(ua)) return "Browser";
+	const product = ua.split(/[/\s(;]/)[0];
+	return product || "(unknown)";
+}
+
+/** Sessions the spend-sessions dataset flags, by flag. null where the schema has no such flag. */
+export interface AiGatewaySessionHealth {
+	sessions: number;
+	flags: Record<SessionFlag, number | null>;
+	/** A drilled-in view filters sessions by their primary model/provider, not every request's. */
+	basis: "all" | "primary";
+}
+
+export const SESSION_FLAGS = {
+	abnormalCost: "flagAbnormalCost",
+	abnormalDuration: "flagAbnormalDuration",
+	lowCacheHit: "flagLowCacheHit",
+	highFirstContext: "flagHighFirstContext",
+	highMcpTools: "flagHighMcpTools",
+	premiumModel: "flagPremiumModel",
+	thinkingModel: "flagThinkingModel",
+} as const;
+export type SessionFlag = keyof typeof SESSION_FLAGS;
+
 export interface AiGatewayStatusRow {
 	statusCode: string;
 	rateLimited: boolean;
@@ -308,6 +352,7 @@ export interface AiGatewayFilter {
 /** Headline numbers for the window before this one, for the change shown on each card. */
 export interface AiGatewayPrevious {
 	requests: number;
+	sessions: number | null;
 	tokens: number | null;
 	cost: number | null;
 	errorRate: number | null;
@@ -342,6 +387,11 @@ export interface AiGatewayTotals {
 	p50: number | null;
 	p95: number | null;
 	rateLimited: number | null;
+	/** Distinct counts; null when the schema has none. Users is 0 when no user id is sent. */
+	users: number | null;
+	sessions: number | null;
+	/** Provider-side prompt caching. null when the schema carries no such sums. */
+	promptCache: { readTokens: number; inputTokens: number; requestsWithRead: number | null } | null;
 }
 
 export interface AiGatewayUsageResult {
@@ -349,12 +399,15 @@ export interface AiGatewayUsageResult {
 	timeDimension: string;
 	series: AiGatewaySeriesPoint[];
 	/** The series split by one dimension per bucket; empty for a dimension the schema lacks. */
-	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[] };
+	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[]; client: AiGatewaySplitPoint[] };
 	totals: AiGatewayTotals;
 	byGateway: AiGatewayBreakdownRow[];
 	byProvider: AiGatewayBreakdownRow[];
 	byModel: AiGatewayBreakdownRow[];
 	byStatus: AiGatewayStatusRow[];
+	/** By client application (from the user agent), versions folded together. */
+	byClient: AiGatewayBreakdownRow[];
+	sessionHealth: (AiGatewaySessionHealth & { available: true }) | { available: false; reason: string };
 	/** The most recent requests in the slice, newest first. Empty when the schema has no request id. */
 	recent: AiGatewayRequestRow[];
 	previous: AiGatewayPrevious | null;
@@ -473,6 +526,10 @@ function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["req
 	const measures = `count
         ${sumSelection([f.tokensIn, f.tokensOut, f.cachedRequests, f.erroredRequests, f.cost])}
         ${quantileSelection([f.latencyP50, f.latencyP95])}`;
+	const uniq = [f.uniqueUsers, f.uniqueSessions].filter(Boolean);
+	const headline = `${measures}
+        ${sumSelection([f.cacheReadTokens, f.contextTokens, f.requestsWithCacheRead])}
+        ${uniq.length ? `uniq { ${uniq.join(" ")} }` : ""}`;
 	// A breakdown whose dimension does not exist is omitted entirely rather than queried against
 	// a guessed name — the whole document fails on one unknown field, taking the series with it.
 	const breakdown = (alias: string, dimension: string | null) =>
@@ -525,14 +582,48 @@ query AiGatewayRequests($accountTag: string!, $since: Time!, $until: Time!, $pre
         ${sumSelection([f.tokensIn, f.tokensOut, f.cachedRequests, f.erroredRequests, f.cost])}
       }
       total: ${f.name}(filter: ${clause}, limit: 1) {
-        ${measures}
+        ${headline}
       }
       previous: ${f.name}(filter: ${previous.clause}, limit: 1) {
-        ${measures}
-      }${splitSeries("seriesByGateway", f.gateway)}${splitSeries("seriesByModel", f.model)}${splitSeries("seriesByProvider", f.provider)}${breakdown("byGateway", f.gateway)}${breakdown("byProvider", f.provider)}${breakdown("byModel", f.model)}${status}${recent}
+        ${headline}
+      }${splitSeries("seriesByGateway", f.gateway)}${splitSeries("seriesByModel", f.model)}${splitSeries("seriesByProvider", f.provider)}${splitSeries("seriesByClient", f.userAgent)}${breakdown("byGateway", f.gateway)}${breakdown("byProvider", f.provider)}${breakdown("byModel", f.model)}${breakdown("byClient", f.userAgent)}${status}${recent}
     }
   }
 }`;
+}
+
+/** Filters for the sessions dataset: a session's gateway, and its primary model and provider. */
+const SESSION_FILTER: Record<(typeof FILTER_KEYS)[number], string> = { gateway: "gateway", model: "primaryModel", provider: "primaryProvider" };
+
+/**
+ * Sessions in the window, and how many carry each health flag. The flags are 0/1 dimensions on
+ * the spend-sessions dataset (its cost and count sums read zero on the account this was built
+ * against), so each is counted with its own filter. The literal 1 is the only value written into
+ * the query; filter values are variables.
+ */
+function sessionHealthQuery(spend: DatasetCaps, filter: AiGatewayFilter): { query: string; flags: SessionFlag[] } {
+	const clauses = ["datetime_geq: $since", "datetime_leq: $until"];
+	const declarations: string[] = [];
+	for (const key of FILTER_KEYS) {
+		if (filter[key] === undefined) continue;
+		clauses.push(`${SESSION_FILTER[key]}: $f_${key}`);
+		declarations.push(`, $f_${key}: string`);
+	}
+	const flags = (Object.keys(SESSION_FLAGS) as SessionFlag[]).filter((flag) => spend.dimensions.includes(SESSION_FLAGS[flag]));
+	const base = clauses.join(", ");
+	const aliases = flags.map((flag) => `${flag}: ${spend.name}(filter: { ${base}, ${SESSION_FLAGS[flag]}: 1 }, limit: 1) { count }`).join("\n      ");
+	return {
+		flags,
+		query: `
+query AiGatewaySessions($accountTag: string!, $since: Time!, $until: Time!${declarations.join("")}) {
+  viewer {
+    accounts(filter: { accountTag: $accountTag }) {
+      sessions: ${spend.name}(filter: { ${base} }, limit: 1) { count }
+      ${aliases}
+    }
+  }
+}`,
+	};
 }
 
 function errorsQuery(f: DatasetCaps): string {
@@ -586,16 +677,23 @@ function isCacheHit(value: unknown): boolean {
 }
 
 const sumField = (row: RawRow | undefined, field: string | null): number | null => (field ? (row?.sum?.[field] ?? 0) : null);
+const uniqOf = (row: RawRow | undefined, field: string | null): number | null => (field ? (row?.uniq?.[field] ?? 0) : null);
 const addNullable = (a: number | null, b: number | null): number | null => (a === null && b === null ? null : (a ?? 0) + (b ?? 0));
 
 /** One bucket's share for one gateway/model/provider, for the stacked chart. */
-function foldSplit(rows: RawRow[], timeDimension: string, dimension: string | null, f: NonNullable<ResolvedFields["requests"]>): AiGatewaySplitPoint[] {
+function foldSplit(
+	rows: RawRow[],
+	timeDimension: string,
+	dimension: string | null,
+	f: NonNullable<ResolvedFields["requests"]>,
+	keyOf: (raw: string) => string = (raw) => raw.trim() || "(unknown)",
+): AiGatewaySplitPoint[] {
 	if (!dimension) return [];
 	return rows
 		.filter((row) => row.dimensions?.[timeDimension])
 		.map((row) => ({
 			ts: String(row.dimensions?.[timeDimension]),
-			key: String(row.dimensions?.[dimension] ?? "").trim() || "(unknown)",
+			key: keyOf(String(row.dimensions?.[dimension] ?? "")),
 			requests: row.count,
 			tokens: addNullable(sumField(row, f.tokensIn), sumField(row, f.tokensOut)),
 			cost: sumField(row, f.cost),
@@ -623,10 +721,17 @@ const quantile = (row: RawRow | undefined, field: string | null): number | null 
 	return typeof value === "number" && Number.isFinite(value) ? value : null;
 };
 
-function foldBreakdown(rows: RawRow[], dimension: string, f: NonNullable<ResolvedFields["requests"]>): AiGatewayBreakdownRow[] {
+function foldBreakdown(
+	rows: RawRow[],
+	dimension: string,
+	f: NonNullable<ResolvedFields["requests"]>,
+	keyOf: (raw: string) => string = (raw) => raw.trim() || "(unknown)",
+): AiGatewayBreakdownRow[] {
 	const byKey = new Map<string, AiGatewayBreakdownRow>();
+	const merged = new Set<string>();
 	for (const row of rows) {
-		const key = String(row.dimensions?.[dimension] ?? "").trim() || "(unknown)";
+		const key = keyOf(String(row.dimensions?.[dimension] ?? ""));
+		if (byKey.has(key)) merged.add(key);
 		const entry = byKey.get(key) ?? { key, requests: 0, tokensIn: null, tokensOut: null, cost: null, errors: null, cached: null, p50: null, p95: null };
 		entry.requests += row.count;
 		entry.tokensIn = addNullable(entry.tokensIn, sumField(row, f.tokensIn));
@@ -638,6 +743,12 @@ function foldBreakdown(rows: RawRow[], dimension: string, f: NonNullable<Resolve
 		entry.p50 ??= quantile(row, f.latencyP50);
 		entry.p95 ??= quantile(row, f.latencyP95);
 		byKey.set(key, entry);
+	}
+	// Quantiles do not add: a key folded from several rows (client versions) has no honest p50.
+	for (const key of merged) {
+		const entry = byKey.get(key)!;
+		entry.p50 = null;
+		entry.p95 = null;
 	}
 	return [...byKey.values()].sort((a, b) => b.requests - a.requests);
 }
@@ -712,6 +823,8 @@ export async function fetchAiGatewayUsage(
 		seriesByGateway?: RawRow[];
 		seriesByModel?: RawRow[];
 		seriesByProvider?: RawRow[];
+		seriesByClient?: RawRow[];
+		byClient?: RawRow[];
 		total?: RawRow[];
 		previous?: RawRow[];
 		byGateway?: RawRow[];
@@ -751,10 +864,14 @@ export async function fetchAiGatewayUsage(
 	// They carry no gateway/provider/model filter here, so on a drilled-in view they would report
 	// the whole account as the slice — left out instead.
 	const sliceOnly = (dataset: string) => Promise.reject(new Error(`The ${dataset} dataset is not filtered to this slice`));
-	const [errorsOutcome, cacheOutcome, spendOutcome] = await Promise.allSettled([
+	const sessions = fields.spend ? sessionHealthQuery(fields.spend, filter) : null;
+	const [errorsOutcome, cacheOutcome, spendOutcome, sessionsOutcome] = await Promise.allSettled([
 		filtered && inlineErrors === null ? sliceOnly("errors") : fields.errors ? postGraphql<{ total?: RawRow[] }>(accountId, token, errorsQuery(fields.errors), variables) : Promise.reject(new Error("This account's schema exposes no AI Gateway errors dataset")),
 		filtered && cachedRequests === null ? sliceOnly("cache") : fields.cache ? postGraphql<{ byStatus?: RawRow[] }>(accountId, token, cacheQuery(fields.cache), variables) : Promise.reject(new Error("This account's schema exposes no AI Gateway cache dataset")),
 		filtered && inlineCost === null ? sliceOnly("spend") : fields.spend ? postGraphql<{ total?: RawRow[] }>(accountId, token, spendQuery(fields.spend), variables) : Promise.reject(new Error("This account's schema exposes no AI Gateway spend dataset")),
+		sessions
+			? postGraphql<Record<string, RawRow[] | undefined>>(accountId, token, sessions.query, { since: options.since, until: options.until, ...filterVariables })
+			: Promise.reject(new Error("This account's schema exposes no AI Gateway sessions dataset")),
 	]);
 
 	const reasonOf = (outcome: PromiseSettledResult<unknown>): string =>
@@ -820,7 +937,27 @@ export async function fetchAiGatewayUsage(
 		p50: quantile(totalRow, fields.requests.latencyP50),
 		p95: quantile(totalRow, fields.requests.latencyP95),
 		rateLimited: null,
+		users: uniqOf(totalRow, fields.requests.uniqueUsers),
+		sessions: uniqOf(totalRow, fields.requests.uniqueSessions),
+		promptCache:
+			fields.requests.cacheReadTokens && fields.requests.contextTokens
+				? {
+						readTokens: sumField(totalRow, fields.requests.cacheReadTokens) ?? 0,
+						inputTokens: sumField(totalRow, fields.requests.contextTokens) ?? 0,
+						requestsWithRead: sumField(totalRow, fields.requests.requestsWithCacheRead),
+					}
+				: null,
 	};
+
+	let sessionHealth: AiGatewayUsageResult["sessionHealth"];
+	if (sessions && sessionsOutcome.status === "fulfilled") {
+		const account = sessionsOutcome.value.account ?? {};
+		const count = (alias: string) => (account[alias] ?? []).reduce((sum, row) => sum + row.count, 0);
+		const flags = Object.fromEntries((Object.keys(SESSION_FLAGS) as SessionFlag[]).map((flag) => [flag, sessions.flags.includes(flag) ? count(flag) : null])) as Record<SessionFlag, number | null>;
+		sessionHealth = { available: true, sessions: count("sessions"), flags, basis: filter.model || filter.provider ? "primary" : "all" };
+	} else {
+		sessionHealth = { available: false, reason: reasonOf(sessionsOutcome) };
+	}
 
 	const byStatus: AiGatewayStatusRow[] = (account?.byStatus || []).map((row) => ({
 		statusCode: text(row.dimensions?.[fields.requests!.statusCode as string]) || "(unknown)",
@@ -839,6 +976,7 @@ export async function fetchAiGatewayUsage(
 	const previous: AiGatewayPrevious | null = prevRow
 		? {
 				requests: prevRequests,
+				sessions: uniqOf(prevRow, fields.requests.uniqueSessions),
 				tokens: addNullable(prevField(fields.requests.tokensIn), prevField(fields.requests.tokensOut)),
 				cost: prevField(fields.requests.cost),
 				errorRate: prevRequests > 0 && prevErrors !== null ? prevErrors / prevRequests : null,
@@ -855,12 +993,15 @@ export async function fetchAiGatewayUsage(
 			gateway: foldSplit(account?.seriesByGateway || [], timeDimension, fields.requests.gateway, fields.requests),
 			model: foldSplit(account?.seriesByModel || [], timeDimension, fields.requests.model, fields.requests),
 			provider: foldSplit(account?.seriesByProvider || [], timeDimension, fields.requests.provider, fields.requests),
+			client: foldSplit(account?.seriesByClient || [], timeDimension, fields.requests.userAgent, fields.requests, clientName),
 		},
 		totals,
 		byGateway: fields.requests.gateway ? foldBreakdown(account?.byGateway || [], fields.requests.gateway, fields.requests) : [],
 		byProvider: fields.requests.provider ? foldBreakdown(account?.byProvider || [], fields.requests.provider, fields.requests) : [],
 		byModel: fields.requests.model ? foldBreakdown(account?.byModel || [], fields.requests.model, fields.requests) : [],
 		byStatus,
+		byClient: fields.requests.userAgent ? foldBreakdown(account?.byClient || [], fields.requests.userAgent, fields.requests, clientName) : [],
+		sessionHealth,
 		recent: foldRecent(account?.recent || [], fields.requests),
 		previous,
 		previousWindow: prev,

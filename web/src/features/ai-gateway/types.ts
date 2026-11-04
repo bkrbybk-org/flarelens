@@ -87,10 +87,29 @@ export interface AiGatewayTotals {
 	p50: number | null;
 	p95: number | null;
 	rateLimited: number | null;
+	users: number | null;
+	sessions: number | null;
+	promptCache: { readTokens: number; inputTokens: number; requestsWithRead: number | null } | null;
 }
+
+export const SESSION_FLAG_LABEL = {
+	abnormalCost: "Unusually expensive",
+	abnormalDuration: "Unusually long",
+	lowCacheHit: "Low prompt-cache reuse",
+	highFirstContext: "Very large first prompt",
+	highMcpTools: "Heavy MCP tool use",
+	premiumModel: "Used a premium model",
+	thinkingModel: "Used a thinking model",
+} as const;
+export type SessionFlag = keyof typeof SESSION_FLAG_LABEL;
+
+export type AiGatewaySessionHealth =
+	| { available: true; sessions: number; flags: Record<SessionFlag, number | null>; basis: "all" | "primary" }
+	| { available: false; reason: string };
 
 export interface AiGatewayPrevious {
 	requests: number;
+	sessions: number | null;
 	tokens: number | null;
 	cost: number | null;
 	errorRate: number | null;
@@ -102,12 +121,14 @@ export interface AiGatewayUsageResult {
 	granularity: AiGatewayGranularity;
 	timeDimension: string;
 	series: AiGatewaySeriesPoint[];
-	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[] };
+	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[]; client: AiGatewaySplitPoint[] };
 	totals: AiGatewayTotals;
 	byGateway: AiGatewayBreakdownRow[];
 	byProvider: AiGatewayBreakdownRow[];
 	byModel: AiGatewayBreakdownRow[];
 	byStatus: AiGatewayStatusRow[];
+	byClient: AiGatewayBreakdownRow[];
+	sessionHealth: AiGatewaySessionHealth;
 	recent: AiGatewayRequestRow[];
 	previous: AiGatewayPrevious | null;
 	previousWindow: { since: string; until: string };
@@ -129,7 +150,46 @@ export const EMPTY_TOTALS: AiGatewayTotals = {
 	p50: null,
 	p95: null,
 	rateLimited: null,
+	users: null,
+	sessions: null,
+	promptCache: null,
 };
+
+/** Provider ids as AI Gateway records them, in the names people know them by. Unknown ids show as they are. */
+const PROVIDER_NAMES: Record<string, string> = {
+	"workers-ai": "Workers AI",
+	openai: "OpenAI",
+	anthropic: "Anthropic",
+	"google-ai-studio": "Google AI Studio",
+	"google-vertex-ai": "Google Vertex AI",
+	"azure-openai": "Azure OpenAI",
+	"aws-bedrock": "Amazon Bedrock",
+	groq: "Groq",
+	mistral: "Mistral",
+	cohere: "Cohere",
+	deepseek: "DeepSeek",
+	"perplexity-ai": "Perplexity",
+	openrouter: "OpenRouter",
+	grok: "xAI",
+	huggingface: "Hugging Face",
+	replicate: "Replicate",
+	cerebras: "Cerebras",
+	cartesia: "Cartesia",
+	elevenlabs: "ElevenLabs",
+	deepgram: "Deepgram",
+	"fal-ai": "fal",
+	ideogram: "Ideogram",
+};
+
+export function providerName(id: string): string {
+	return PROVIDER_NAMES[id] ?? id;
+}
+
+/** Days in the window with any request, and the window's length in days. */
+export function activeDays(series: { ts: string; requests: number }[], windowDays: number): { active: number; of: number } {
+	const days = new Set(series.filter((p) => p.requests > 0).map((p) => p.ts.slice(0, 10)));
+	return { active: days.size, of: Math.max(windowDays, days.size) };
+}
 
 export function compactCount(value: number | null): string {
 	if (value === null) return "—";
