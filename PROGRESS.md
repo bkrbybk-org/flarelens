@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-27** against a full read of the tree, t
 live probe of every route on the deployed Worker. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,264 tests green across 95 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,270 tests green across 96 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `662526be`, deployed 2026-11-04 (full-screen presentation mode on every page; before it the same day, `59db4f87`: AI Gateway timeframe buttons and stacked chart by gateway, model, Workers AI vs third-party; before it the same day, `19bcacaa`: AI Gateway overview and drill-down; before it, 2026-10-28, `1ba2856c`: Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
+Running version `a9e33353`, deployed 2026-11-04 (page rotation in presentation mode; before it the same day, `662526be`: full-screen presentation mode on every page; before it the same day, `59db4f87`: AI Gateway timeframe buttons and stacked chart by gateway, model, Workers AI vs third-party; before it the same day, `19bcacaa`: AI Gateway overview and drill-down; before it, 2026-10-28, `1ba2856c`: Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -244,6 +244,7 @@ Disconnect clears the store.
 | `cf_zt_prefs` | localStorage | `PREFS_VERSION = 3`; a version bump discards saved column order/visibility so new defaults apply. The policies table keeps its own `policyColumnVisibility` / `policyColumnOrder` keys: it shares column ids (`name`, `updated_at`, `id`) with the applications table, so one saved order would scramble the other |
 | `flarelens_saved_views` | localStorage | Saved views: name + hash + account, listed only for the current account, capped at 50 each |
 | `flarelens_recent_commands` | localStorage | Command palette's recently used commands |
+| `flarelens_rotation` | localStorage | Presentation-mode page rotation: the chosen pages and interval |
 | `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (19 keys in all, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
 
 ### Tests
@@ -394,6 +395,13 @@ files behind.
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **Page rotation (2026-11-04, `a9e33353`).** Presentation mode can loop through two or more chosen
+  pages, 30 s to 5 min each, with a "Rotating 2/4 · next: … in 0:45" status, Pause and Stop. The
+  countdown restarts on any page change (so a visitor clicking around gets the full interval), each
+  page remounts and reloads on arrival, and leaving full screen by any means stops it. The loop and
+  interval persist per browser under `flarelens_rotation` (localStorage, via lib/storage.ts; unknown
+  pages and intervals dropped on read). Live bundle checked; not exercised in a browser.
 
 - **Full screen on every page (2026-11-04, `662526be`).** For booths and presentations: a top-bar
   button and a ⌘K command enter full screen with the sidebar and top bar replaced by a slim bar

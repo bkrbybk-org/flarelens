@@ -30,6 +30,7 @@ import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
 import { Topbar } from "./components/shell/Topbar";
 import { PresentationBar } from "./components/shell/PresentationBar";
 import { useAutoRefresh, usePresentation } from "./hooks/usePresentation";
+import { loadRotation, saveRotation, usePageRotation, type RotationConfig } from "./hooks/usePageRotation";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { NameDialog } from "./components/shell/NameDialog";
 import { AddAccountDialog } from "./components/shell/AddAccountDialog";
@@ -322,6 +323,21 @@ export default function App() {
 	const refreshing = DATA_ROUTES.has(route) ? data.loading : (sectionRefresh?.loading ?? false);
 	const [autoRefreshMs, setAutoRefreshMs] = useState(0);
 	useAutoRefresh(presentation.active ? autoRefreshMs : 0, currentRefresh, refreshing);
+	// Page rotation: an unattended screen loops through chosen pages. Only while presenting —
+	// leaving full screen, by any means, stops it.
+	const [rotationConfig, setRotationConfig] = useState<RotationConfig>(loadRotation);
+	const [rotating, setRotating] = useState(false);
+	const [rotationPaused, setRotationPaused] = useState(false);
+	if (!presentation.active && rotating) setRotating(false);
+	const rotation = usePageRotation({ running: presentation.active && rotating, paused: rotationPaused, config: rotationConfig, route, navigate });
+	const startRotation = (config: RotationConfig) => {
+		saveRotation(config);
+		setRotationConfig(config);
+		setRotationPaused(false);
+		setRotating(true);
+		if (!config.routes.includes(route)) navigate(config.routes[0]);
+	};
+
 	// "Updated hh:mm" on the presentation bar: stamped each time a load finishes.
 	const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 	const [wasRefreshing, setWasRefreshing] = useState(refreshing);
@@ -393,6 +409,18 @@ export default function App() {
 						onAutoRefresh={setAutoRefreshMs}
 						onRefresh={currentRefresh}
 						onExit={presentation.exit}
+						rotation={{
+							config: rotationConfig,
+							running: rotating,
+							paused: rotationPaused,
+							next: rotation.next,
+							secondsLeft: rotation.secondsLeft,
+							position: rotationConfig.routes.indexOf(route) + 1,
+							onStart: startRotation,
+							onPause: () => setRotationPaused(true),
+							onResume: () => setRotationPaused(false),
+							onStop: () => setRotating(false),
+						}}
 					/>
 				) : (
 				<Topbar
