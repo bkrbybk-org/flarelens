@@ -91,6 +91,41 @@ export function buildStacks(
 	};
 }
 
+/** Each key's running total across the buckets — the "Accumulated" view. */
+export function accumulate(stacks: Stacks): Stacks {
+	const running: Record<string, number> = {};
+	return {
+		...stacks,
+		buckets: stacks.buckets.map((b) => {
+			const values: Record<string, number> = {};
+			for (const key of stacks.keys) {
+				running[key] = (running[key] ?? 0) + (b.values[key] ?? 0);
+				values[key] = running[key];
+			}
+			return { ts: b.ts, values, total: Object.values(values).reduce((a, c) => a + c, 0) };
+		}),
+	};
+}
+
+const DAYS_PER_MONTH = 365.25 / 12;
+const BUCKET_MINUTES: Record<AiGatewayGranularity, number> = { "15m": 15, hourly: 60, daily: 1440 };
+
+/** A monthly budget's share of one bucket, or of a window of `minutes`. */
+export function budgetFor(monthly: number, minutes: number): number {
+	return (monthly * minutes) / (DAYS_PER_MONTH * 1440);
+}
+export const bucketMinutes = (granularity: AiGatewayGranularity) => BUCKET_MINUTES[granularity];
+
+/**
+ * This calendar month's spend at the window's daily run rate. A projection, not a bill: it
+ * assumes the window's pace holds for the whole month.
+ */
+export function forecastMonth(spend: number, windowMinutes: number, now = new Date()): number {
+	const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+	const perDay = spend / Math.max(windowMinutes / 1440, 1 / 24);
+	return perDay * daysInMonth;
+}
+
 /** Categorical, colour-blind-distinguishable; red is kept for errors, grey for "Other". */
 export const STACK_COLORS = ["#f6821f", "#2563eb", "#0d9488", "#7c3aed", "#ca8a04", "#db2777"];
 export const OTHER_COLOR = "#a1a1aa";

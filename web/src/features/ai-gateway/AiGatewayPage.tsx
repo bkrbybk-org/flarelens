@@ -1,16 +1,17 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useSectionRefresh } from "../../hooks/useSectionRefresh";
-import { EmptyNote } from "../../components/EmptyState";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
 import { TabPanel, Tabs } from "../../components/Tabs";
 import { ALERT_ERROR, BADGE, BADGE_NEUTRAL, CARD, FOCUS_RING, MUTED, SECTION_TITLE } from "../../lib/ui";
-import { ChartTooltip, HoverGuide, useChartHover } from "../../components/chart/ChartHover";
 import { getHashParams, setHashParam } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
 import { TIME_PRESETS, type TimeRange } from "../../hooks/useTimeRange";
-import { OTHER, buildStacks, colorFor, windowBuckets, type Split, type Stacks, type StackMetric } from "./stack";
+import { accumulate, budgetFor, bucketMinutes, buildStacks, forecastMonth, sourceOf, windowBuckets, type Split, type StackMetric } from "./stack";
 import { useAiGatewayUsage } from "./useAiGatewayUsage";
+import { UsageChart, type ChartMode, type ChartType } from "./UsageChart";
+import { DonutPanel, type DonutSlice } from "./DonutPanel";
+import { storageGet, storageSet } from "../../lib/storage";
 import { buildInsights } from "./insights";
 import {
 	EMPTY_TOTALS,
@@ -20,7 +21,6 @@ import {
 	activeDays,
 	providerName,
 	granularityFor,
-	aiGatewayBucketLabel as bucketLabel,
 	change,
 	compactCount as compact,
 	formatCost,
@@ -39,18 +39,29 @@ import {
 
 const ACCENT = "#f6821f";
 
-const W = 960;
-const H = 200;
-const PAD_L = 52;
-const PAD_R = 12;
-const PAD_T = 12;
-const PAD_B = 26;
-
-function niceMax(value: number): number {
-	if (value <= 0) return 1;
-	const magnitude = 10 ** Math.floor(Math.log10(value));
-	return Math.ceil(value / magnitude) * magnitude;
+/** Granularity, as a cost view offers it: one column per group, a running total, or a bucket size. */
+type GranularityChoice = "none" | "accumulated" | AiGatewayGranularity;
+const GRANULARITY_CHOICES: { id: GranularityChoice; label: string }[] = [
+	{ id: "none", label: "None" },
+	{ id: "accumulated", label: "Accumulated" },
+	{ id: "daily", label: "Daily" },
+	{ id: "hourly", label: "Hourly" },
+	{ id: "15m", label: "15 minutes" },
+];
+/** A bucket size that suits the window: not so fine that a 30-day chart has 2,880 columns, not one column for an hour. */
+function bucketFits(choice: AiGatewayGranularity, minutes: number): boolean {
+	if (choice === "15m") return minutes <= 1440;
+	if (choice === "hourly") return minutes <= 10_080;
+	return minutes >= 1440;
 }
+const CHART_TYPES: { id: ChartType; label: string }[] = [
+	{ id: "stacked", label: "Column (stacked)" },
+	{ id: "grouped", label: "Column (grouped)" },
+	{ id: "line", label: "Line" },
+	{ id: "area", label: "Area" },
+];
+type DonutDimension = "gateway" | "model" | "provider" | "client" | "source" | "tag";
+const SELECT_SM = `rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`;
 
 type Metric = StackMetric;
 const SPLIT_LABEL: Record<Split, string> = {
@@ -71,165 +82,6 @@ const METRICS: { id: Metric; label: string; format: (v: number) => string }[] = 
 	{ id: "errors", label: "Errors", format: (v) => compact(v) },
 ];
 
-/** Bucket axis labels, thinned so they never collide: at most about eight across the chart. */
-function axisLabel(ts: string, granularity: AiGatewayGranularity): string {
-	const date = new Date(ts.length === 10 ? `${ts}T00:00:00Z` : ts);
-	if (Number.isNaN(date.getTime())) return ts;
-	if (granularity === "daily") return date.toLocaleDateString([], { month: "short", day: "numeric" });
-	return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-function StackedChart({
-	stacks,
-	split,
-	granularity,
-	metric,
-	onPick,
-	label = (key) => key,
-	spendLine,
-}: {
-	stacks: Stacks;
-	split: Split;
-	granularity: AiGatewayGranularity;
-	metric: Metric;
-	onPick?: (key: string) => void;
-	label?: (key: string) => string;
-	/** Spend per bucket, keyed like the buckets, drawn as a line on its own right-hand axis. */
-	spendLine?: Map<string, number>;
-}) {
-	const spec = METRICS.find((m) => m.id === metric)!;
-	const { buckets, keys } = stacks;
-	const innerH = H - PAD_T - PAD_B;
-	// Room on the right for the spend axis, when there is one.
-	const padR = spendLine ? 56 : PAD_R;
-	const plotRight = W - padR;
-	const slot = (plotRight - PAD_L) / Math.max(1, buckets.length);
-	const spendValues = spendLine ? buckets.map((b) => spendLine.get(b.ts) ?? 0) : [];
-	const spendMax = Math.max(0, ...spendValues) || 1;
-	const barW = Math.max(1, slot * 0.72);
-	const peak = Math.max(0, ...buckets.map((b) => b.total));
-	const max = metric === "cost" ? peak || 1 : niceMax(Math.max(1, peak));
-	const color = (key: string) => colorFor(key, keys.indexOf(key), split);
-	const labelEvery = Math.max(1, Math.ceil(buckets.length / 8));
-
-	const { hover, hoverProps } = useChartHover({
-		count: buckets.length,
-		viewWidth: W,
-		viewHeight: H,
-		plotLeft: PAD_L,
-		plotRight,
-		mode: "slot",
-	});
-
-	if (!buckets.length || peak === 0) return <EmptyNote title={`No ${spec.label.toLowerCase()} in this window`} />;
-	const bucket = hover === null ? null : buckets[hover.index];
-
-	return (
-		<div>
-			<div className="relative">
-				<svg viewBox={`0 0 ${W} ${H}`} className="h-[220px] w-full" role="img" aria-label={`${spec.label} per ${GRANULARITY_LABEL[granularity].toLowerCase()} bucket${split === "none" ? "" : `, split by ${splitPhrase(split)}`}`} {...hoverProps}>
-					{[0, 0.5, 1].map((fraction) => {
-						const y = PAD_T + innerH * fraction;
-						return (
-							<g key={fraction}>
-								<line x1={PAD_L} x2={plotRight} y1={y} y2={y} className="stroke-zinc-200 dark:stroke-zinc-800" />
-								<text x={PAD_L - 8} y={y + 4} textAnchor="end" className="fill-zinc-400 text-[10px]">
-									{spec.format(max * (1 - fraction))}
-								</text>
-								{spendLine && (
-									<text x={plotRight + 8} y={y + 4} textAnchor="start" className="fill-amber-500 text-[10px]">
-										{formatCost(spendMax * (1 - fraction))}
-									</text>
-								)}
-							</g>
-						);
-					})}
-					{buckets.map((b, i) => {
-						let y = PAD_T + innerH;
-						return (
-							<g key={b.ts}>
-								{keys.map((key) => {
-									const h = ((b.values[key] ?? 0) / max) * innerH;
-									if (h <= 0) return null;
-									y -= h;
-									return <rect key={key} x={PAD_L + i * slot} y={y} width={barW} height={h} fill={color(key)} />;
-								})}
-								{i % labelEvery === 0 && (
-									<text x={PAD_L + i * slot + barW / 2} y={H - 8} textAnchor="middle" className="fill-zinc-400 text-[10px]">
-										{axisLabel(b.ts, granularity)}
-									</text>
-								)}
-							</g>
-						);
-					})}
-					{spendLine && (
-						<polyline
-							fill="none"
-							stroke={SPEND_COLOR}
-							strokeWidth={2}
-							strokeLinejoin="round"
-							points={spendValues.map((v, i) => `${PAD_L + i * slot + barW / 2},${PAD_T + innerH - (v / spendMax) * innerH}`).join(" ")}
-						/>
-					)}
-					{spendLine &&
-						spendValues.map((v, i) =>
-							v > 0 ? <circle key={i} cx={PAD_L + i * slot + barW / 2} cy={PAD_T + innerH - (v / spendMax) * innerH} r={2.5} fill={SPEND_COLOR} /> : null,
-						)}
-					{hover !== null && <HoverGuide x={PAD_L + slot * (hover.index + 0.5)} top={PAD_T} bottom={PAD_T + innerH} />}
-				</svg>
-				<ChartTooltip
-					hover={hover}
-					header={bucket ? bucketLabel(bucket.ts, granularity) : ""}
-					rows={
-						bucket
-							? [
-									...keys
-										.filter((key) => bucket.values[key])
-										.map((key) => ({ label: split === "none" ? spec.label : label(key), value: spec.format(bucket.values[key]), color: color(key) })),
-									...(split !== "none" ? [{ label: "Total", value: spec.format(bucket.total) }] : []),
-									...(spendLine ? [{ label: "Spend", value: formatCost(spendLine.get(bucket.ts) ?? 0), color: SPEND_COLOR }] : []),
-								]
-							: []
-					}
-				/>
-			</div>
-			{(split !== "none" || spendLine) && (
-				<ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Legend">
-					{(split === "none" ? [] : keys).map((key) => {
-						const drillable = onPick && key !== OTHER;
-						const content = (
-							<>
-								<span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: color(key) }} />
-								<span className="max-w-[16rem] truncate">{label(key)}</span>
-								<span className={`tabular-nums ${MUTED}`}>{spec.format(stacks.totals[key] ?? 0)}</span>
-							</>
-						);
-						return (
-							<li key={key}>
-								{drillable ? (
-									<button type="button" onClick={() => onPick(key)} className={`flex items-center gap-1.5 hover:underline ${FOCUS_RING}`} title={`Drill into ${label(key)}`}>
-										{content}
-									</button>
-								) : (
-									<span className="flex items-center gap-1.5">{content}</span>
-								)}
-							</li>
-						);
-					})}
-					{spendLine && (
-						<li className="flex items-center gap-1.5">
-							<span aria-hidden className="inline-block h-0.5 w-4" style={{ background: SPEND_COLOR }} />
-							Spend (right axis)
-							<span className={`tabular-nums ${MUTED}`}>{formatCost(spendValues.reduce((a, b) => a + b, 0))}</span>
-						</li>
-					)}
-				</ul>
-			)}
-		</div>
-	);
-}
-
-const SPEND_COLOR = "#d97706";
 
 /**
  * The change since the previous window, coloured by whether up is good. Requests, tokens and
@@ -582,8 +434,22 @@ export function AiGatewayPage({
 		if (!key && split === "tag") setSplit("source");
 	};
 	const [tab, setTab] = useState<BreakdownTab | null>(null);
+	const [granChoice, setGranChoice] = useState<GranularityChoice | null>(null);
+	const [chartType, setChartType] = useState<ChartType>("stacked");
+	const [donuts, setDonuts] = useState<DonutDimension[]>(["gateway", "model", "provider"]);
+	// A monthly budget, per account and per browser: a convenience, not shared state.
+	const budgetKey = `flarelens_aig_budget:${session.accountId}`;
+	const [budgetText, setBudgetText] = useState(() => storageGet("local", budgetKey) ?? "");
+	const monthlyBudget = Number(budgetText) > 0 ? Number(budgetText) : null;
+	const saveBudget = (text: string) => {
+		setBudgetText(text);
+		storageSet("local", budgetKey, text);
+	};
 
-	const granularity: AiGatewayGranularity = granularityFor(timeRange.minutes);
+	// The bucket size asked for: the one chosen, if it still suits the window, else the window's default.
+	const chosenBucket = granChoice && granChoice !== "none" && granChoice !== "accumulated" && bucketFits(granChoice, timeRange.minutes) ? granChoice : null;
+	const granularity: AiGatewayGranularity = chosenBucket ?? granularityFor(timeRange.minutes);
+	const chartMode: ChartMode = granChoice === "none" ? "none" : granChoice === "accumulated" ? "accumulated" : "buckets";
 	const { from, to } = timeRange.bounds();
 	const filterKey = FILTER_ORDER.map((k) => filter[k] ?? "").join("\u0000");
 
@@ -631,9 +497,46 @@ export function AiGatewayPage({
 
 	// Spend per bucket for the line over the bars: messages and money on one chart.
 	const spendLine = useMemo(
-		() => (showSpend && metric !== "cost" && result?.series.some((p) => p.cost !== null) ? new Map(result.series.map((p) => [p.ts, p.cost ?? 0])) : undefined),
-		[showSpend, metric, result],
+		() =>
+			showSpend && metric !== "cost" && chartMode === "buckets" && result?.series.some((p) => p.cost !== null) ? new Map(result.series.map((p) => [p.ts, p.cost ?? 0])) : undefined,
+		[showSpend, metric, result, chartMode],
 	);
+	const shownStacks = useMemo(() => (chartMode === "accumulated" ? accumulate(stacks) : stacks), [stacks, chartMode]);
+	// The budget in the charted unit: only for spend, pro-rated to a bucket or to the whole window.
+	const budgetLevel =
+		metric === "cost" && monthlyBudget && chartMode !== "none"
+			? budgetFor(monthlyBudget, chartMode === "accumulated" ? timeRange.minutes : bucketMinutes(shownGranularity))
+			: null;
+	const forecast = totals.cost !== null ? forecastMonth(totals.cost, timeRange.minutes) : null;
+	const measureOf = (row: BreakdownRow): number =>
+		metric === "cost" ? (row.cost ?? 0) : metric === "tokens" ? (row.tokensIn ?? 0) + (row.tokensOut ?? 0) : metric === "errors" ? (row.errors ?? 0) : row.requests;
+	const donutDims: { id: DonutDimension; label: string }[] = [
+		{ id: "gateway", label: "Gateway" },
+		{ id: "model", label: "Model" },
+		{ id: "provider", label: "Provider" },
+		{ id: "client", label: "Client" },
+		{ id: "source", label: "Workers AI vs third-party" },
+		...(tag && result?.tags?.selected === tag ? [{ id: "tag" as const, label: `Tag: ${tag}` }] : []),
+	];
+	const slicesFor = (dimension: DonutDimension): DonutSlice[] => {
+		const rows =
+			dimension === "gateway"
+				? result?.byGateway
+				: dimension === "model"
+					? result?.byModel
+					: dimension === "provider" || dimension === "source"
+						? result?.byProvider
+						: dimension === "client"
+							? result?.byClient
+							: result?.tags?.rows;
+		const slices = (rows ?? []).map((row) => ({ key: dimension === "source" ? sourceOf(row.key) : row.key, value: measureOf(row) }));
+		if (dimension !== "source") return slices;
+		const folded = new Map<string, number>();
+		for (const sl of slices) folded.set(sl.key, (folded.get(sl.key) ?? 0) + sl.value);
+		return [...folded].map(([key, value]) => ({ key, value }));
+	};
+	const metricSpec = METRICS.find((m) => m.id === metric)!;
+
 	const days = useMemo(
 		// "of 7" for a 7-day window, though its edges touch 8 calendar dates.
 		() => activeDays(result?.series ?? [], Math.max(1, Math.round(timeRange.minutes / 1440))),
@@ -830,62 +733,151 @@ export function AiGatewayPage({
 			)}
 
 			<section className={CARD} aria-labelledby="aig-chart-title">
-				<div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-					<h2 id="aig-chart-title" className={SECTION_TITLE}>
-						{METRICS.find((m) => m.id === metric)!.label} by {GRANULARITY_LABEL[shownGranularity] === "Daily" ? "day" : GRANULARITY_LABEL[shownGranularity] === "Hourly" ? "hour" : "15 minutes"}
-						{split !== "none" ? `, split by ${splitPhrase(split)}` : ""}
-					</h2>
-					<div className="ml-auto flex flex-wrap items-center gap-3">
-						<label className="flex items-center gap-1.5 text-xs">
-							<span className={MUTED}>Split by</span>
-							<select value={split} onChange={(e) => setSplit(e.target.value as Split)} className={`rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`}>
-								{(Object.keys(SPLIT_LABEL) as Split[])
-									.filter((k) => !(k === "gateway" && filter.gateway) && !(k === "model" && filter.model) && !(k === "provider" && filter.provider) && !(k === "tag" && !tag))
-									.map((k) => (
-										<option key={k} value={k}>
-											{k === "none" ? "Nothing (total)" : k === "tag" ? `Tag: ${tag}` : SPLIT_LABEL[k]}
-										</option>
-									))}
-							</select>
+				{/* The cost header a cost view opens with: what was spent, where the month is heading, against what budget. */}
+				<div className="mb-4 flex flex-wrap items-end gap-x-10 gap-y-3">
+					<div>
+						<div className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`}>Actual spend</div>
+						<div className="text-3xl font-semibold tabular-nums">{formatCost(totals.cost)}</div>
+					</div>
+					<div>
+						<div className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`} title="This calendar month at the window's daily run rate">
+							Forecast this month
+						</div>
+						<div className="text-3xl font-semibold tabular-nums">{forecast === null ? "--" : formatCost(forecast)}</div>
+					</div>
+					<div>
+						<label htmlFor="aig-budget" className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`}>
+							Budget
 						</label>
-						{metric !== "cost" && (
-							<label className="flex items-center gap-1.5 text-xs">
-								<input type="checkbox" checked={showSpend} onChange={(e) => setShowSpend(e.target.checked)} />
-								<span className={MUTED}>Spend line</span>
-							</label>
-						)}
-						<div className="flex gap-1" role="group" aria-label="Chart metric">
-							{METRICS.map((m) => (
-								<button
-									key={m.id}
-									type="button"
-									aria-pressed={metric === m.id}
-									onClick={() => setMetric(m.id)}
-									className={`rounded-md px-2.5 py-1 text-xs ${metric === m.id ? "bg-cf text-white" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"} ${FOCUS_RING}`}
-								>
-									{m.label}
-								</button>
-							))}
+						<div className="flex items-baseline gap-1">
+							<span className="text-3xl font-semibold">$</span>
+							<input
+								id="aig-budget"
+								type="number"
+								min={0}
+								step="1"
+								inputMode="decimal"
+								placeholder="none"
+								value={budgetText}
+								onChange={(e) => saveBudget(e.target.value)}
+								className={`w-28 rounded-md border border-transparent bg-transparent text-3xl font-semibold tabular-nums hover:border-zinc-300 focus:border-cf dark:hover:border-zinc-700 ${FOCUS_RING}`}
+							/>
+							<span className={`text-sm ${MUTED}`}>/mo</span>
 						</div>
 					</div>
+					{monthlyBudget && forecast !== null && (
+						<div className={`text-sm ${forecast > monthlyBudget ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400"}`} role="status">
+							{forecast > monthlyBudget
+								? `Forecast ${formatRate(forecast / monthlyBudget)} of budget — over by ${formatCost(forecast - monthlyBudget)}`
+								: `On track: forecast ${formatRate(forecast / monthlyBudget)} of budget`}
+						</div>
+					)}
 				</div>
-				<StackedChart
-					stacks={stacks}
+
+				<h2 id="aig-chart-title" className={`mb-2 ${SECTION_TITLE}`}>
+					{metricSpec.label}
+					{chartMode === "none"
+						? " for the window"
+						: chartMode === "accumulated"
+							? ", accumulated"
+							: ` by ${shownGranularity === "daily" ? "day" : shownGranularity === "hourly" ? "hour" : "15 minutes"}`}
+					{split !== "none" ? `, split by ${split === "tag" ? `tag ${tag}` : splitPhrase(split)}` : ""}
+				</h2>
+				<div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+					<label className="flex items-center gap-1.5 text-xs">
+						<span className={MUTED}>Group by</span>
+						<select value={split} onChange={(e) => setSplit(e.target.value as Split)} className={SELECT_SM}>
+							{(Object.keys(SPLIT_LABEL) as Split[])
+								.filter((k) => !(k === "gateway" && filter.gateway) && !(k === "model" && filter.model) && !(k === "provider" && filter.provider) && !(k === "tag" && !tag))
+								.map((k) => (
+									<option key={k} value={k}>
+										{k === "none" ? "None" : k === "tag" ? `Tag: ${tag}` : SPLIT_LABEL[k]}
+									</option>
+								))}
+						</select>
+					</label>
+					<label className="flex items-center gap-1.5 text-xs">
+						<span className={MUTED}>Granularity</span>
+						<select
+							value={chartMode === "buckets" ? shownGranularity : chartMode}
+							onChange={(e) => setGranChoice(e.target.value as GranularityChoice)}
+							className={SELECT_SM}
+						>
+							{GRANULARITY_CHOICES.map((g) => (
+								<option key={g.id} value={g.id} disabled={g.id !== "none" && g.id !== "accumulated" && !bucketFits(g.id as AiGatewayGranularity, timeRange.minutes)}>
+									{g.label}
+								</option>
+							))}
+						</select>
+					</label>
+					<label className="flex items-center gap-1.5 text-xs">
+						<span className={MUTED}>Chart</span>
+						<select value={chartMode === "none" ? "stacked" : chartType} disabled={chartMode === "none"} onChange={(e) => setChartType(e.target.value as ChartType)} className={SELECT_SM}>
+							{CHART_TYPES.map((t) => (
+								<option key={t.id} value={t.id}>{t.label}</option>
+							))}
+						</select>
+					</label>
+					{metric !== "cost" && chartMode === "buckets" && (
+						<label className="flex items-center gap-1.5 text-xs">
+							<input type="checkbox" checked={showSpend} onChange={(e) => setShowSpend(e.target.checked)} />
+							<span className={MUTED}>Spend line</span>
+						</label>
+					)}
+					<div className="ml-auto flex gap-1" role="group" aria-label="Chart metric">
+						{METRICS.map((m) => (
+							<button
+								key={m.id}
+								type="button"
+								aria-pressed={metric === m.id}
+								onClick={() => setMetric(m.id)}
+								className={`rounded-md px-2.5 py-1 text-xs ${metric === m.id ? "bg-cf text-white" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"} ${FOCUS_RING}`}
+							>
+								{m.label}
+							</button>
+						))}
+					</div>
+				</div>
+				<UsageChart
+					stacks={shownStacks}
 					split={split}
 					granularity={shownGranularity}
-					metric={metric}
+					measure={metricSpec.label}
+					format={metricSpec.format}
+					chartType={chartType}
+					mode={chartMode}
+					label={split === "provider" ? providerName : undefined}
 					onPick={
 						split === "gateway" ? (key) => drill("gateway", key) : split === "model" ? (key) => drill("model", key) : split === "provider" ? (key) => drill("provider", key) : undefined
 					}
-					label={split === "provider" ? providerName : undefined}
 					spendLine={spendLine}
+					budget={budgetLevel}
 				/>
-				{split === "source" && (
-					<p className={`mt-2 text-xs ${MUTED}`}>
-						Workers AI is Cloudflare's own inference; every other provider the gateway forwards to counts as third-party.
-					</p>
-				)}
+				<p className={`mt-2 text-xs ${MUTED}`}>
+					{metric === "cost"
+						? monthlyBudget
+							? `Budget ${formatCost(monthlyBudget)}/month, pro-rated ${chartMode === "accumulated" ? "to this window" : "to each bar"}; anything above it shows red.`
+							: "Set a monthly budget above to draw it on the chart, with overage in red."
+						: "Switch to Spend to see the budget line."}
+					{split === "source" ? " Workers AI is Cloudflare's own inference; every other provider counts as third-party." : ""}
+				</p>
 			</section>
+
+			<div className="grid gap-4 lg:grid-cols-3">
+				{donuts.map((dimension, i) => (
+					<DonutPanel
+						key={i}
+						idPrefix={`aig-donut-${i}`}
+						dimension={dimension}
+						dimensions={donutDims}
+						onDimension={(next) => setDonuts((prev) => prev.map((d, j) => (j === i ? next : d)))}
+						slices={slicesFor(dimension)}
+						format={metricSpec.format}
+						label={dimension === "provider" ? providerName : undefined}
+						onPick={dimension === "gateway" || dimension === "model" || dimension === "provider" ? (key) => drill(dimension, key) : undefined}
+					/>
+				))}
+			</div>
 
 			<section className={CARD}>
 				<h2 className={`mb-1 ${SECTION_TITLE}`}>Breakdown</h2>

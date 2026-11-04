@@ -161,8 +161,46 @@ describe("AiGatewayPage", () => {
 		expect(await within(breakdown).findByText("search")).toBeInTheDocument();
 		expect(within(breakdown).getByText("(not tagged)")).toBeInTheDocument();
 		// And the chart can be split by the tag's values.
-		await user.selectOptions(screen.getByRole("combobox", { name: "Split by" }), "tag");
+		await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "tag");
 		expect(screen.getByRole("list", { name: "Legend" })).toHaveTextContent("search");
+	});
+
+	it("works like a cost view: granularity, chart type, budget with overage, forecast, donuts", async () => {
+		localStorage.clear();
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		await screen.findByRole("heading", { name: /^Requests by day/ });
+		await user.click(screen.getByRole("button", { name: "Spend" }));
+		// A $10/month budget against $0.50 in one day of a 7-day window: forecast $0.50/7 × 30 days.
+		await user.type(screen.getByLabelText("Budget"), "10");
+		expect(localStorage.getItem("flarelens_aig_budget:acc1")).toBe("10");
+		expect(screen.getByText(/^On track: forecast/)).toBeInTheDocument();
+		const legend = screen.getByRole("list", { name: "Legend" });
+		// Per day, the budget is $10 / 30.4 ≈ $0.33, and the $0.50 day goes over it.
+		expect(legend).toHaveTextContent("Budget per bucket $0.33");
+		expect(document.querySelector('rect[fill="#dc2626"]')).not.toBeNull();
+		// Accumulated: a running total against the budget for the whole window.
+		await user.selectOptions(screen.getByRole("combobox", { name: "Granularity" }), "accumulated");
+		expect(screen.getByRole("heading", { name: /^Spend, accumulated/ })).toBeInTheDocument();
+		expect(screen.getByRole("list", { name: "Legend" })).toHaveTextContent("Budget for the window $2.30");
+		// Line chart; None gives one column per group and disables the chart type.
+		await user.selectOptions(screen.getByRole("combobox", { name: "Chart" }), "line");
+		expect(document.querySelector("polyline")).not.toBeNull();
+		await user.selectOptions(screen.getByRole("combobox", { name: "Granularity" }), "none");
+		expect(screen.getByRole("heading", { name: /^Spend for the window/ })).toBeInTheDocument();
+		expect(screen.getByRole("combobox", { name: "Chart" })).toBeDisabled();
+		// 15-minute buckets do not suit a 7-day window.
+		expect(within(screen.getByRole("combobox", { name: "Granularity" })).getByRole("option", { name: "15 minutes" })).toBeDisabled();
+		// Donuts: share of the charted measure, the dimension picked per panel, a slice drills in.
+		const donuts = screen.getAllByRole("img", { name: /^Share by / });
+		expect(donuts.map((d) => d.getAttribute("aria-label"))).toEqual(["Share by Gateway", "Share by Model", "Share by Provider"]);
+		const third = donuts[2].closest("section")!;
+		expect(third).toHaveTextContent("Workers AI$0.50");
+		await user.selectOptions(within(third).getByRole("combobox"), "source");
+		expect(third).toHaveTextContent("Workers AI");
+		const first = donuts[0].closest("section")!;
+		await user.click(within(first).getByRole("button", { name: /prod/ }));
+		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { gateway: "prod" } });
 	});
 
 	it("picks the timeframe on the page, and buckets a week by day", async () => {
@@ -183,7 +221,7 @@ describe("AiGatewayPage", () => {
 		const legend = await screen.findByRole("list", { name: "Legend" });
 		expect(legend).toHaveTextContent("Workers AI8");
 		expect(legend).toHaveTextContent("Third-party2");
-		await user.selectOptions(screen.getByRole("combobox", { name: "Split by" }), "gateway");
+		await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "gateway");
 		const byGateway = screen.getByRole("list", { name: "Legend" });
 		// A gateway in the legend drills into it.
 		await user.click(within(byGateway).getByRole("button", { name: /^prod/ }));

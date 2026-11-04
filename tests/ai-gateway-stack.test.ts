@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { OTHER, THIRD_PARTY, WORKERS_AI, buildStacks, sourceOf, windowBuckets } from "../web/src/features/ai-gateway/stack";
+import { OTHER, THIRD_PARTY, WORKERS_AI, accumulate, budgetFor, buildStacks, forecastMonth, sourceOf, windowBuckets } from "../web/src/features/ai-gateway/stack";
+import { topSlices } from "../web/src/features/ai-gateway/DonutPanel";
 import { granularityFor } from "../web/src/features/ai-gateway/types";
 import type { AiGatewaySplitPoint } from "../web/src/features/ai-gateway/types";
 
@@ -77,5 +78,44 @@ describe("buildStacks", () => {
 		const s = buildStacks([], [pt("d1", "a", 10, 0.5), pt("d1", "b", 1, 2)], "model", "cost", ["d1"]);
 		expect(s.keys).toEqual(["b", "a"]);
 		expect(s.buckets[0].total).toBe(2.5);
+	});
+});
+
+describe("cost view helpers", () => {
+	it("accumulates each key over the buckets", () => {
+		const s = buildStacks([], [pt("d1", "a", 2), pt("d1", "b", 1), pt("d2", "a", 3), pt("d3", "b", 4)], "model", "requests", ["d1", "d2", "d3"]);
+		const acc = accumulate(s);
+		expect(acc.buckets.map((b) => [b.values.a, b.values.b, b.total])).toEqual([
+			[2, 1, 3],
+			[5, 1, 6],
+			[5, 5, 10],
+		]);
+		expect(acc.totals).toEqual(s.totals);
+	});
+
+	it("pro-rates a monthly budget to a bucket or a window", () => {
+		// An average month is 30.4375 days.
+		expect(budgetFor(30.4375, 1440)).toBeCloseTo(1, 10);
+		expect(budgetFor(100, 7 * 1440)).toBeCloseTo((100 * 7) / 30.4375, 10);
+	});
+
+	it("forecasts the calendar month at the window's daily rate", () => {
+		// $7 over 7 days is $1 a day; November has 30 days.
+		expect(forecastMonth(7, 7 * 1440, new Date("2026-11-04T00:00:00Z"))).toBe(30);
+		expect(forecastMonth(7, 7 * 1440, new Date("2026-02-10T00:00:00Z"))).toBe(28);
+	});
+
+	it("keeps the six biggest donut slices and folds the rest", () => {
+		const slices = ["a", "b", "c", "d", "e", "f", "g", "h"].map((key, i) => ({ key, value: 10 - i }));
+		expect(topSlices(slices).map((s) => [s.key, s.value])).toEqual([
+			["a", 10],
+			["b", 9],
+			["c", 8],
+			["d", 7],
+			["e", 6],
+			["f", 5],
+			[OTHER, 4 + 3],
+		]);
+		expect(topSlices([{ key: "x", value: 0 }, { key: "y", value: -1 }])).toEqual([]);
 	});
 });
