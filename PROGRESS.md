@@ -397,10 +397,16 @@ files behind.
 | P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules. **Re-confirmed 2026-09-16** after four further deploys, and again **2026-11-04** on `61d851f8` — the deployed values have not moved, which rules out a stale build |
 | P3 | **Bound token lacks SSL and Certificates: Read** | Zone Health reports edge and custom certificates as *not checked* on every zone (8 unknown checks), so certificate expiry is currently unmonitored | Add the scope to `CF_API_TOKEN`; no code change — the section starts grading on the next load |
 | P3 | **Two zones are not entitled to API Shield** | Their API Shield configuration reads answer 403 code 10403; the other reads succeed. The page now says "not entitled" rather than asking for a scope | Nothing to fix in the app. Enable API Shield on those zones only if they should have it |
-| P3 | **`tests/data-fanout.test.ts` still waits a real 20ms** | It now counts requests held at a gate rather than timing them, but gives the second wave a fixed 20ms to start; under heavy load it could see fewer than three in flight (failed once, 2026-09-19) | Wait until three requests are held (poll the counter) instead of a fixed delay |
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **`tests/data-fanout.test.ts` no longer depends on timing (2026-11-04).** The concurrency test
+  gave the tunnel-side reads a fixed 20ms to reach their gate, so a loaded machine could count
+  fewer than three in flight (it failed once, 2026-09-19). It now waits with `vi.waitFor` until
+  three are held — none can finish while the gate is shut, so sequential reads still fail it,
+  checked against a mutant that awaits the configurations first (`expected 1 to be 3`) — and
+  always opens the gate, so a failure cannot leave the request hanging. Test-only; no deploy.
 
 - **AI Gateway: a cost view on the usage chart (2026-11-04, `61d851f8`).** Modelled on a cloud
   cost-management page: actual / forecast / budget header (forecast = the window's daily spend ×

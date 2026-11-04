@@ -141,11 +141,17 @@ describe("/api/access/tunnels policy resolution", () => {
 		urls = [];
 
 		const pending = app.request(`/api/access/tunnels?account_id=${ACCOUNT}`, { headers: auth }, ENV, ctx());
-		// Let the tunnel list resolve and the next wave be issued.
-		await new Promise((r) => setTimeout(r, 20));
-		const inFlight = started.length;
-		release.current?.();
-		await pending;
+		// Wait for the next wave to reach the gate rather than for a fixed time: none of the three can
+		// complete while the gate is shut, so if they ran one after another only one would ever arrive
+		// and this times out. Always open the gate so a failure never leaves the request hanging.
+		let inFlight = 0;
+		try {
+			await vi.waitFor(() => expect(started.length).toBe(3), { timeout: 2_000, interval: 5 });
+			inFlight = started.length;
+		} finally {
+			release.current?.();
+			await pending;
+		}
 
 		// All three were in flight before any of them completed.
 		expect(inFlight).toBe(3);
