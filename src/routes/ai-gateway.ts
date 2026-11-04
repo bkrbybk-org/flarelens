@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
-// AI Gateway (request volume, tokens, spend, errors, cache — see src/lib/ai-gateway.ts for the
-// unverified-field-name caveat: this has never been run against a real account)
+// AI Gateway (request volume, tokens, spend, errors, cache, latency — field names resolved from
+// the live schema, see src/lib/ai-gateway.ts), optionally drilled into one gateway/provider/model
 
 import { assertAllowedScope, resolveAuth } from "../lib/auth";
-import { MAX_AI_GATEWAY_RANGE_MS, AiGatewayUsageError, fetchAiGatewayUsage, isAiGatewayGranularity } from "../lib/ai-gateway";
+import { MAX_AI_GATEWAY_RANGE_MS, AiGatewayUsageError, fetchAiGatewayUsage, isAiGatewayGranularity, type AiGatewayFilter } from "../lib/ai-gateway";
 import { parseInstant } from "../lib/workers-analytics";
 import { validHexId } from "../http";
 import type { App } from "../env";
@@ -14,7 +14,7 @@ export function registerAiGatewayRoutes(app: App): void {
 		if (!auth.ok) {
 			return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
 		}
-		let body: { accountId?: string; from?: string; to?: string; granularity?: string };
+		let body: { accountId?: string; from?: string; to?: string; granularity?: string; filter?: Record<string, unknown> };
 		try {
 			body = await c.req.json();
 		} catch {
@@ -36,18 +36,29 @@ export function registerAiGatewayRoutes(app: App): void {
 			return c.json({ success: false, errors: [{ message: "Range is longer than the supported 30 days" }] }, 400);
 		}
 		const granularity = isAiGatewayGranularity(body.granularity) ? body.granularity : "hourly";
+		// The slice to drill into: exact names from the page's own breakdowns, sent upstream as
+		// GraphQL variables. Anything that is not a short string is refused, not ignored.
+		const filter: AiGatewayFilter = {};
+		for (const key of ["gateway", "provider", "model"] as const) {
+			const value = body.filter?.[key];
+			if (value === undefined || value === null || value === "") continue;
+			if (typeof value !== "string" || value.length > 256) {
+				return c.json({ success: false, errors: [{ message: `Invalid filter.${key}` }] }, 400);
+			}
+			filter[key] = value;
+		}
 		const scope = assertAllowedScope(auth.auth, c.env, { accountId });
 		if (scope) {
 			return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
 		}
 
 		try {
-			const result = await fetchAiGatewayUsage(accountId, auth.auth.token, { since, until, granularity });
+			const result = await fetchAiGatewayUsage(accountId, auth.auth.token, { since, until, granularity, filter });
 			return c.json({ success: true, result });
 		} catch (err) {
 			const status = err instanceof AiGatewayUsageError ? err.status : 502;
 			const message = err instanceof Error ? err.message : "Failed to load AI Gateway usage";
-			return c.json({ success: false, errors: [{ message }] }, status as 502);
+			return c.json({ success: false, errors: [{ message }] }, status === 400 ? 400 : (status as 502));
 		}
 	});
 }

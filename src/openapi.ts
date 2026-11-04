@@ -333,9 +333,9 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 			"/api/ai-gateway/usage": {
 				post: {
 					tags: ["AI Gateway"],
-					summary: "AI Gateway request volume, tokens, spend, errors, cache",
+					summary: "AI Gateway overview and drill-down",
 					description:
-						"Window of at most 30 days. Field names in the underlying analytics query have never been run against a real account — see src/lib/ai-gateway.ts's own caveat — so treat the exact response shape as provisional.",
+						"Window of at most 30 days. Requests, tokens, spend, errors, cache and p50/p95 latency for the window and for the same-length window before it; breakdowns by gateway, provider, model and status code; and the 50 most recent requests. `filter` narrows every figure to one gateway, provider and/or model (exact names). Field names are read from the account's live GraphQL schema; a filter the schema cannot apply is a 400.",
 					requestBody: jsonBody({
 						type: "object",
 						required: ["accountId", "from", "to"],
@@ -344,6 +344,14 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 							from: { type: "string", format: "date-time" },
 							to: { type: "string", format: "date-time" },
 							granularity: { type: "string", default: "hourly" },
+							filter: {
+								type: "object",
+								properties: {
+									gateway: { type: "string", maxLength: 256 },
+									provider: { type: "string", maxLength: 256 },
+									model: { type: "string", maxLength: 256 },
+								},
+							},
 						},
 					}),
 					responses: {

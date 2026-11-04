@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchAiGatewayUsage, isSessionError } from "../../api/client";
 import { useEstimatedProgress } from "../../hooks/useEstimatedProgress";
-import type { AiGatewayGranularity, AiGatewayUsageResult } from "./types";
+import type { AiGatewayFilter, AiGatewayGranularity, AiGatewayUsageResult } from "./types";
 
 interface State {
 	result: AiGatewayUsageResult | null;
@@ -20,13 +20,13 @@ export function useAiGatewayUsage(onAuthError: () => void) {
 	const { start: progressStart, stop: progressStop } = progress;
 
 	const load = useCallback(
-		async (token: string, accountId: string, from: string, to: string, granularity: AiGatewayGranularity) => {
+		async (token: string, accountId: string, from: string, to: string, granularity: AiGatewayGranularity, filter: AiGatewayFilter = {}) => {
 			const requestId = ++requestIdRef.current;
 			setState((prev) => ({ ...prev, loading: true, error: null }));
 			progressStart();
 			let success = false;
 			try {
-				const result = await fetchAiGatewayUsage<AiGatewayUsageResult>(token, { accountId, from, to, granularity });
+				const result = await fetchAiGatewayUsage<AiGatewayUsageResult>(token, { accountId, from, to, granularity, filter });
 				if (requestId !== requestIdRef.current) return;
 				success = true;
 				setState({ result, loading: false, error: null });

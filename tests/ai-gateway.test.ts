@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
-import { MAX_AI_GATEWAY_RANGE_MS, isAiGatewayGranularity } from "../src/lib/ai-gateway";
+import { MAX_AI_GATEWAY_RANGE_MS, isAiGatewayGranularity, type AiGatewayUsageResult } from "../src/lib/ai-gateway";
 
 /**
  * Cover for the AI Gateway route: series/totals fold, rate arithmetic (never divide by zero),
@@ -160,8 +160,8 @@ describe("series and totals", () => {
 			result: { series: { ts: string; requests: number }[] };
 		};
 		expect(result.series).toEqual([
-			{ ts: "2026-09-05T09:00:00Z", requests: 40 },
-			{ ts: "2026-09-05T10:00:00Z", requests: 100 },
+			{ ts: "2026-09-05T09:00:00Z", requests: 40, tokens: 210, cost: null, errors: null },
+			{ ts: "2026-09-05T10:00:00Z", requests: 100, tokens: 700, cost: null, errors: null },
 		]);
 	});
 
@@ -178,7 +178,7 @@ describe("series and totals", () => {
 		const { result } = (await (await usage({ accountId: ACCOUNT, ...win() })).json()) as {
 			result: { byGateway: { key: string; requests: number }[]; byModel: { key: string; requests: number }[] };
 		};
-		expect(result.byGateway[0]).toEqual({ key: "prod", requests: 120 });
+		expect(result.byGateway[0]).toMatchObject({ key: "prod", requests: 120 });
 		expect(result.byModel[0].requests).toBe(90);
 	});
 });
@@ -303,5 +303,91 @@ describe("validation", () => {
 	it("surfaces a load-bearing GraphQL error as a 502", async () => {
 		mockUpstream({ primaryFail: true });
 		expect((await usage({ accountId: ACCOUNT, ...win() })).status).toBe(502);
+	});
+});
+
+describe("overview and drill-down", () => {
+	// A different account id: the schema resolution is cached per account, and this one is richer.
+	const RICH = "22222222222222222222222222222222";
+	const RICH_SCHEMA = {
+		sums: { aiGatewayRequestsAdaptiveGroupsType: ["tokensIn", "tokensOut", "cost", "erroredRequests", "cachedRequests"] },
+		dimensions: {
+			aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "datetime", "gateway", "provider", "model", "statusCode", "rateLimited", "requestId", "durationMs", "cached", "userAgent"],
+		},
+	};
+	const RICH_PRIMARY = {
+		series: [row({ datetimeHour: "2026-09-05T10:00:00Z" }, 10, { tokensIn: 100, tokensOut: 20, cost: 0.5, erroredRequests: 1, cachedRequests: 2 })],
+		total: [row({}, 10, { tokensIn: 100, tokensOut: 20, cost: 0.5, erroredRequests: 1, cachedRequests: 2 })],
+		previous: [row({}, 20, { tokensIn: 50, tokensOut: 10, cost: 0.25, erroredRequests: 0, cachedRequests: 15 })],
+		byGateway: [row({ gateway: "prod" }, 10, { tokensIn: 100, tokensOut: 20, cost: 0.5, erroredRequests: 1, cachedRequests: 2 })],
+		byProvider: [row({ provider: "workers-ai" }, 10, { cost: 0.5 })],
+		byModel: [row({ model: "@cf/a" }, 7, { cost: 0.4 }), row({ model: "@cf/b" }, 3, { cost: 0.1 })],
+		byStatus: [row({ statusCode: 200, rateLimited: 0 }, 9), row({ statusCode: 429, rateLimited: 1 }, 1)],
+		recent: [
+			row({ requestId: "r1", datetime: "2026-09-05T10:05:00Z", gateway: "prod", provider: "workers-ai", model: "@cf/a", statusCode: 200, durationMs: 1200, cached: 1, rateLimited: 0, userAgent: "app/1" }, 1, {
+				tokensIn: 10,
+				tokensOut: 2,
+				cost: 0.01,
+			}),
+		],
+	};
+
+	beforeEach(() => mockUpstream({ schema: RICH_SCHEMA, primary: RICH_PRIMARY }));
+
+	it("returns the previous window, status codes, rate limiting and the latest requests", async () => {
+		const res = await usage({ accountId: RICH, ...win() });
+		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		expect(result.totals).toMatchObject({ requests: 10, cost: 0.5, errors: 1, cacheHits: 2, rateLimited: 1 });
+		expect(result.previous).toEqual({ requests: 20, tokens: 60, cost: 0.25, errorRate: 0, cacheHitRate: 0.75, p50: null });
+		expect(result.byStatus).toEqual([
+			{ statusCode: "200", rateLimited: false, requests: 9 },
+			{ statusCode: "429", rateLimited: true, requests: 1 },
+		]);
+		expect(result.byModel.map((r) => [r.key, r.cost])).toEqual([
+			["@cf/a", 0.4],
+			["@cf/b", 0.1],
+		]);
+		expect(result.recent[0]).toEqual({
+			requestId: "r1",
+			datetime: "2026-09-05T10:05:00Z",
+			gateway: "prod",
+			provider: "workers-ai",
+			model: "@cf/a",
+			statusCode: "200",
+			durationMs: 1200,
+			cached: true,
+			rateLimited: false,
+			tokensIn: 10,
+			tokensOut: 2,
+			cost: 0.01,
+			userAgent: "app/1",
+		});
+		// The previous window is the same length, ending where this one starts.
+		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string; variables: Record<string, string> };
+		expect(Date.parse(query.variables.prevUntil)).toBe(Date.parse(query.variables.since));
+		expect(Date.parse(query.variables.until) - Date.parse(query.variables.since)).toBe(Date.parse(query.variables.prevUntil) - Date.parse(query.variables.prevSince));
+	});
+
+	it("drills into a slice with the values as variables, never in the query text", async () => {
+		const res = await usage({ accountId: RICH, ...win(), filter: { gateway: 'prod" } evil', model: "@cf/a" } });
+		expect(res.status).toBe(200);
+		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string; variables: Record<string, string> };
+		expect(query.query).not.toContain("evil");
+		expect(query.query).toContain("gateway: $f_gateway");
+		expect(query.query).toContain("model: $f_model");
+		expect(query.variables).toMatchObject({ f_gateway: 'prod" } evil', f_model: "@cf/a" });
+		const { result } = (await res.json()) as { result: { filter: Record<string, string> } };
+		expect(result.filter).toEqual({ gateway: 'prod" } evil', model: "@cf/a" });
+	});
+
+	it("refuses a filter the schema cannot apply, and a malformed one", async () => {
+		// A schema with no model dimension cannot honour a model filter; ignoring it would show the whole account as the slice.
+		mockUpstream({ schema: { sums: {}, dimensions: { aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date"] } }, primary: {} });
+		const THIN = "33333333333333333333333333333333";
+		const res = await usage({ accountId: THIN, ...win(), filter: { model: "@cf/a" } });
+		expect(res.status).toBe(400);
+		expect(((await res.json()) as { errors: { message: string }[] }).errors[0].message).toContain("cannot be filtered by model");
+		expect((await usage({ accountId: RICH, ...win(), filter: { gateway: 42 } })).status).toBe(400);
+		expect((await usage({ accountId: RICH, ...win(), filter: { gateway: "x".repeat(300) } })).status).toBe(400);
 	});
 });

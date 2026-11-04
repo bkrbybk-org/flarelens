@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-27** against a full read of the tree, t
 live probe of every route on the deployed Worker. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,235 tests green across 91 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,247 tests green across 93 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `1ba2856c`, deployed 2026-10-28 (Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
+Running version `19bcacaa`, deployed 2026-11-04 (AI Gateway overview and drill-down; before it, 2026-10-28, `1ba2856c`: Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -114,7 +114,7 @@ of the calling token — see the P2 entry below.
 | `POST /api/audit/logs` | account | Audit Log — Cloudflare's v2 account audit log for a window of up to 30 days, paged by cursor to 5,000 events. Actor IPs and request/response bodies are withheld. Not cached |
 | `GET /api/openapi.json` | — (auth required) | OpenAPI 3.0.3 document for every route, server URL taken from the request |
 | `GET /docs` | — (auth required) | Swagger UI, self-hosted; the one path whose CSP adds `'unsafe-inline'` to `style-src` |
-| `POST /api/ai-gateway/usage` | account | AI Gateway (proxy requests, tokens, errors, cache, spend). Field names resolved from the live schema — see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
+| `POST /api/ai-gateway/usage` | account | AI Gateway overview and drill-down (requests, tokens, spend, errors, cache, p50/p95, previous window, breakdowns by gateway/provider/model/status, latest requests; optional `filter`). Field names resolved from the live schema — see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
 | `app.all("*")` | — | static asset fallback |
 
 All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, missing/bad token →
@@ -394,6 +394,21 @@ files behind.
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **AI Gateway: overview and drill-down (2026-11-04, `19bcacaa`).** The page showed four
+  numbers, a request chart and two request-count lists. It now leads with six headline cards
+  compared against the previous window, an "At a glance" list, a metric-switchable chart,
+  breakdown tabs with full measures per row, and the latest 50 requests; any gateway, provider or
+  model name drills the whole page into that slice (URL-carried, breadcrumb to step out). Built on
+  a live schema probe: `aiGatewayRequestsAdaptiveGroups` alone carries every measure (provider,
+  status code, rate limiting, duration quantiles, and `requestId` for one row per request), so one
+  query answers the page and the filter applies to all of it. Live, 7 days: 161 requests, $2.26,
+  p50 11.4 s against 296 requests, $0.09 and p50 61 ms the week before — cache hit rate 73% → 0%,
+  the first thing "At a glance" says; the `default` gateway drilled in gives 80 requests and
+  $1.07. The REST API (gateway settings, logs with bodies) needs `AI Gateway: Read`, which the
+  bound token lacks, so it is not used; the request details point to the dashboard for bodies.
+  The file's "unverified field names" header, stale since the schema probe, now records what was
+  verified.
 
 - **Request Trace: each rule's action and condition (2026-10-28, `1ba2856c`).** Every rule shows its
   effective action and a collapsible condition, including the rule that matched. Found on the live
