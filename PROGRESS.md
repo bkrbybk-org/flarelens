@@ -1,7 +1,7 @@
 # Flarelens — Progress
 
-Status snapshot, last reviewed **2026-09-27** against a full read of the tree, the gate, and a
-live probe of every route on the deployed Worker. See [README.md](README.md) for how to run the app; this file tracks where the
+Status snapshot, last reviewed **2026-11-04** against a read of the tree, the gate, and a live
+probe of the deployed Worker (running version and response headers). See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
 **TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,282 tests green across 96 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
@@ -32,7 +32,7 @@ pull request; there is no deploy job, deliberately — see the note under Recent
 
 ## Sections
 
-Twenty-three sections, grouped in the sidebar by Cloudflare product area:
+Twenty-two sections, grouped in the sidebar by Cloudflare product area:
 
 | Group | Routes |
 |---|---|
@@ -43,6 +43,7 @@ Twenty-three sections, grouped in the sidebar by Cloudflare product area:
 | Audit | `#/findings`, `#/audit` |
 
 Beyond the sections: a command palette (⌘K), saved views per account, a light/dark/system theme,
+full-screen presentation mode with page rotation,
 and the API documentation at `/docs` (Swagger UI over `GET /api/openapi.json`), linked from the
 sidebar footer.
 
@@ -114,7 +115,7 @@ of the calling token — see the P2 entry below.
 | `POST /api/audit/logs` | account | Audit Log — Cloudflare's v2 account audit log for a window of up to 30 days, paged by cursor to 5,000 events. Actor IPs and request/response bodies are withheld. Not cached |
 | `GET /api/openapi.json` | — (auth required) | OpenAPI 3.0.3 document for every route, server URL taken from the request |
 | `GET /docs` | — (auth required) | Swagger UI, self-hosted; the one path whose CSP adds `'unsafe-inline'` to `style-src` |
-| `POST /api/ai-gateway/usage` | account | AI Gateway overview and drill-down (requests, tokens, spend, errors, cache, p50/p95, previous window, breakdowns by gateway/provider/model/status, latest requests; optional `filter`). Field names resolved from the live schema — see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
+| `POST /api/ai-gateway/usage` | account | AI Gateway overview and drill-down (requests, tokens, spend, errors, cache, p50/p95, previous window, breakdowns by gateway/provider/model/client/status, sessions and session health, prompt cache, latest requests; optional `filter` and `tag` — a metadata key, refused when it names people or single items, email values reduced to their domain). Field names resolved from the live schema — see [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) |
 | `app.all("*")` | — | static asset fallback |
 
 All `/api/*` responses carry `Cache-Control: no-store`. Invalid IDs → 400, missing/bad token →
@@ -162,16 +163,19 @@ documents, so no caller text reaches a query.
 | [src/lib/zone-health.ts](src/lib/zone-health.ts) | Certificate expiry (managed packs held to 7 days since they should renew themselves, custom 14/30, Origin CA 30; a pack that never issued is a finding) and DNS hygiene. Dangling means NXDOMAIN from DNS-over-HTTPS and nothing else; any other outcome is unknown. Tunnel CNAMEs are checked against the account tunnel list, domain-validation targets are skipped and counted, lookups capped at 200 per report |
 | [src/lib/edge-cache.ts](src/lib/edge-cache.ts) | `cacheKey` and `withEdgeCache`: the tenant-isolated 60s cache described under API routes. A malformed entry is a miss, a cache failure falls through to a live read |
 | [web/src/lib/edge-cache-caption.ts](web/src/lib/edge-cache-caption.ts) | The one sentence that tells a reader their data came from cache. States the clock time it was cached, not an age — an age is computed once at render and is untrue a few minutes later |
-| [src/lib/request-trace.ts](src/lib/request-trace.ts) | Ray ID forensics: schema-swept field selection, adaptive retry around per-zone entitlements and Cloudflare's field ceiling |
+| [src/lib/request-trace.ts](src/lib/request-trace.ts) | Ray ID forensics: schema-swept field selection, adaptive retry around per-zone entitlements and Cloudflare's field ceiling, the window searched in 7-day slices newest first |
+| [src/lib/request-context.ts](src/lib/request-context.ts) | A traced request's surroundings: a draft's reach, the deciding rule across the zone, the client's ±1 h timeline; request values sent as GraphQL variables |
+| [src/lib/waf-aggregates.ts](src/lib/waf-aggregates.ts) | Full, sample-adjusted WAF counts from `firewallEventsAdaptiveGroups`: by action, time series, top countries |
 | [src/lib/workers-analytics.ts](src/lib/workers-analytics.ts) | Workers invocation metrics; script list degrades when the scope is absent |
 | [src/lib/workers-ai.ts](src/lib/workers-ai.ts) | Workers AI inference metrics; folds rows split by `errorCode` |
 | [src/lib/ai-gateway.ts](src/lib/ai-gateway.ts) | AI Gateway proxy usage across four `aiGateway*AdaptiveGroups` datasets. Dataset, dimension and aggregate names are **resolved from the live schema at runtime** (`resolveAiGatewayFields`, 10-minute module cache) and the response carries the `candidates` it chose between, so a wrong resolution is diagnosable rather than a confident zero. The requests dataset is load-bearing (throws on failure); errors/cache/spend degrade independently, each reporting `{ available, reason }` |
+| [web/src/features/ai-gateway/](web/src/features/ai-gateway/) | `insights` ("At a glance"), `stack` (chart buckets, top keys + Other, accumulation, budget pro-rating, month forecast), `UsageChart` (columns stacked or grouped, line, area, budget line, spend axis), `DonutPanel` (share donuts) |
 | [src/lib/ai-sec/](src/lib/ai-sec/) | AI Security: zone fan-out, schema-capability probing, per-token edge caching of the **aggregate half only** (rows are never cached), and the `buildDashboard` aggregation |
 | [web/src/hooks/useTimeRange.ts](web/src/hooks/useTimeRange.ts) | Shared analytics window in minutes, hash-synced, clamped per section |
 | [web/src/components/chart/ChartHover.tsx](web/src/components/chart/ChartHover.tsx) | Hover readout for every inline-SVG chart: bucket hit-testing and measured, clamped placement |
 | [web/src/features/ai-security/matchedData.ts](web/src/features/ai-security/matchedData.ts) | HPKE decryption of logged prompts. Browser-only; the key never reaches the Worker or storage |
 | [web/src/lib/expr.ts](web/src/lib/expr.ts) | **Wirefilter evaluator — single source.** Worker imports it for attribution (strict boolean); client imports it for the URL tester (Kleene tri-state). Pulled into the Worker build via the `web/src/lib/expr.ts` entry in `tsconfig.worker.json` |
-| [web/src/lib/waf/](web/src/lib/waf/) | `aggregate` (correlation, action drift, per-rule detail), `chart` (bucketing), `format`, `constants`, `types` |
+| [web/src/lib/waf/](web/src/lib/waf/) | `aggregate` (correlation, action drift, per-rule detail), `chart` (bucketing), `format`, `constants`, `types`; for Request Trace `ray-verdict` (matches over the evaluation order), `ray-review` (false-positive / false-negative review and drafts), `explain-expr` (why an expression matched, three-valued) and `ray-report` (Markdown case report) |
 | [web/src/lib/rules.ts](web/src/lib/rules.ts) | Access rule vocabulary (`describeRule`, ~20 rule types), `resolvePolicy`, decision tones |
 | [web/src/lib/findings.ts](web/src/lib/findings.ts) | Pure audit checks per source (`accessFindings`, `groupsFindings`, `wafFindings`, `cacheFindings`), plus the shared `groupUsedBy` cross-reference |
 | [web/src/lib/csv.ts](web/src/lib/csv.ts) | RFC 4180 `toCsv` + `downloadCsv`; cells that would run as spreadsheet formulas get a leading apostrophe; UTF-8 BOM so Excel reads Thai names |
@@ -206,7 +210,7 @@ plus a test that fails when a second copy appears, not a style guide. See
 [tests/refresh-affordance.test.ts](tests/refresh-affordance.test.ts) and
 [tests/shell-layout.test.ts](tests/shell-layout.test.ts) for the pins.
 
-Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/useRoute.ts) parses the path segment, [useHashParams.ts](web/src/hooks/useHashParams.ts) syncs query params. Five sections: `#/access`, `#/groups`, `#/waf`, `#/cache`, `#/findings`. Deep links like `#/waf?zone=…&lookback=1440&tab=rules` win over saved prefs on load, then mirror state back via `replaceState`.
+Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/useRoute.ts) parses the path segment, [useHashParams.ts](web/src/hooks/useHashParams.ts) syncs query params. Every route is listed once in [nav.ts](web/src/components/shell/nav.ts) (see Sections above); old `#/why` links redirect to `#/request`. Deep links like `#/waf?zone=…&lookback=1440&tab=rules` win over saved prefs on load, then mirror state back via `replaceState`.
 
 **Hooks**
 
@@ -219,6 +223,8 @@ Routing is hash-based with no router dependency — [useRoute.ts](web/src/hooks/
 | [useZeroTrustData](web/src/hooks/useZeroTrustData.ts) / [useWafData](web/src/features/waf/useWafData.ts) / [useCacheData](web/src/features/cache/useCacheData.ts) | Per-section fetch + state |
 | [useEstimatedProgress](web/src/hooks/useEstimatedProgress.ts) | Progress estimated from this section's last real load duration. Exposes `etaMs`, `elapsedMs` and `measured`: a countdown is shown only when the estimate was measured and still ahead of the clock, otherwise elapsed time |
 | [useSectionRefresh](web/src/hooks/useSectionRefresh.ts) | Puts the mounted section's reload behind the top bar's Sync button |
+| [usePresentation](web/src/hooks/usePresentation.ts) | Full-screen presentation mode: Fullscreen API with an in-window fallback, Esc to leave, auto-refresh that never stacks on a running load |
+| [usePageRotation](web/src/hooks/usePageRotation.ts) | Presentation-mode page rotation: chosen pages in sidebar order, 30 s – 5 min each, countdown restarted by interaction, stopped on leaving full screen |
 | [useFocusTrap](web/src/hooks/useFocusTrap.ts) | Keyboard contract shared by the command palette, the name dialog and the tunnel drawer: Tab cycles inside, Escape closes, focus returns |
 
 Every data loader ends the session only through `isSessionError` in
@@ -245,6 +251,7 @@ Disconnect clears the store.
 | `flarelens_saved_views` | localStorage | Saved views: name + hash + account, listed only for the current account, capped at 50 each |
 | `flarelens_recent_commands` | localStorage | Command palette's recently used commands |
 | `flarelens_rotation` | localStorage | Presentation-mode page rotation: the chosen pages and interval |
+| `flarelens_aig_budget:<accountId>` | localStorage | AI Gateway cost view: the monthly budget, per account. Not shared with other viewers or stored by the Worker |
 | `cf_zt_last_load_ms`, `cf_<section>_last_load_ms` (19 keys in all, one per data hook) | sessionStorage | Rolling load-duration estimates, blended 50/50 with the previous value on each successful load; a failed load records nothing |
 
 ### Tests
@@ -254,7 +261,7 @@ DOM; and a `component` project, `environment: "jsdom"` + `@testing-library/react
 rendered components — `tests/components/setup.ts` wires jest-dom matchers and RTL's auto-cleanup
 into that project only, so the node project's Workers-shaped globals stay untouched).
 
-77 test files, 1,135 tests. [README.md](README.md#tests) keeps the per-file table by layer (unit,
+96 test files, 1,282 tests. [README.md](README.md#tests) keeps the per-file table by layer (unit,
 component, integration, system, compatibility, security, regression, opt-in E2E) and is the one
 place that list is maintained — this file used to carry a second copy that had fallen a dozen
 files behind.
@@ -387,11 +394,10 @@ files behind.
 
 | # | Issue | Impact | Fix |
 |---|---|---|---|
-| P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules. **Re-confirmed 2026-09-16** after four further deploys — the deployed values have not moved, which rules out a stale build |
+| P2 | **Deployed security headers do not match source.** Prod returns `x-frame-options: SAMEORIGIN`, `referrer-policy: same-origin` and an `x-xss-protection` header; [src/index.ts](src/index.ts) sets `DENY`, `strict-origin-when-cross-origin` and no XSS header | Cosmetic only — CSP `frame-ancestors 'none'` survives and is the authoritative control in current browsers | Something outside this repo (Access, or a zone managed-headers/transform rule) is rewriting them. Changing the Worker will not move them; check the zone's transform rules. **Re-confirmed 2026-09-16** after four further deploys, and again **2026-11-04** on `61d851f8` — the deployed values have not moved, which rules out a stale build |
 | P3 | **Bound token lacks SSL and Certificates: Read** | Zone Health reports edge and custom certificates as *not checked* on every zone (8 unknown checks), so certificate expiry is currently unmonitored | Add the scope to `CF_API_TOKEN`; no code change — the section starts grading on the next load |
 | P3 | **Two zones are not entitled to API Shield** | Their API Shield configuration reads answer 403 code 10403; the other reads succeed. The page now says "not entitled" rather than asking for a scope | Nothing to fix in the app. Enable API Shield on those zones only if they should have it |
-| P3 | **`/api/waf/rulesets` takes ~20s uncached** | WAF Analytics' first load is slow; it fetches every ruleset's detail per zone and has no edge cache | Put it behind the same 60s per-credential edge cache as the other configuration routes |
-| P3 | **`tests/data-fanout.test.ts` times real 20ms delays** | It asserts concurrency from wall-clock timing and failed once under full-suite load (2026-09-19); passes on rerun | Assert concurrency from the order requests start in, not from elapsed time |
+| P3 | **`tests/data-fanout.test.ts` still waits a real 20ms** | It now counts requests held at a gate rather than timing them, but gives the second wave a fixed 20ms to start; under heavy load it could see fewer than three in flight (failed once, 2026-09-19) | Wait until three requests are held (poll the counter) instead of a fixed delay |
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
