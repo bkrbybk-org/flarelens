@@ -14,7 +14,7 @@ export function registerAiGatewayRoutes(app: App): void {
 		if (!auth.ok) {
 			return c.json({ success: false, errors: [{ message: auth.message }] }, auth.status);
 		}
-		let body: { accountId?: string; from?: string; to?: string; granularity?: string; filter?: Record<string, unknown> };
+		let body: { accountId?: string; from?: string; to?: string; granularity?: string; filter?: Record<string, unknown>; tag?: unknown };
 		try {
 			body = await c.req.json();
 		} catch {
@@ -47,13 +47,22 @@ export function registerAiGatewayRoutes(app: App): void {
 			}
 			filter[key] = value;
 		}
+		// A metadata tag key to break spend down by (a cost center, a team). Sent upstream as a
+		// variable; anything but a short plain key is refused.
+		let tag: string | undefined;
+		if (body.tag !== undefined && body.tag !== null && body.tag !== "") {
+			if (typeof body.tag !== "string" || !/^[\w.:-]{1,64}$/.test(body.tag)) {
+				return c.json({ success: false, errors: [{ message: "Invalid tag" }] }, 400);
+			}
+			tag = body.tag;
+		}
 		const scope = assertAllowedScope(auth.auth, c.env, { accountId });
 		if (scope) {
 			return c.json({ success: false, errors: [{ message: scope.message }] }, scope.status);
 		}
 
 		try {
-			const result = await fetchAiGatewayUsage(accountId, auth.auth.token, { since, until, granularity, filter });
+			const result = await fetchAiGatewayUsage(accountId, auth.auth.token, { since, until, granularity, filter, tag });
 			return c.json({ success: true, result });
 		} catch (err) {
 			const status = err instanceof AiGatewayUsageError ? err.status : 502;

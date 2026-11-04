@@ -92,6 +92,14 @@ export interface AiGatewayTotals {
 	promptCache: { readTokens: number; inputTokens: number; requestsWithRead: number | null } | null;
 }
 
+/** Mirrors src/lib/ai-gateway.ts. Values are masked by the Worker (emails to their domain). */
+export interface AiGatewayTags {
+	keys: { key: string; requests: number; sensitive: boolean }[];
+	selected: string | null;
+	rows: AiGatewayBreakdownRow[];
+	series: AiGatewaySplitPoint[];
+}
+
 export const SESSION_FLAG_LABEL = {
 	abnormalCost: "Unusually expensive",
 	abnormalDuration: "Unusually long",
@@ -129,6 +137,8 @@ export interface AiGatewayUsageResult {
 	byStatus: AiGatewayStatusRow[];
 	byClient: AiGatewayBreakdownRow[];
 	sessionHealth: AiGatewaySessionHealth;
+	/** Spend by custom metadata tag; null when the schema carries no metadata. */
+	tags: AiGatewayTags | null;
 	recent: AiGatewayRequestRow[];
 	previous: AiGatewayPrevious | null;
 	previousWindow: { since: string; until: string };

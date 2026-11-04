@@ -33,6 +33,7 @@ import {
 	type AiGatewayRequestRow,
 	type AiGatewayStatusRow,
 	type AiGatewaySessionHealth,
+	type AiGatewayTags,
 	type SessionFlag,
 } from "./types";
 
@@ -58,6 +59,7 @@ const SPLIT_LABEL: Record<Split, string> = {
 	model: "Model",
 	provider: "Provider",
 	client: "Client",
+	tag: "Tag",
 	source: "Workers AI vs third-party",
 };
 /** In running text: "split by gateway", but "Workers AI" keeps its capitals. */
@@ -274,8 +276,8 @@ function UnavailableNote({ status, label }: { status: DatasetStatus; label: stri
 }
 
 type Dimension = "gateway" | "provider" | "model";
-type BreakdownTab = Dimension | "client" | "status";
-const TAB_LABEL: Record<BreakdownTab, string> = { gateway: "Gateways", provider: "Providers", model: "Models", client: "Clients", status: "Status codes" };
+type BreakdownTab = Dimension | "client" | "tag" | "status";
+const TAB_LABEL: Record<BreakdownTab, string> = { gateway: "Gateways", provider: "Providers", model: "Models", client: "Clients", tag: "Tags", status: "Status codes" };
 
 function BreakdownTable({
 	rows,
@@ -283,6 +285,7 @@ function BreakdownTable({
 	onDrill,
 	dimension,
 	label = (key) => key,
+	heading,
 }: {
 	rows: BreakdownRow[];
 	total: number;
@@ -290,6 +293,8 @@ function BreakdownTable({
 	onDrill?: (key: string) => void;
 	dimension: Exclude<BreakdownTab, "status">;
 	label?: (key: string) => string;
+	/** Column heading, when the tab's own name does not fit (a tag key). */
+	heading?: string;
 }) {
 	if (!rows.length) return <p className={`py-6 text-center text-sm ${MUTED}`}>No traffic in this slice.</p>;
 	const max = Math.max(1, ...rows.map((r) => r.requests));
@@ -298,7 +303,7 @@ function BreakdownTable({
 			<table className="w-full min-w-[760px] text-sm">
 				<thead className={`text-left text-xs uppercase tracking-wide ${MUTED}`}>
 					<tr>
-						<th className="py-2 pr-2 font-medium">{TAB_LABEL[dimension].replace(/s$/, "")}</th>
+						<th className="py-2 pr-2 font-medium">{heading ?? TAB_LABEL[dimension].replace(/s$/, "")}</th>
 						<th className="px-2 py-2 font-medium">Requests</th>
 						<th className="px-2 py-2 text-right font-medium">Tokens in / out</th>
 						<th className="px-2 py-2 text-right font-medium">Spend</th>
@@ -495,6 +500,51 @@ function SessionHealthPanel({ health }: { health: AiGatewaySessionHealth }) {
 	);
 }
 
+/**
+ * Spend by a custom metadata tag — the cf-aig-metadata header an application sends — for cost
+ * allocation by team, cost center or feature. Keys that identify people or single items (user,
+ * email, session, anything ending in "id") are listed but cannot be picked: the Worker refuses
+ * them, and masks identifying values (emails to their domain) under any other key.
+ */
+function TagBreakdown({ tags, total, tag, onTag }: { tags: AiGatewayTags | null; total: number; tag: string; onTag: (key: string) => void }) {
+	if (!tags) return <p className={`py-6 text-center text-sm ${MUTED}`}>This account's schema carries no request metadata.</p>;
+	if (!tags.keys.length) {
+		return (
+			<p className={`py-6 text-center text-sm ${MUTED}`}>
+				No request in this slice carries custom metadata. Applications tag requests with the <code>cf-aig-metadata</code> header —
+				for example <code>{'{"team":"search","costCenter":"CC-1042"}'}</code> — and those keys appear here.
+			</p>
+		);
+	}
+	const blocked = tags.keys.filter((k) => k.sensitive);
+	return (
+		<div className="pt-3">
+			<label className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+				<span className={MUTED}>Break spend down by</span>
+				<select value={tag} onChange={(e) => onTag(e.target.value)} className={`rounded-md border border-zinc-200 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`}>
+					<option value="">Choose a tag key…</option>
+					{tags.keys.map((k) => (
+						<option key={k.key} value={k.key} disabled={k.sensitive}>
+							{k.key} ({compact(k.requests)} requests){k.sensitive ? " — identifies people, not shown" : ""}
+						</option>
+					))}
+				</select>
+			</label>
+			{tag && tags.selected === tag ? (
+				<BreakdownTable rows={tags.rows} total={total} dimension="tag" heading={`${tag} value`} />
+			) : (
+				<p className={`py-4 text-sm ${MUTED}`}>Pick a key — a cost center, team or feature — to see requests and spend for each of its values, and what is not tagged.</p>
+			)}
+			{blocked.length > 0 && (
+				<p className={`mt-2 text-xs ${MUTED}`}>
+					{blocked.map((k) => k.key).join(", ")} {blocked.length === 1 ? "names" : "name"} people or single items, so {blocked.length === 1 ? "it is" : "they are"} not broken
+					down — a per-user view is a separate decision. Email addresses under any other key show as their domain.
+				</p>
+			)}
+		</div>
+	);
+}
+
 function readFilter(): AiGatewayFilter {
 	const params = getHashParams();
 	const filter: AiGatewayFilter = {};
@@ -524,6 +574,13 @@ export function AiGatewayPage({
 	const [metric, setMetric] = useState<Metric>("requests");
 	const [split, setSplit] = useState<Split>("source");
 	const [showSpend, setShowSpend] = useState(true);
+	// The tag key spend is broken down by, carried in the URL (#/ai-gateway?tag=team) like the slice.
+	const [tag, setTag] = useState(() => getHashParams().get("tag") ?? "");
+	const chooseTag = (key: string) => {
+		setTag(key);
+		setHashParam("tag", key || null);
+		if (!key && split === "tag") setSplit("source");
+	};
 	const [tab, setTab] = useState<BreakdownTab | null>(null);
 
 	const granularity: AiGatewayGranularity = granularityFor(timeRange.minutes);
@@ -531,9 +588,9 @@ export function AiGatewayPage({
 	const filterKey = FILTER_ORDER.map((k) => filter[k] ?? "").join("\u0000");
 
 	useEffect(() => {
-		load(session.token, session.accountId, from, to, granularity, filter);
+		load(session.token, session.accountId, from, to, granularity, filter, tag);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [session.token, session.accountId, timeRange.minutes, granularity, reloadKey, load, filterKey]);
+	}, [session.token, session.accountId, timeRange.minutes, granularity, reloadKey, load, filterKey, tag]);
 
 	const applyFilter = (next: AiGatewayFilter) => {
 		setFilter(next);
@@ -555,7 +612,18 @@ export function AiGatewayPage({
 	const shownGranularity = result?.granularity ?? granularity;
 	const stacks = useMemo(() => {
 		const by = result?.seriesBy;
-		const points = split === "gateway" ? by?.gateway : split === "model" ? by?.model : split === "source" || split === "provider" ? by?.provider : split === "client" ? by?.client : [];
+		const points =
+			split === "gateway"
+				? by?.gateway
+				: split === "model"
+					? by?.model
+					: split === "source" || split === "provider"
+						? by?.provider
+						: split === "client"
+							? by?.client
+							: split === "tag"
+								? result?.tags?.series
+								: [];
 		return buildStacks(result?.series ?? [], points ?? [], split, metric, windowBuckets(from, to, shownGranularity));
 		// from/to move with the clock; the window they describe is keyed by the range and the result.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -574,9 +642,9 @@ export function AiGatewayPage({
 	const prompt = totals.promptCache;
 
 	// Tabs for the dimensions not already pinned by the filter — a drilled-in dimension has one row.
-	const tabs: BreakdownTab[] = [...(["gateway", "provider", "model"] as Dimension[]).filter((d) => !filter[d]), "client", "status"];
+	const tabs: BreakdownTab[] = [...(["gateway", "provider", "model"] as Dimension[]).filter((d) => !filter[d]), "client", "tag", "status"];
 	const activeTab: BreakdownTab = tab && tabs.includes(tab) ? tab : tabs[0];
-	const rowsFor: Record<Exclude<BreakdownTab, "status">, BreakdownRow[]> = {
+	const rowsFor: Record<Exclude<BreakdownTab, "status" | "tag">, BreakdownRow[]> = {
 		gateway: result?.byGateway ?? [],
 		provider: result?.byProvider ?? [],
 		model: result?.byModel ?? [],
@@ -772,10 +840,10 @@ export function AiGatewayPage({
 							<span className={MUTED}>Split by</span>
 							<select value={split} onChange={(e) => setSplit(e.target.value as Split)} className={`rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`}>
 								{(Object.keys(SPLIT_LABEL) as Split[])
-									.filter((k) => !(k === "gateway" && filter.gateway) && !(k === "model" && filter.model) && !(k === "provider" && filter.provider))
+									.filter((k) => !(k === "gateway" && filter.gateway) && !(k === "model" && filter.model) && !(k === "provider" && filter.provider) && !(k === "tag" && !tag))
 									.map((k) => (
 										<option key={k} value={k}>
-											{k === "none" ? "Nothing (total)" : SPLIT_LABEL[k]}
+											{k === "none" ? "Nothing (total)" : k === "tag" ? `Tag: ${tag}` : SPLIT_LABEL[k]}
 										</option>
 									))}
 							</select>
@@ -829,6 +897,8 @@ export function AiGatewayPage({
 				<TabPanel id={activeTab} idPrefix="aig">
 					{activeTab === "status" ? (
 						<StatusTable rows={result?.byStatus ?? []} total={totals.requests} />
+					) : activeTab === "tag" ? (
+						<TagBreakdown tags={result?.tags ?? null} total={totals.requests} tag={tag} onTag={chooseTag} />
 					) : (
 						<BreakdownTable
 							rows={rowsFor[activeTab]}

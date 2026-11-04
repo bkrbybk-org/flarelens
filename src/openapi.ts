@@ -352,6 +352,12 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 									model: { type: "string", maxLength: 256 },
 								},
 							},
+							tag: {
+								type: "string",
+								pattern: "^[\\w.:-]{1,64}$",
+								description:
+									"A custom metadata key (cf-aig-metadata) to break spend down by, such as a team or cost center. Keys naming people or single items (user, email, session, …id) are refused; email-shaped values under any key are reduced to their domain.",
+							},
 						},
 					}),
 					responses: {

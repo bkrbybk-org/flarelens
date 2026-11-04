@@ -76,6 +76,15 @@ const usage: AiGatewayUsageResult = {
 	byModel: [slice("@cf/a", 10)],
 	byStatus: [{ statusCode: "200", rateLimited: false, requests: 10 }],
 	byClient: [slice("opencode", 10)],
+	tags: {
+		keys: [
+			{ key: "team", requests: 8, sensitive: false },
+			{ key: "user", requests: 6, sensitive: true },
+		],
+		selected: null,
+		rows: [],
+		series: [],
+	},
 	sessionHealth: {
 		available: true,
 		sessions: 4,
@@ -133,6 +142,27 @@ describe("AiGatewayPage", () => {
 		expect(health).toHaveTextContent("Unusually expensive1 (25.0%)");
 		// A flag the schema lacks is left out, not shown as zero.
 		expect(health).not.toHaveTextContent("Heavy MCP tool use");
+	});
+
+	it("breaks spend down by a chosen tag key, and will not offer one that names people", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const breakdown = (await screen.findByRole("heading", { name: "Breakdown" })).closest("section")!;
+		await user.click(within(breakdown).getByRole("tab", { name: "Tags" }));
+		const picker = within(breakdown).getByRole("combobox", { name: "Break spend down by" });
+		expect(within(picker).getByRole("option", { name: "user (6 requests) — identifies people, not shown" })).toBeDisabled();
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({
+			...usage,
+			tags: { ...usage.tags!, selected: "team", rows: [slice("search", 7), slice("(not tagged)", 3)], series: [{ ts: "2026-11-03", key: "search", requests: 7, tokens: 0, cost: 0.4, errors: 0 }] },
+		});
+		await user.selectOptions(picker, "team");
+		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ tag: "team" });
+		expect(location.hash).toContain("tag=team");
+		expect(await within(breakdown).findByText("search")).toBeInTheDocument();
+		expect(within(breakdown).getByText("(not tagged)")).toBeInTheDocument();
+		// And the chart can be split by the tag's values.
+		await user.selectOptions(screen.getByRole("combobox", { name: "Split by" }), "tag");
+		expect(screen.getByRole("list", { name: "Legend" })).toHaveTextContent("search");
 	});
 
 	it("picks the timeframe on the page, and buckets a week by day", async () => {

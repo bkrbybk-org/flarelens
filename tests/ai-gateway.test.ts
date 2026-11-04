@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
-import { MAX_AI_GATEWAY_RANGE_MS, isAiGatewayGranularity, type AiGatewayUsageResult } from "../src/lib/ai-gateway";
+import { MAX_AI_GATEWAY_RANGE_MS, isAiGatewayGranularity, isSensitiveTagKey, maskTagValue, type AiGatewayUsageResult } from "../src/lib/ai-gateway";
 
 /**
  * Cover for the AI Gateway route: series/totals fold, rate arithmetic (never divide by zero),
@@ -447,6 +447,53 @@ describe("overview and drill-down", () => {
 		expect(sessionsQuery.variables.f_gateway).toBe("prod");
 	});
 
+	it("breaks spend down by a tag, with the untagged remainder and identifying values masked", async () => {
+		const ACCT = "55555555555555555555555555555555";
+		mockUpstream({
+			schema: {
+				sums: { aiGatewayRequestsAdaptiveGroupsType: ["cost"] },
+				dimensions: { aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "gateway", "metadataKey", "metadataValue", "metadataKeys"] },
+			},
+			primary: {
+				series: [],
+				total: [row({}, 10, { cost: 1 })],
+				tagKeys: [row({ metadataKey: "team" }, 8), row({ metadataKey: "user" }, 6)],
+				byTag: [row({ metadataValue: "search" }, 5, { cost: 0.5 }), row({ metadataValue: "a.person@example.com" }, 2, { cost: 0.2 }), row({ metadataValue: "" }, 1, { cost: 0.1 })],
+				seriesByTag: [row({ datetimeHour: "2026-09-05T10:00:00Z", metadataValue: "search" }, 5, { cost: 0.5 })],
+			},
+		});
+		const res = await usage({ accountId: ACCT, ...win(), tag: "team" });
+		expect(res.status).toBe(200);
+		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		expect(result.tags!.keys).toEqual([
+			{ key: "team", requests: 8, sensitive: false },
+			{ key: "user", requests: 6, sensitive: true },
+		]);
+		expect(result.tags!.rows.map((r) => [r.key, r.requests, Math.round((r.cost ?? 0) * 1000) / 1000])).toEqual([
+			["search", 5, 0.5],
+			["(someone)@example.com", 2, 0.2],
+			["(empty)", 1, 0.1],
+			["(not tagged)", 2, 0.2],
+		]);
+		expect(result.tags!.series).toHaveLength(1);
+		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string; variables: Record<string, string> };
+		expect(query.query).toContain("metadataValue(key: $tagKey)");
+		expect(query.query).toContain("metadataKeys_has: $tagKey");
+		expect(query.query).not.toContain('"team"');
+		expect(query.variables.tagKey).toBe("team");
+		// Nothing in the response carries the address itself.
+		expect(JSON.stringify(result)).not.toContain("a.person");
+	});
+
+	it("refuses a tag that identifies people, and a malformed one", async () => {
+		mockUpstream({ schema: RICH_SCHEMA, primary: RICH_PRIMARY });
+		const refused = await usage({ accountId: RICH, ...win(), tag: "user" });
+		expect(refused.status).toBe(400);
+		expect(((await refused.json()) as { errors: { message: string }[] }).errors[0].message).toContain("identifies people");
+		expect((await usage({ accountId: RICH, ...win(), tag: "team} evil" })).status).toBe(400);
+		expect((await usage({ accountId: RICH, ...win(), tag: 7 })).status).toBe(400);
+	});
+
 	it("drills into a slice with the values as variables, never in the query text", async () => {
 		const res = await usage({ accountId: RICH, ...win(), filter: { gateway: 'prod" } evil', model: "@cf/a" } });
 		expect(res.status).toBe(200);
@@ -468,5 +515,19 @@ describe("overview and drill-down", () => {
 		expect(((await res.json()) as { errors: { message: string }[] }).errors[0].message).toContain("cannot be filtered by model");
 		expect((await usage({ accountId: RICH, ...win(), filter: { gateway: 42 } })).status).toBe(400);
 		expect((await usage({ accountId: RICH, ...win(), filter: { gateway: "x".repeat(300) } })).status).toBe(400);
+	});
+});
+
+describe("tag privacy", () => {
+	it("treats keys naming people or single items as sensitive, and cost centers as not", () => {
+		for (const key of ["user", "userId", "email", "user_email", "gadgetId", "chatId", "cf.session_id", "customer", "ip"]) expect(isSensitiveTagKey(key)).toBe(true);
+		for (const key of ["team", "costCenter", "cost-center", "source", "task", "origin", "ai-search", "tier", "feature"]) expect(isSensitiveTagKey(key)).toBe(false);
+	});
+
+	it("masks emails to their domain and long identifiers, and names an empty value", () => {
+		expect(maskTagValue("someone@example.co.th")).toBe("(someone)@example.co.th");
+		expect(maskTagValue("b95f90995eaed87c4e2ee17f8a99714c")).toBe("(identifier)");
+		expect(maskTagValue("  ")).toBe("(empty)");
+		expect(maskTagValue("CC-1042")).toBe("CC-1042");
 	});
 });

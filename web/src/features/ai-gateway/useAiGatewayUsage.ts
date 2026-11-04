@@ -20,13 +20,13 @@ export function useAiGatewayUsage(onAuthError: () => void) {
 	const { start: progressStart, stop: progressStop } = progress;
 
 	const load = useCallback(
-		async (token: string, accountId: string, from: string, to: string, granularity: AiGatewayGranularity, filter: AiGatewayFilter = {}) => {
+		async (token: string, accountId: string, from: string, to: string, granularity: AiGatewayGranularity, filter: AiGatewayFilter = {}, tag = "") => {
 			const requestId = ++requestIdRef.current;
 			setState((prev) => ({ ...prev, loading: true, error: null }));
 			progressStart();
 			let success = false;
 			try {
-				const result = await fetchAiGatewayUsage<AiGatewayUsageResult>(token, { accountId, from, to, granularity, filter });
+				const result = await fetchAiGatewayUsage<AiGatewayUsageResult>(token, { accountId, from, to, granularity, filter, ...(tag ? { tag } : {}) });
 				if (requestId !== requestIdRef.current) return;
 				success = true;
 				setState({ result, loading: false, error: null });

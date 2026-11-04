@@ -40,6 +40,7 @@ function result(overrides: Partial<AiGatewayUsageResult> = {}): AiGatewayUsageRe
 		recent: [],
 		byClient: [],
 		sessionHealth: { available: false, reason: "test" },
+		tags: null,
 		previous: { requests: 296, sessions: 0, tokens: 274_219, cost: 0.089, errorRate: 0, cacheHitRate: 0.73, p50: 61 },
 		previousWindow: { since: "", until: "" },
 		filter: {},

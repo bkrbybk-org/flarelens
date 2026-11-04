@@ -233,7 +233,7 @@ export function fetchGatewayUsage<T>(
 
 export function fetchAiGatewayUsage<T>(
 	token: string,
-	body: { accountId: string; from: string; to: string; granularity: string; filter?: { gateway?: string; provider?: string; model?: string } },
+	body: { accountId: string; from: string; to: string; granularity: string; filter?: { gateway?: string; provider?: string; model?: string }; tag?: string },
 ): Promise<T> {
 	return postJson<T>("/api/ai-gateway/usage", token, body);
 }

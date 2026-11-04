@@ -70,6 +70,10 @@ interface ResolvedFields {
 				cacheReadTokens: string | null;
 				contextTokens: string | null;
 				requestsWithCacheRead: string | null;
+				/** Custom metadata (the cf-aig-metadata header): one row per key, a value per named key, the key list. */
+				metadataKey: string | null;
+				metadataValue: string | null;
+				metadataKeys: string | null;
 		  })
 		| null;
 	errors: DatasetCaps | null;
@@ -214,6 +218,9 @@ export async function resolveAiGatewayFields(token: string, cacheKey: string): P
 			// contextTokens = fresh input + cache reads + cache writes: all the input a model saw.
 			contextTokens: prefer(requests.sums, "contextTokens"),
 			requestsWithCacheRead: prefer(requests.sums, "requestsWithCacheRead"),
+			metadataKey: prefer(requests.dimensions, "metadataKey"),
+			metadataValue: prefer(requests.dimensions, "metadataValue"),
+			metadataKeys: prefer(requests.dimensions, "metadataKeys"),
 		},
 		errors,
 		cache: cache && { ...cache, status: prefer(cache.dimensions, "cacheStatus", "cacheOp") ?? pick(cache.dimensions, /cach/) },
@@ -298,6 +305,43 @@ export function clientName(userAgent: string): string {
 	if (/^Mozilla\//.test(ua)) return "Browser";
 	const product = ua.split(/[/\s(;]/)[0];
 	return product || "(unknown)";
+}
+
+/**
+ * Tag keys that name a person or a single thing rather than a cost center: a breakdown by them is
+ * a per-user (or per-chat) list, which is the per-user decision still open — so they are listed
+ * but never broken down. Matched on the key's words: user, email, name, session, chat, ip, phone,
+ * account, or anything ending in "id".
+ */
+export function isSensitiveTagKey(key: string): boolean {
+	const words = key
+		.replace(/([a-z])([A-Z])/g, "$1 $2")
+		.toLowerCase()
+		.split(/[^a-z0-9]+/)
+		.filter(Boolean);
+	return words.some((w) => /^(user|users|username|email|mail|name|session|chat|ip|phone|account|owner|customer)$/.test(w)) || /id$/i.test(key);
+}
+
+/**
+ * A value an allowed key still carries that identifies someone is reduced before it leaves the
+ * Worker: an email address to its domain, a long hex identifier to a placeholder.
+ */
+export function maskTagValue(value: string): string {
+	const v = value.trim();
+	if (!v) return "(empty)";
+	const email = /^[^\s@]+@([^\s@]+\.[^\s@]+)$/.exec(v);
+	if (email) return `(someone)@${email[1]}`;
+	if (/^[0-9a-f]{24,}$/i.test(v)) return "(identifier)";
+	return v;
+}
+
+export interface AiGatewayTags {
+	/** Every key seen in the window, with how many requests carry it. */
+	keys: { key: string; requests: number; sensitive: boolean }[];
+	selected: string | null;
+	/** Requests by the selected key's value, plus "(not tagged)" for those without the key. */
+	rows: AiGatewayBreakdownRow[];
+	series: AiGatewaySplitPoint[];
 }
 
 /** Sessions the spend-sessions dataset flags, by flag. null where the schema has no such flag. */
@@ -408,6 +452,8 @@ export interface AiGatewayUsageResult {
 	/** By client application (from the user agent), versions folded together. */
 	byClient: AiGatewayBreakdownRow[];
 	sessionHealth: (AiGatewaySessionHealth & { available: true }) | { available: false; reason: string };
+	/** Cost allocation by custom metadata tag; null when the schema carries no metadata. */
+	tags: AiGatewayTags | null;
 	/** The most recent requests in the slice, newest first. Empty when the schema has no request id. */
 	recent: AiGatewayRequestRow[];
 	previous: AiGatewayPrevious | null;
@@ -520,7 +566,7 @@ export function unsupportedFilters(f: NonNullable<ResolvedFields["requests"]>, f
 	return FILTER_KEYS.filter((key) => filter[key] !== undefined && !f[key]);
 }
 
-function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["requests"]>, filter: AiGatewayFilter): string {
+function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["requests"]>, filter: AiGatewayFilter, tag: string | null = null): string {
 	const { clause, declarations } = filterParts(f, filter);
 	const previous = filterParts(f, filter, "$prevSince", "$prevUntil");
 	const measures = `count
@@ -570,7 +616,30 @@ function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["req
         ${sumSelection([f.tokensIn, f.tokensOut, f.erroredRequests, f.cost])}
       }`
 			: "";
-	const declared = [...new Set([...declarations, ...previous.declarations])].map((d) => `, ${d}`).join("");
+	// Tags: the keys in use, and — for one chosen key — requests by its value. The key travels as
+	// a variable, into both the filter (requests carrying it) and the value dimension's argument.
+	const tagKeys = f.metadataKey
+		? `
+      tagKeys: ${f.name}(filter: ${clause}, limit: 50, orderBy: [count_DESC]) {
+        count
+        dimensions { ${f.metadataKey} }
+      }`
+		: "";
+	const tagClause = tag && f.metadataKeys ? clause.replace(/ }$/, `, ${f.metadataKeys}_has: $tagKey }`) : "";
+	const tagged =
+		tag && f.metadataValue && f.metadataKeys
+			? `
+      byTag: ${f.name}(filter: ${tagClause}, limit: $breakdownLimit, orderBy: [count_DESC]) {
+        ${measures}
+        dimensions { ${f.metadataValue}(key: $tagKey) }
+      }
+      seriesByTag: ${f.name}(filter: ${tagClause}, limit: $seriesLimit, orderBy: [${timeDimension}_ASC]) {
+        count
+        dimensions { ${timeDimension} ${f.metadataValue}(key: $tagKey) }
+        ${sumSelection([f.tokensIn, f.tokensOut, f.erroredRequests, f.cost])}
+      }`
+			: "";
+	const declared = [...new Set([...declarations, ...previous.declarations, ...(tagged ? ["$tagKey: string!"] : [])])].map((d) => `, ${d}`).join("");
 
 	return `
 query AiGatewayRequests($accountTag: string!, $since: Time!, $until: Time!, $prevSince: Time!, $prevUntil: Time!, $seriesLimit: Int!, $breakdownLimit: Int!, $recentLimit: Int!${declared}) {
@@ -586,7 +655,7 @@ query AiGatewayRequests($accountTag: string!, $since: Time!, $until: Time!, $pre
       }
       previous: ${f.name}(filter: ${previous.clause}, limit: 1) {
         ${headline}
-      }${splitSeries("seriesByGateway", f.gateway)}${splitSeries("seriesByModel", f.model)}${splitSeries("seriesByProvider", f.provider)}${splitSeries("seriesByClient", f.userAgent)}${breakdown("byGateway", f.gateway)}${breakdown("byProvider", f.provider)}${breakdown("byModel", f.model)}${breakdown("byClient", f.userAgent)}${status}${recent}
+      }${splitSeries("seriesByGateway", f.gateway)}${splitSeries("seriesByModel", f.model)}${splitSeries("seriesByProvider", f.provider)}${splitSeries("seriesByClient", f.userAgent)}${breakdown("byGateway", f.gateway)}${breakdown("byProvider", f.provider)}${breakdown("byModel", f.model)}${breakdown("byClient", f.userAgent)}${status}${recent}${tagKeys}${tagged}
     }
   }
 }`;
@@ -789,7 +858,7 @@ const RECENT_LIMIT = 50;
 export async function fetchAiGatewayUsage(
 	accountId: string,
 	token: string,
-	options: { since: string; until: string; granularity: AiGatewayGranularity; filter?: AiGatewayFilter },
+	options: { since: string; until: string; granularity: AiGatewayGranularity; filter?: AiGatewayFilter; tag?: string },
 ): Promise<AiGatewayUsageResult> {
 	let granularity = options.granularity;
 	const filter = options.filter ?? {};
@@ -814,6 +883,10 @@ export async function fetchAiGatewayUsage(
 	if (unsupported.length) {
 		throw new AiGatewayUsageError(`This account's AI Gateway dataset cannot be filtered by ${unsupported.join(", ")}`, 400);
 	}
+	const tag = options.tag ?? null;
+	if (tag && isSensitiveTagKey(tag)) {
+		throw new AiGatewayUsageError(`The "${tag}" tag identifies people or single items, so it is not broken down`, 400);
+	}
 	// 15-minute buckets only where the schema has them; hourly is the floor every account carries.
 	if (granularity === "15m" && !fields.requests.dimensions.includes(TIME_DIMENSION["15m"])) granularity = "hourly";
 	const timeDimension = TIME_DIMENSION[granularity];
@@ -825,6 +898,9 @@ export async function fetchAiGatewayUsage(
 		seriesByProvider?: RawRow[];
 		seriesByClient?: RawRow[];
 		byClient?: RawRow[];
+		tagKeys?: RawRow[];
+		byTag?: RawRow[];
+		seriesByTag?: RawRow[];
 		total?: RawRow[];
 		previous?: RawRow[];
 		byGateway?: RawRow[];
@@ -833,7 +909,8 @@ export async function fetchAiGatewayUsage(
 		byStatus?: RawRow[];
 		recent?: RawRow[];
 	}
-	const { account } = await postGraphql<RequestsAccount>(accountId, token, requestsQuery(timeDimension, fields.requests, filter), {
+	const { account } = await postGraphql<RequestsAccount>(accountId, token, requestsQuery(timeDimension, fields.requests, filter, tag), {
+		...(tag ? { tagKey: tag } : {}),
 		...variables,
 		...filterVariables,
 		prevSince: prev.since,
@@ -968,6 +1045,40 @@ export async function fetchAiGatewayUsage(
 		totals.rateLimited = byStatus.filter((r) => r.rateLimited).reduce((sum, r) => sum + r.requests, 0);
 	}
 
+	let tags: AiGatewayTags | null = null;
+	const md = fields.requests;
+	if (md.metadataKey) {
+		const keys = (account?.tagKeys || [])
+			.map((row) => ({ key: text(row.dimensions?.[md.metadataKey as string]).trim(), requests: row.count }))
+			.filter((k) => k.key)
+			.map((k) => ({ ...k, sensitive: isSensitiveTagKey(k.key) }));
+		let rows: AiGatewayBreakdownRow[] = [];
+		let tagSeries: AiGatewaySplitPoint[] = [];
+		if (tag && md.metadataValue) {
+			rows = foldBreakdown(account?.byTag || [], md.metadataValue, md, maskTagValue);
+			tagSeries = foldSplit(account?.seriesByTag || [], timeDimension, md.metadataValue, md, maskTagValue);
+			// What the tagged rows leave of the total is the untagged remainder — the share nobody
+			// has allocated yet, which is often the point of the exercise.
+			const sumOf = (pick: (r: AiGatewayBreakdownRow) => number | null) => rows.reduce((n, r) => n + (pick(r) ?? 0), 0);
+			const rest = (whole: number | null, pick: (r: AiGatewayBreakdownRow) => number | null) => (whole === null ? null : Math.max(0, whole - sumOf(pick)));
+			const untagged = totals.requests - sumOf((r) => r.requests);
+			if (untagged > 0) {
+				rows.push({
+					key: "(not tagged)",
+					requests: untagged,
+					tokensIn: rest(totals.tokensIn, (r) => r.tokensIn),
+					tokensOut: rest(totals.tokensOut, (r) => r.tokensOut),
+					cost: rest(totals.cost, (r) => r.cost),
+					errors: rest(totals.errors, (r) => r.errors),
+					cached: rest(totals.cacheHits, (r) => r.cached),
+					p50: null,
+					p95: null,
+				});
+			}
+		}
+		tags = { keys, selected: tag, rows, series: tagSeries };
+	}
+
 	const prevRow = account?.previous?.[0];
 	const prevField = (field: string | null) => sumField(prevRow, field);
 	const prevRequests = prevRow?.count ?? 0;
@@ -1002,6 +1113,7 @@ export async function fetchAiGatewayUsage(
 		byStatus,
 		byClient: fields.requests.userAgent ? foldBreakdown(account?.byClient || [], fields.requests.userAgent, fields.requests, clientName) : [],
 		sessionHealth,
+		tags,
 		recent: foldRecent(account?.recent || [], fields.requests),
 		previous,
 		previousWindow: prev,
