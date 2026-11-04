@@ -1,4 +1,23 @@
-export type AiGatewayGranularity = "hourly" | "daily";
+export type AiGatewayGranularity = "15m" | "hourly" | "daily";
+
+/** Buckets that suit the window: a short window in 15 minutes, a day in hours, longer by day. */
+export function granularityFor(minutes: number): AiGatewayGranularity {
+	if (minutes <= 360) return "15m";
+	if (minutes <= 1440) return "hourly";
+	return "daily";
+}
+
+export const GRANULARITY_LABEL: Record<AiGatewayGranularity, string> = { "15m": "15-minute", hourly: "Hourly", daily: "Daily" };
+
+/** One bucket's share for one gateway, model or provider. */
+export interface AiGatewaySplitPoint {
+	ts: string;
+	key: string;
+	requests: number;
+	tokens: number | null;
+	cost: number | null;
+	errors: number | null;
+}
 
 /** Mirrors src/lib/ai-gateway.ts. A null measure means the schema has no such field — never 0. */
 export interface AiGatewaySeriesPoint {
@@ -83,6 +102,7 @@ export interface AiGatewayUsageResult {
 	granularity: AiGatewayGranularity;
 	timeDimension: string;
 	series: AiGatewaySeriesPoint[];
+	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[] };
 	totals: AiGatewayTotals;
 	byGateway: AiGatewayBreakdownRow[];
 	byProvider: AiGatewayBreakdownRow[];

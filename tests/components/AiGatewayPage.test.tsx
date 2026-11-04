@@ -39,9 +39,20 @@ const slice = (key: string, requests: number, extra: Partial<AiGatewayBreakdownR
 });
 
 const usage: AiGatewayUsageResult = {
-	granularity: "hourly",
-	timeDimension: "datetimeHour",
-	series: [{ ts: "2026-11-03T10:00:00Z", requests: 10, tokens: 110, cost: 0.5, errors: 0 }],
+	granularity: "daily",
+	timeDimension: "date",
+	series: [{ ts: "2026-11-03", requests: 10, tokens: 110, cost: 0.5, errors: 0 }],
+	seriesBy: {
+		gateway: [
+			{ ts: "2026-11-03", key: "prod", requests: 7, tokens: 77, cost: 0.35, errors: 0 },
+			{ ts: "2026-11-03", key: "staging", requests: 3, tokens: 33, cost: 0.15, errors: 0 },
+		],
+		model: [{ ts: "2026-11-03", key: "@cf/a", requests: 10, tokens: 110, cost: 0.5, errors: 0 }],
+		provider: [
+			{ ts: "2026-11-03", key: "workers-ai", requests: 8, tokens: 90, cost: 0.4, errors: 0 },
+			{ ts: "2026-11-03", key: "openai", requests: 2, tokens: 20, cost: 0.1, errors: 0 },
+		],
+	},
 	totals: { requests: 10, tokensIn: 100, tokensOut: 10, cost: 0.5, errors: 0, errorRate: 0, cacheHits: 2, cacheMisses: 8, cacheHitRate: 0.2, p50: 1200, p95: 5000, rateLimited: 0 },
 	byGateway: [slice("prod", 7), slice("staging", 3)],
 	byProvider: [slice("workers-ai", 10)],
@@ -71,6 +82,31 @@ describe("AiGatewayPage", () => {
 		// A rate changes by points, coloured by direction: the cache hit rate fell 40 points.
 		expect(screen.getByText("Cache hit rate").closest("div[class*='rounded-xl']")).toHaveTextContent("▼ 40.0 pts");
 		expect(screen.getByText("Cache hit rate fell from 60% to 20% since the previous window", { exact: false })).toBeInTheDocument();
+	});
+
+	it("picks the timeframe on the page, and buckets a week by day", async () => {
+		const setPreset = vi.fn();
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={{ ...timeRange, setPreset }} onAuthError={vi.fn()} />);
+		expect(vi.mocked(fetchAiGatewayUsage).mock.calls[0][1]).toMatchObject({ granularity: "daily" });
+		const frames = screen.getByRole("group", { name: "Timeframe" });
+		expect(within(frames).getByRole("button", { name: "7 days" })).toHaveAttribute("aria-pressed", "true");
+		await user.click(within(frames).getByRole("button", { name: "24 hours" }));
+		expect(setPreset).toHaveBeenCalledWith("24h");
+		expect(await screen.findByRole("heading", { name: "Requests by day, split by Workers AI vs third-party" })).toBeInTheDocument();
+	});
+
+	it("splits the chart by Workers AI vs third-party by default, and by gateway or model on request", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const legend = await screen.findByRole("list", { name: "Legend" });
+		expect(legend).toHaveTextContent("Workers AI8");
+		expect(legend).toHaveTextContent("Third-party2");
+		await user.selectOptions(screen.getByRole("combobox", { name: "Split by" }), "gateway");
+		const byGateway = screen.getByRole("list", { name: "Legend" });
+		// A gateway in the legend drills into it.
+		await user.click(within(byGateway).getByRole("button", { name: /^prod/ }));
+		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { gateway: "prod" } });
 	});
 
 	it("drills into a gateway from the breakdown, carries it in the URL, and steps back out", async () => {

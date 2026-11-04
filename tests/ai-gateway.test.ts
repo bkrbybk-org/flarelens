@@ -368,6 +368,28 @@ describe("overview and drill-down", () => {
 		expect(Date.parse(query.variables.until) - Date.parse(query.variables.since)).toBe(Date.parse(query.variables.prevUntil) - Date.parse(query.variables.prevSince));
 	});
 
+	it("splits each bucket by gateway, model and provider, and falls back to hours without 15-minute buckets", async () => {
+		mockUpstream({
+			schema: RICH_SCHEMA,
+			primary: {
+				...RICH_PRIMARY,
+				seriesByProvider: [row({ datetimeHour: "2026-09-05T10:00:00Z", provider: "workers-ai" }, 8, { cost: 0.4 }), row({ datetimeHour: "2026-09-05T10:00:00Z", provider: "openai" }, 2, { cost: 0.1 })],
+			},
+		});
+		// RICH_SCHEMA has no datetimeFifteenMinutes, so a 15-minute request is answered hourly.
+		const res = await usage({ accountId: RICH, ...win(), granularity: "15m" });
+		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		expect(result.granularity).toBe("hourly");
+		expect(result.seriesBy.provider).toEqual([
+			{ ts: "2026-09-05T10:00:00Z", key: "workers-ai", requests: 8, tokens: 0, cost: 0.4, errors: 0 },
+			{ ts: "2026-09-05T10:00:00Z", key: "openai", requests: 2, tokens: 0, cost: 0.1, errors: 0 },
+		]);
+		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests"))!.query;
+		expect(query).toContain("dimensions { datetimeHour gateway }");
+		expect(query).toContain("dimensions { datetimeHour model }");
+		expect(query).toContain("dimensions { datetimeHour provider }");
+	});
+
 	it("drills into a slice with the values as variables, never in the query text", async () => {
 		const res = await usage({ accountId: RICH, ...win(), filter: { gateway: 'prod" } evil', model: "@cf/a" } });
 		expect(res.status).toBe(200);

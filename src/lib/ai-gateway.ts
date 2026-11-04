@@ -214,10 +214,10 @@ export async function resolveAiGatewayFields(token: string, cacheKey: string): P
 
 const GRAPHQL_ENDPOINT = "https://api.cloudflare.com/client/v4/graphql";
 
-export const AI_GATEWAY_GRANULARITIES = ["hourly", "daily"] as const;
+export const AI_GATEWAY_GRANULARITIES = ["15m", "hourly", "daily"] as const;
 export type AiGatewayGranularity = (typeof AI_GATEWAY_GRANULARITIES)[number];
 
-const TIME_DIMENSION: Record<AiGatewayGranularity, string> = { hourly: "datetimeHour", daily: "date" };
+const TIME_DIMENSION: Record<AiGatewayGranularity, string> = { "15m": "datetimeFifteenMinutes", hourly: "datetimeHour", daily: "date" };
 
 const SERIES_LIMIT = 10_000;
 const BREAKDOWN_LIMIT = 100;
@@ -247,6 +247,15 @@ export interface AiGatewaySeriesPoint {
 	ts: string;
 	requests: number;
 	/** null when the schema has no such aggregate. */
+	tokens: number | null;
+	cost: number | null;
+	errors: number | null;
+}
+
+export interface AiGatewaySplitPoint {
+	ts: string;
+	key: string;
+	requests: number;
 	tokens: number | null;
 	cost: number | null;
 	errors: number | null;
@@ -339,6 +348,8 @@ export interface AiGatewayUsageResult {
 	granularity: AiGatewayGranularity;
 	timeDimension: string;
 	series: AiGatewaySeriesPoint[];
+	/** The series split by one dimension per bucket; empty for a dimension the schema lacks. */
+	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[] };
 	totals: AiGatewayTotals;
 	byGateway: AiGatewayBreakdownRow[];
 	byProvider: AiGatewayBreakdownRow[];
@@ -492,6 +503,16 @@ function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["req
         ${dimensionSelection(recentDims)}
       }`
 			: "";
+	// Each bucket split by one dimension, for the stacked chart.
+	const splitSeries = (alias: string, dimension: string | null) =>
+		dimension
+			? `
+      ${alias}: ${f.name}(filter: ${clause}, limit: $seriesLimit, orderBy: [${timeDimension}_ASC]) {
+        count
+        dimensions { ${timeDimension} ${dimension} }
+        ${sumSelection([f.tokensIn, f.tokensOut, f.erroredRequests, f.cost])}
+      }`
+			: "";
 	const declared = [...new Set([...declarations, ...previous.declarations])].map((d) => `, ${d}`).join("");
 
 	return `
@@ -508,7 +529,7 @@ query AiGatewayRequests($accountTag: string!, $since: Time!, $until: Time!, $pre
       }
       previous: ${f.name}(filter: ${previous.clause}, limit: 1) {
         ${measures}
-      }${breakdown("byGateway", f.gateway)}${breakdown("byProvider", f.provider)}${breakdown("byModel", f.model)}${status}${recent}
+      }${splitSeries("seriesByGateway", f.gateway)}${splitSeries("seriesByModel", f.model)}${splitSeries("seriesByProvider", f.provider)}${breakdown("byGateway", f.gateway)}${breakdown("byProvider", f.provider)}${breakdown("byModel", f.model)}${status}${recent}
     }
   }
 }`;
@@ -566,6 +587,21 @@ function isCacheHit(value: unknown): boolean {
 
 const sumField = (row: RawRow | undefined, field: string | null): number | null => (field ? (row?.sum?.[field] ?? 0) : null);
 const addNullable = (a: number | null, b: number | null): number | null => (a === null && b === null ? null : (a ?? 0) + (b ?? 0));
+
+/** One bucket's share for one gateway/model/provider, for the stacked chart. */
+function foldSplit(rows: RawRow[], timeDimension: string, dimension: string | null, f: NonNullable<ResolvedFields["requests"]>): AiGatewaySplitPoint[] {
+	if (!dimension) return [];
+	return rows
+		.filter((row) => row.dimensions?.[timeDimension])
+		.map((row) => ({
+			ts: String(row.dimensions?.[timeDimension]),
+			key: String(row.dimensions?.[dimension] ?? "").trim() || "(unknown)",
+			requests: row.count,
+			tokens: addNullable(sumField(row, f.tokensIn), sumField(row, f.tokensOut)),
+			cost: sumField(row, f.cost),
+			errors: sumField(row, f.erroredRequests),
+		}));
+}
 
 function foldSeries(rows: RawRow[], timeDimension: string, f: NonNullable<ResolvedFields["requests"]>): AiGatewaySeriesPoint[] {
 	const byTs = new Map<string, AiGatewaySeriesPoint>();
@@ -644,7 +680,7 @@ export async function fetchAiGatewayUsage(
 	token: string,
 	options: { since: string; until: string; granularity: AiGatewayGranularity; filter?: AiGatewayFilter },
 ): Promise<AiGatewayUsageResult> {
-	const timeDimension = TIME_DIMENSION[options.granularity];
+	let granularity = options.granularity;
 	const filter = options.filter ?? {};
 	const prev = previousWindow(options.since, options.until);
 	const variables = { since: options.since, until: options.until, seriesLimit: SERIES_LIMIT, breakdownLimit: BREAKDOWN_LIMIT };
@@ -667,9 +703,15 @@ export async function fetchAiGatewayUsage(
 	if (unsupported.length) {
 		throw new AiGatewayUsageError(`This account's AI Gateway dataset cannot be filtered by ${unsupported.join(", ")}`, 400);
 	}
+	// 15-minute buckets only where the schema has them; hourly is the floor every account carries.
+	if (granularity === "15m" && !fields.requests.dimensions.includes(TIME_DIMENSION["15m"])) granularity = "hourly";
+	const timeDimension = TIME_DIMENSION[granularity];
 
 	interface RequestsAccount {
 		series?: RawRow[];
+		seriesByGateway?: RawRow[];
+		seriesByModel?: RawRow[];
+		seriesByProvider?: RawRow[];
 		total?: RawRow[];
 		previous?: RawRow[];
 		byGateway?: RawRow[];
@@ -806,9 +848,14 @@ export async function fetchAiGatewayUsage(
 		: null;
 
 	return {
-		granularity: options.granularity,
+		granularity,
 		timeDimension,
 		series,
+		seriesBy: {
+			gateway: foldSplit(account?.seriesByGateway || [], timeDimension, fields.requests.gateway, fields.requests),
+			model: foldSplit(account?.seriesByModel || [], timeDimension, fields.requests.model, fields.requests),
+			provider: foldSplit(account?.seriesByProvider || [], timeDimension, fields.requests.provider, fields.requests),
+		},
 		totals,
 		byGateway: fields.requests.gateway ? foldBreakdown(account?.byGateway || [], fields.requests.gateway, fields.requests) : [],
 		byProvider: fields.requests.provider ? foldBreakdown(account?.byProvider || [], fields.requests.provider, fields.requests) : [],

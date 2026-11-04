@@ -23,6 +23,7 @@ function result(overrides: Partial<AiGatewayUsageResult> = {}): AiGatewayUsageRe
 		granularity: "hourly",
 		timeDimension: "datetimeHour",
 		series: [],
+		seriesBy: { gateway: [], model: [], provider: [] },
 		totals: { requests: 78, tokensIn: 3_000_000, tokensOut: 160_000, cost: 1.18, errors: 1, errorRate: 1 / 78, cacheHits: 0, cacheMisses: 78, cacheHitRate: 0, p50: 12_275, p95: 368_576, rateLimited: 0 },
 		byGateway: [slice("default", 29), slice("internal-ai", 24), slice("demo", 25)],
 		byProvider: [slice("workers-ai", 77), slice("ceramic", 1, { errors: 1 })],
