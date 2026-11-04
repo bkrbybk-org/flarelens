@@ -28,13 +28,15 @@ import { AiSecurityPage } from "./features/ai-security/AiSecurityPage";
 import { ShieldsPage } from "./features/shields/ShieldsPage";
 import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
 import { Topbar } from "./components/shell/Topbar";
+import { PresentationBar } from "./components/shell/PresentationBar";
+import { useAutoRefresh, usePresentation } from "./hooks/usePresentation";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { NameDialog } from "./components/shell/NameDialog";
 import { AddAccountDialog } from "./components/shell/AddAccountDialog";
 import { addExtraAccounts, clearExtraAccounts, listExtraAccounts, removeExtraAccount, type ExtraAccount } from "./lib/extraAccounts";
 import { useHashSyncedState } from "./hooks/useHashParams";
 import { usePrefs, type Theme } from "./hooks/usePrefs";
-import { TIME_RANGE_ROUTES, useTimeRange } from "./hooks/useTimeRange";
+import { TIME_PRESETS, TIME_RANGE_ROUTES, useTimeRange } from "./hooks/useTimeRange";
 import { useRoute, type Route } from "./hooks/useRoute";
 import { useSession, type Session, type SessionMode } from "./hooks/useSession";
 import { useZeroTrustData } from "./hooks/useZeroTrustData";
@@ -313,6 +315,21 @@ export default function App() {
 		[data.groupMap, data.idpMap, listMap],
 	);
 
+	// Presentation mode (full screen, no sidebar or top bar) and the auto-refresh a booth screen
+	// needs. The refresh is whatever the mounted section registered — the same thing Sync does.
+	const presentation = usePresentation();
+	const currentRefresh = session && DATA_ROUTES.has(route) ? () => load(session.token, session.accountId) : sectionRefresh?.reload;
+	const refreshing = DATA_ROUTES.has(route) ? data.loading : (sectionRefresh?.loading ?? false);
+	const [autoRefreshMs, setAutoRefreshMs] = useState(0);
+	useAutoRefresh(presentation.active ? autoRefreshMs : 0, currentRefresh, refreshing);
+	// "Updated hh:mm" on the presentation bar: stamped each time a load finishes.
+	const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+	const [wasRefreshing, setWasRefreshing] = useState(refreshing);
+	if (wasRefreshing !== refreshing) {
+		setWasRefreshing(refreshing);
+		if (!refreshing) setUpdatedAt(new Date());
+	}
+
 	const handleConnect = useCallback((next: Session) => {
 		setPrimary({ token: next.token, mode: next.mode });
 		connect(next);
@@ -343,6 +360,7 @@ export default function App() {
 	return (
 		<SectionRefreshContext value={registerRefresh}>
 		<div className="flex h-dvh overflow-hidden">
+			{!presentation.active && (
 			<Sidebar
 				accountId={session.accountId}
 				accounts={sidebarAccounts}
@@ -358,11 +376,25 @@ export default function App() {
 				onMobileClose={() => setMobileMenuOpen(false)}
 				savedViewsVersion={savedViewsVersion}
 			/>
+			)}
 			{/* min-h-0 is load-bearing: a flex item defaults to min-height:auto, so without it this
 			    column grows to fit its content instead of being bounded by the h-dvh shell. The
 			    page inside then never becomes the scroll container — the shell's overflow-hidden
 			    box scrolls instead, which drags the sidebar and top bar out of view. */}
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
+				{presentation.active ? (
+					<PresentationBar
+						title={PAGE_TITLES[route]}
+						accountName={session.accountName || session.accountId}
+						windowLabel={TIME_RANGE_ROUTES.has(route) ? TIME_PRESETS.find((p) => p.key === timeRange.preset)?.label : undefined}
+						updatedAt={updatedAt}
+						refreshing={refreshing}
+						autoRefreshMs={autoRefreshMs}
+						onAutoRefresh={setAutoRefreshMs}
+						onRefresh={currentRefresh}
+						onExit={presentation.exit}
+					/>
+				) : (
 				<Topbar
 					title={PAGE_TITLES[route]}
 					theme={prefs.theme}
@@ -420,7 +452,9 @@ export default function App() {
 					onDisconnect={handleDisconnect}
 					mode={session.mode}
 					onMobileMenu={() => setMobileMenuOpen(true)}
+					onPresent={() => void presentation.enter()}
 				/>
+				)}
 				{/* `relative` is load-bearing. `overflow` does not create a containing block, so an
 				    absolutely positioned descendant with no positioned ancestor — every `sr-only`
 				    label, and icons inside inputs — anchors to the initial containing block instead
@@ -555,6 +589,7 @@ export default function App() {
 			showRefresh={DATA_ROUTES.has(route) || sectionRefresh !== null}
 			onDisconnect={handleDisconnect}
 			onSaveView={() => setSaveViewOpen(true)}
+			onPresent={() => void presentation.enter()}
 		/>
 		{saveViewOpen && (
 			<NameDialog

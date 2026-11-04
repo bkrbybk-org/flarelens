@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-09-27** against a full read of the tree, t
 live probe of every route on the deployed Worker. See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,258 tests green across 94 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,264 tests green across 95 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `59db4f87`, deployed 2026-11-04 (AI Gateway timeframe buttons and stacked chart by gateway, model, Workers AI vs third-party; before it the same day, `19bcacaa`: AI Gateway overview and drill-down; before it, 2026-10-28, `1ba2856c`: Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
+Running version `662526be`, deployed 2026-11-04 (full-screen presentation mode on every page; before it the same day, `59db4f87`: AI Gateway timeframe buttons and stacked chart by gateway, model, Workers AI vs third-party; before it the same day, `19bcacaa`: AI Gateway overview and drill-down; before it, 2026-10-28, `1ba2856c`: Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -394,6 +394,14 @@ files behind.
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **Full screen on every page (2026-11-04, `662526be`).** For booths and presentations: a top-bar
+  button and a ⌘K command enter full screen with the sidebar and top bar replaced by a slim bar
+  (page, account, window, "Updated hh:mm"; faint auto-refresh / refresh / exit controls). Auto-refresh
+  reuses each section's registered reload — the same one Sync runs — and skips a tick while a load
+  is in flight. Leaving full screen by the browser's own means leaves the mode; if full screen is
+  refused, the mode still works in the window and Esc exits. Live bundle checked for the feature;
+  not exercised in a browser (the pane's Access session had lapsed).
 
 - **AI Gateway: timeframe and stacked chart (2026-11-04, `59db4f87`).** Timeframe buttons on the
   page (the top-bar setting, made visible where it matters). The chart now buckets by 15 minutes

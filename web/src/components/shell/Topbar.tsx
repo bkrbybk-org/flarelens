@@ -2,7 +2,7 @@ import type { CfZone } from "../../types";
 import { TIME_PRESETS, type TimePresetKey } from "../../hooks/useTimeRange";
 import type { SessionMode } from "../../hooks/useSession";
 import type { Theme } from "../../hooks/usePrefs";
-import { BookmarkIcon, LogoutIcon, MenuIcon, MonitorIcon, MoonIcon, RefreshIcon, SearchIcon, SunIcon } from "../Icons";
+import { BookmarkIcon, LogoutIcon, MaximizeIcon, MenuIcon, MonitorIcon, MoonIcon, RefreshIcon, SearchIcon, SunIcon } from "../Icons";
 import { BTN_ICON, BTN_PRIMARY, FOCUS_RING, SELECT } from "../../lib/ui";
 
 const THEME_CYCLE: Theme[] = ["dark", "light", "system"];
@@ -38,6 +38,8 @@ interface TopbarProps {
 	onMobileMenu: () => void;
 	onOpenPalette: () => void;
 	onSaveView: () => void;
+	/** Full screen, sidebar and top bar hidden — for a booth or a presentation. */
+	onPresent?: () => void;
 }
 
 export function Topbar({
@@ -54,6 +56,7 @@ export function Topbar({
 	onMobileMenu,
 	onOpenPalette,
 	onSaveView,
+	onPresent,
 }: TopbarProps) {
 	return (
 		<header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-200 bg-white px-4 md:px-6 dark:border-zinc-800 dark:bg-zinc-900">
@@ -139,6 +142,12 @@ export function Topbar({
 			>
 				<BookmarkIcon size={16} />
 			</button>
+
+			{onPresent && (
+				<button type="button" onClick={onPresent} aria-label="Full screen" title="Full screen — for a booth or presentation" className={BTN_ICON}>
+					<MaximizeIcon size={16} />
+				</button>
+			)}
 
 			<button
 				type="button"

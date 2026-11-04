@@ -9,6 +9,7 @@ import { NAV_GROUPS } from "./nav";
 import {
 	BookmarkIcon,
 	LogoutIcon,
+	MaximizeIcon,
 	MonitorIcon,
 	MoonIcon,
 	PanelLeftIcon,
@@ -120,6 +121,7 @@ export interface CommandPaletteProps {
 	showRefresh: boolean;
 	onDisconnect: () => void;
 	onSaveView: () => void;
+	onPresent?: () => void;
 }
 
 export function CommandPalette({
@@ -139,6 +141,7 @@ export function CommandPalette({
 	showRefresh,
 	onDisconnect,
 	onSaveView,
+	onPresent,
 }: CommandPaletteProps) {
 	const [query, setQuery] = useState("");
 	const [activeIndex, setActiveIndex] = useState(0);
@@ -247,6 +250,16 @@ export function CommandPalette({
 			});
 		}
 
+		if (onPresent) {
+			out.push({
+				id: "action:present",
+				label: "Full screen (presentation mode)",
+				group: "Actions",
+				icon: MaximizeIcon,
+				run: onPresent,
+			});
+		}
+
 		out.push({
 			id: "action:save-view",
 			label: "Save current view…",
@@ -302,6 +315,7 @@ export function CommandPalette({
 		onRefresh,
 		refreshing,
 		onSaveView,
+		onPresent,
 		views,
 		onDisconnect,
 		onNavigate,
