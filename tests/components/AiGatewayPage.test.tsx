@@ -89,18 +89,18 @@ const usage: AiGatewayUsageResult = {
 	byClient: [slice("opencode", 10)],
 	byUser: [slice("alice@example.com", 6, { cost: 0.4 }), slice("bob@example.com", 1, { cost: 0.05 }), slice("(not tagged)", 3, { cost: 0.05 })],
 	flows: [
-		{ user: "alice@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/meta/llama-3", requests: 5, tokens: 55, cost: 0.35, errors: 1, cached: 2 },
-		{ user: "alice@example.com", gateway: "staging", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "(not tagged)", gateway: "staging", provider: "workers-ai", model: "@cf/a", requests: 2, tokens: 22, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "bob@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "(not tagged)", gateway: "prod", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 11, cost: 0, errors: 0, cached: 0 },
+		{ user: "alice@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/meta/llama-3", action: null, requests: 5, tokens: 55, cost: 0.35, errors: 1, cached: 2 },
+		{ user: "alice@example.com", gateway: "staging", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "(not tagged)", gateway: "staging", provider: "workers-ai", model: "@cf/a", action: null, requests: 2, tokens: 22, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "bob@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "(not tagged)", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 11, cost: 0, errors: 0, cached: 0 },
 	],
 	// The window before: alice already used prod → llama-3 and staging, carol's dev path has since gone quiet.
 	previousFlows: [
-		{ user: "alice@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/meta/llama-3", requests: 3, tokens: 33, cost: 0.2, errors: 0, cached: 0 },
-		{ user: "alice@example.com", gateway: "staging", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "carol@example.com", gateway: "dev", provider: "workers-ai", model: "@cf/meta/llama-3", requests: 2, tokens: 22, cost: 0.3, errors: 0, cached: 0 },
-		{ user: "(not tagged)", gateway: "prod", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 11, cost: 0.01, errors: 0, cached: 0 },
+		{ user: "alice@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/meta/llama-3", action: null, requests: 3, tokens: 33, cost: 0.2, errors: 0, cached: 0 },
+		{ user: "alice@example.com", gateway: "staging", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "carol@example.com", gateway: "dev", provider: "workers-ai", model: "@cf/meta/llama-3", action: null, requests: 2, tokens: 22, cost: 0.3, errors: 0, cached: 0 },
+		{ user: "(not tagged)", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 11, cost: 0.01, errors: 0, cached: 0 },
 	],
 	tags: {
 		keys: [
@@ -440,6 +440,48 @@ describe("AiGatewayPage", () => {
 		expect([...colour.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["User", "Gateway", "Model"]);
 	});
 
+	it("shows what AI Gateway did with each path, coloured by action and never drilled on", async () => {
+		const user = userEvent.setup();
+		const act = (f: NonNullable<typeof usage.flows>[number], action: string, requests: number, cost: number) => ({ ...f, action, requests, cost });
+		const [alice, , untagged] = usage.flows!;
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({
+			...usage,
+			flows: [act(alice, "Passed", 4, 0.35), act(alice, "Blocked", 2, 0), act(untagged, "From cache", 2, 0), act(untagged, "Passed", 1, 0.05)],
+		});
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		// The action column opens by default where the data has one.
+		expect(within(flows).getByRole("combobox", { name: "Columns" })).toHaveValue("user-gateway-model-action");
+		// Sized by spend, blocked and cached requests cost nothing: the diagram says so instead of drawing nothing.
+		expect(flows).toHaveTextContent("4 requests carry no spend (blocked, from cache), so they are not drawn; chart requests to see them.");
+		await user.click(screen.getByRole("button", { name: "Requests" }));
+		expect(flows).not.toHaveTextContent("carry no");
+		const blocked = within(flows).getByRole("button", { name: /^Action Blocked: 2/ });
+		expect(blocked.querySelector("rect")).toHaveAttribute("fill", "#dc2626");
+		expect(within(flows).getByRole("list", { name: "Actions" })).toHaveTextContent("PassedBlockedFrom cache");
+		expect(flows).toHaveTextContent("Blocked is HTTP 422 or 424");
+		// The action is not a page filter: a node offers no drill, a band drills on the rest.
+		await user.click(blocked);
+		expect(within(flows).queryByRole("button", { name: /^Drill into/ })).toBeNull();
+		await user.click(within(flows).getByRole("button", { name: /^alice@example\.com: llama-3 → Blocked: 2/ }));
+		expect(within(flows).getByRole("button", { name: "Drill into alice@example.com · llama-3" })).toBeInTheDocument();
+		// The table splits a path by action while the action is a column, and sums it when not.
+		await user.click(within(flows).getByRole("button", { name: "Table" }));
+		expect(within(within(flows).getByRole("table")).getAllByRole("row")).toHaveLength(5);
+		await user.click(within(flows).getByRole("button", { name: "Diagram" }));
+		await user.selectOptions(within(flows).getByRole("combobox", { name: "Columns" }), "user-gateway-model");
+		await user.click(within(flows).getByRole("button", { name: "Table" }));
+		expect(within(within(flows).getByRole("table")).getAllByRole("row")).toHaveLength(3);
+		// New and quiet are said per path, never twice for one path's two actions.
+		expect(within(flows).getByRole("region", { name: "New this window" })).toHaveTextContent("New this window · 1 path");
+	});
+
+	it("does not offer the action column where the schema reports no status code", async () => {
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		expect([...within(flows).getByRole("combobox", { name: "Columns" }).querySelectorAll("option")].map((o) => o.value)).not.toContain("user-gateway-model-action");
+	});
+
 	it("reorders the columns, adds the provider, and colours by any column", async () => {
 		const user = userEvent.setup();
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
@@ -479,7 +521,7 @@ describe("AiGatewayPage", () => {
 
 	it("writes the figure on the biggest bands, and leaves small paths out on request", async () => {
 		const user = userEvent.setup();
-		const tiny = { user: "carol@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 1, cost: 0.001, errors: 0, cached: 0 };
+		const tiny = { user: "carol@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 1, cost: 0.001, errors: 0, cached: 0 };
 		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, flows: [...usage.flows!, tiny] });
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
 		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;

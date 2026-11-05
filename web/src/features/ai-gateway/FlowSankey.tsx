@@ -25,15 +25,31 @@ import { UNDRILLABLE, compactCount, formatCost, type AiGatewayFlow } from "./typ
  * can be left out. A table lists every path with all its figures, and exports as CSV.
  */
 
-export type FlowColumn = "user" | "gateway" | "provider" | "model";
-const COLUMN_LABEL: Record<FlowColumn, string> = { user: "User", gateway: "Gateway", provider: "Provider", model: "Model" };
+export type FlowColumn = "user" | "gateway" | "provider" | "model" | "action";
+const COLUMN_LABEL: Record<FlowColumn, string> = { user: "User", gateway: "Gateway", provider: "Provider", model: "Model", action: "Action" };
 
-/** The column orders on offer; the provider one only where the schema reports a provider. */
+/**
+ * The column orders on offer, the first available being the default; one with the provider or the
+ * action only where the schema reports it. The action is what AI Gateway did with the requests —
+ * passed them on, answered from cache, blocked, rate limited — told from each request's status.
+ */
 export const FLOW_LAYOUTS: { id: string; columns: FlowColumn[] }[] = [
+	{ id: "user-gateway-model-action", columns: ["user", "gateway", "model", "action"] },
 	{ id: "user-gateway-model", columns: ["user", "gateway", "model"] },
 	{ id: "user-gateway-provider-model", columns: ["user", "gateway", "provider", "model"] },
+	{ id: "user-gateway-action", columns: ["user", "gateway", "action"] },
 	{ id: "model-gateway-user", columns: ["model", "gateway", "user"] },
 ];
+
+/** One colour per action, the same in every view, so a red band reads as blocked at a glance. */
+export const ACTION_COLORS: Record<string, string> = {
+	Passed: "#16a34a",
+	"From cache": "#2563eb",
+	Blocked: "#dc2626",
+	"Rate limited": "#ca8a04",
+	Cancelled: "#a1a1aa",
+	Failed: "#ea580c",
+};
 const layoutName = (columns: FlowColumn[]) => columns.map((c, i) => (i ? COLUMN_LABEL[c].toLowerCase() : COLUMN_LABEL[c])).join(" → ");
 
 /** Paths smaller than this share of the measure can be left out, to cut clutter on a big screen. */
@@ -60,7 +76,7 @@ interface Node {
 }
 
 type Path = Record<FlowColumn, string>;
-const pathOf = (f: AiGatewayFlow): Path => ({ user: f.user, gateway: f.gateway, provider: f.provider ?? "(unknown)", model: f.model });
+const pathOf = (f: AiGatewayFlow): Path => ({ user: f.user, gateway: f.gateway, provider: f.provider ?? "(unknown)", model: f.model, action: f.action ?? "(unknown)" });
 
 /**
  * What is traced: a node, or one band — one key of the band's thread column (the colour column,
@@ -69,11 +85,31 @@ const pathOf = (f: AiGatewayFlow): Path => ({ user: f.user, gateway: f.gateway, 
 type Selection =
 	| { kind: "node"; column: FlowColumn; key: string }
 	| { kind: "band"; thread: FlowColumn; key: string; fromColumn: FlowColumn; from: string; toColumn: FlowColumn; to: string };
-/** The filters a drill applies: one for a node, up to three for a band, all four for a table row. */
-export type FlowDrill = Partial<Record<FlowColumn, string>>;
+/** The filters a drill applies: one for a node, up to three for a band, all of a table row's. The action is not a page filter. */
+export type FlowDrill = Partial<Record<Exclude<FlowColumn, "action">, string>>;
+const drillable = (column: FlowColumn, key: string): column is Exclude<FlowColumn, "action"> => column !== "action" && key !== OTHER && !UNDRILLABLE.has(key);
 
 const sameSelection = (a: Selection | null, b: Selection | null) => JSON.stringify(a) === JSON.stringify(b);
+/** A path without its action: new and quiet are said of who reached which model, not of each outcome. */
 const pathKey = (f: AiGatewayFlow) => JSON.stringify([f.user, f.gateway, f.provider, f.model]);
+const sumNullable = (a: number | null, b: number | null) => (a === null && b === null ? null : (a ?? 0) + (b ?? 0));
+/** Each path once, its actions summed. */
+function mergeActions(flows: AiGatewayFlow[]): AiGatewayFlow[] {
+	const byPath = new Map<string, AiGatewayFlow>();
+	for (const f of flows) {
+		const into = byPath.get(pathKey(f));
+		if (!into) {
+			byPath.set(pathKey(f), { ...f, action: null });
+			continue;
+		}
+		into.requests += f.requests;
+		into.tokens = sumNullable(into.tokens, f.tokens);
+		into.cost = sumNullable(into.cost, f.cost);
+		into.errors = sumNullable(into.errors, f.errors);
+		into.cached = sumNullable(into.cached, f.cached);
+	}
+	return [...byPath.values()];
+}
 /** How many new or quiet paths are listed before "and N more". */
 const CHANGES_SHOWN = 4;
 
@@ -187,7 +223,8 @@ export function FlowSankey({
 
 	// The provider column is offered only where the schema reports one per path.
 	const hasProvider = flows.some((f) => f.provider !== null);
-	const layouts = FLOW_LAYOUTS.filter((l) => hasProvider || !l.columns.includes("provider"));
+	const hasAction = flows.some((f) => f.action !== null);
+	const layouts = FLOW_LAYOUTS.filter((l) => (hasProvider || !l.columns.includes("provider")) && (hasAction || !l.columns.includes("action")));
 	const layout = layouts.find((l) => l.id === layoutId) ?? layouts[0];
 	const cols = layout.columns;
 	const first = cols[0];
@@ -236,11 +273,12 @@ export function FlowSankey({
 	const before = previousFlows?.length ? new Set(previousFlows.map(pathKey)) : null;
 	const nowSeen = new Set(flows.map(pathKey));
 	const isNewPath = (f: AiGatewayFlow) => Boolean(before) && !before!.has(pathKey(f));
-	const newPaths = before ? flows.filter((f) => isNewPath(f) && valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a)) : [];
-	const quietPaths = before ? previousFlows!.filter((f) => !nowSeen.has(pathKey(f)) && valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a)) : [];
+	const merged = mergeActions(flows);
+	const newPaths = before ? merged.filter((f) => isNewPath(f) && valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a)) : [];
+	const quietPaths = before ? mergeActions(previousFlows!).filter((f) => !nowSeen.has(pathKey(f)) && valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a)) : [];
 	// An outline marks the exception. When most paths are new (tagging only just started, say),
 	// outlining most of the diagram would mark nothing, so the list says so instead.
-	const outlineNew = Boolean(before) && newPaths.length * 2 <= flows.filter((f) => valueOf(f) > 0).length;
+	const outlineNew = Boolean(before) && newPaths.length * 2 <= merged.filter((f) => valueOf(f) > 0).length;
 	// A band is new when no path of the window before ran along the same thread key and segment.
 	const segmentId = (key: string, from: FlowColumn, a: string, to: FlowColumn, b: string) => JSON.stringify([key, from, a, to, b]);
 	const seenSegments = new Set(
@@ -265,24 +303,30 @@ export function FlowSankey({
 	}));
 	const total = paths.reduce((n, p) => n + p.value, 0);
 	const measureName = measure === "cost" ? "spend" : measure;
-	const pathText = (f: AiGatewayFlow) => cols.map((c) => label(c, pathOf(f)[c])).join(" → ");
-	const pathTitle = (f: AiGatewayFlow) => cols.map((c) => pathOf(f)[c]).join(" → ");
+	// New and quiet are said per path, so their lines leave the action out.
+	const pathCols = cols.filter((c) => c !== "action");
+	const pathText = (f: AiGatewayFlow) => pathCols.map((c) => label(c, pathOf(f)[c])).join(" → ");
+	const pathTitle = (f: AiGatewayFlow) => pathCols.map((c) => pathOf(f)[c]).join(" → ");
 
-	// Every path for the table and the export, by the charted measure, then by requests.
-	const rows = [...flows].filter((f) => f.requests > 0 || valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a) || b.requests - a.requests);
+	// Every path for the table and the export, by the charted measure, then by requests: one row per
+	// action when the action is a column, the actions summed when it is not.
+	const busiest = (list: AiGatewayFlow[]) => list.filter((f) => f.requests > 0 || valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a) || b.requests - a.requests);
+	const rows = busiest(cols.includes("action") ? flows : merged);
+	const rowKey = (f: AiGatewayFlow) => JSON.stringify([pathKey(f), f.action]);
 	const rowDrill = (f: AiGatewayFlow): FlowDrill => {
 		const p = pathOf(f);
 		const drill: FlowDrill = {};
-		for (const c of cols) if (p[c] !== OTHER && !UNDRILLABLE.has(p[c])) drill[c] = p[c];
+		for (const c of cols) if (drillable(c, p[c])) drill[c] = p[c];
 		return drill;
 	};
 	const has = { tokens: flows.some((f) => f.tokens !== null), cost: flows.some((f) => f.cost !== null), errors: flows.some((f) => f.errors !== null), cached: flows.some((f) => f.cached !== null) };
 	const exportCsv = () => {
-		const csv = toCsv(rows, [
+		const csv = toCsv(busiest(flows), [
 			{ header: "user", value: (f) => f.user },
 			{ header: "gateway", value: (f) => f.gateway },
 			...(hasProvider ? [{ header: "provider", value: (f: AiGatewayFlow) => f.provider ?? "" }] : []),
 			{ header: "model", value: (f) => f.model },
+			...(hasAction ? [{ header: "action", value: (f: AiGatewayFlow) => f.action ?? "" }] : []),
 			{ header: "requests", value: (f) => f.requests },
 			{ header: "tokens", value: (f) => f.tokens ?? "" },
 			{ header: "cost_usd", value: (f) => f.cost ?? "" },
@@ -401,9 +445,9 @@ export function FlowSankey({
 					{rows.map((f) => {
 						const p = pathOf(f);
 						const drill = rowDrill(f);
-						const parts = cols.filter((c) => drill[c]);
+						const parts = pathCols.filter((c) => drill[c]);
 						return (
-							<tr key={pathKey(f)} className="border-t border-zinc-100 dark:border-zinc-800">
+							<tr key={rowKey(f)} className="border-t border-zinc-100 dark:border-zinc-800">
 								{cols.map((c, i) => (
 									<td key={c} className="max-w-[16rem] truncate py-1.5 pr-3" title={p[c]}>
 										{label(c, p[c])}
@@ -454,6 +498,19 @@ export function FlowSankey({
 				{hidden.count} small {hidden.count === 1 ? "path" : "paths"} ({format(hidden.value)}, under {Math.round(cutoff * 100)}% each) left out; the table lists them.
 			</p>
 		) : null;
+	// A band is as wide as its share of the measure, so requests that cost nothing — blocked, cached,
+	// failed, or simply free — are not drawn when sizing by spend or tokens. Say so, and how to see them.
+	const unsized = measure === "requests" ? [] : flows.filter((f) => f.requests > 0 && valueOf(f) <= 0);
+	const unsizedRequests = unsized.reduce((n, f) => n + f.requests, 0);
+	const unsizedActions = [...new Set(unsized.map((f) => f.action).filter((a): a is string => a !== null))];
+	const unsizedNote =
+		view === "diagram" && unsizedRequests > 0 ? (
+			<p className={`mt-2 text-xs ${MUTED}`}>
+				{compactCount(unsizedRequests)} {unsizedRequests === 1 ? "request carries" : "requests carry"} no {measureName}
+				{unsizedActions.length ? ` (${unsizedActions.join(", ").toLowerCase()})` : ""}, so {unsizedRequests === 1 ? "it is" : "they are"} not drawn; chart requests to see{" "}
+				{unsizedRequests === 1 ? "it" : "them"}.
+			</p>
+		) : null;
 
 	return (
 		<section
@@ -478,6 +535,7 @@ export function FlowSankey({
 				)}
 			</div>
 			{hiddenNote}
+			{unsizedNote}
 			{changes}
 		</section>
 	);
@@ -516,7 +574,8 @@ export function FlowSankey({
 			}),
 		) as Record<FlowColumn, Map<string, Node>>;
 		const order = (column: FlowColumn, key: string) => [...nodes[column].keys()].indexOf(key);
-		const catColor = (column: FlowColumn, key: string) => (key === OTHER || UNDRILLABLE.has(key) ? OTHER_COLOR : STACK_COLORS[order(column, key) % STACK_COLORS.length]);
+		const catColor = (column: FlowColumn, key: string) =>
+			column === "action" ? (ACTION_COLORS[key] ?? OTHER_COLOR) : key === OTHER || UNDRILLABLE.has(key) ? OTHER_COLOR : STACK_COLORS[order(column, key) % STACK_COLORS.length];
 		// Health per node, summed over the paths through it.
 		const nodeHealth = (column: FlowColumn, key: string) => {
 			const h: Health = { requests: 0, errors: null, cached: null };
@@ -589,7 +648,6 @@ export function FlowSankey({
 			const mid = (x0 + x1) / 2;
 			return `M${x0},${y0} C${mid},${y0} ${mid},${y1} ${x1},${y1} L${x1},${y1 + h} C${mid},${y1 + h} ${mid},${y0 + h} ${x0},${y0 + h} Z`;
 		};
-		const drillable = (key: string) => key !== OTHER && !UNDRILLABLE.has(key);
 		const counts = cols.map((c) => `${nodes[c].size} ${COLUMN_LABEL[c].toLowerCase()}${nodes[c].size === 1 ? "" : "s"}`).join(", ");
 		const toggle = (sel: Selection) => setPinned((now) => (sameSelection(now, sel) ? null : sel));
 		const pressKeys = (sel: Selection) => (e: React.KeyboardEvent) => {
@@ -610,16 +668,16 @@ export function FlowSankey({
 					title: `${COLUMN_LABEL[sel.column].toLowerCase()} ${label(sel.column, sel.key)}`,
 					value: node.value,
 					health: nodeHealth(sel.column, sel.key),
-					drill: drillable(sel.key) ? ({ [sel.column]: sel.key } as FlowDrill) : {},
+					drill: drillable(sel.column, sel.key) ? ({ [sel.column]: sel.key } as FlowDrill) : {},
 				};
 			}
 			const band = drawnBands.find((b) => sameSelection(b.selection, sel))!;
 			const drill: FlowDrill = {};
-			for (const [column, key] of [[sel.thread, sel.key], [sel.fromColumn, sel.from], [sel.toColumn, sel.to]] as [FlowColumn, string][]) if (drillable(key)) drill[column] = key;
+			for (const [column, key] of [[sel.thread, sel.key], [sel.fromColumn, sel.from], [sel.toColumn, sel.to]] as [FlowColumn, string][]) if (drillable(column, key)) drill[column] = key;
 			return { title: bandName(band), value: band.value, health: band.health, drill };
 		};
 		const pinInfo = pin ? describe(pin) : null;
-		const drillParts = pinInfo ? cols.filter((c) => pinInfo.drill[c]) : [];
+		const drillParts = pinInfo ? pathCols.filter((c) => pinInfo.drill[c]) : [];
 
 		return (
 			<>
@@ -727,7 +785,14 @@ export function FlowSankey({
 								const sel: Selection = { kind: "node", column, key: node.key };
 								const text = fit(column, label(column, node.key), format(node.value));
 								const health = nodeHealth(column, node.key);
-								const fill = isHealth(colour) ? healthColor(health, colour) : column === colour ? catColor(column, node.key) : node.key === OTHER ? OTHER_COLOR : "#71717a";
+								// An action node keeps its own colour whatever the bands are coloured by.
+								const fill = isHealth(colour)
+									? healthColor(health, colour)
+									: column === colour || column === "action"
+										? catColor(column, node.key)
+										: node.key === OTHER
+											? OTHER_COLOR
+											: "#71717a";
 								const isPinned = sameSelection(pin, sel);
 								const isActive = sameSelection(active, sel);
 								const isFirst = i === 0;
@@ -801,6 +866,22 @@ export function FlowSankey({
 							</li>
 						)}
 					</ul>
+				)}
+				{cols.includes("action") && (
+					<div className="mt-2 text-xs">
+						<ul className="flex flex-wrap gap-x-4 gap-y-1" aria-label="Actions">
+							{[...nodes.action.keys()].map((key) => (
+								<li key={key} className="flex items-center gap-1.5">
+									<span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: catColor("action", key) }} />
+									{key}
+								</li>
+							))}
+						</ul>
+						<p className={`mt-1 ${MUTED}`}>
+							Told from each request's status, as AI Gateway records no action as such: Blocked is HTTP 422 or 424, how Guardrails and DLP refuse a prompt or response (a
+							provider's own 422 or 424 would count too); Cancelled is 499, the client gone before the answer; Failed is any other error.
+						</p>
+					</div>
 				)}
 			</>
 		);

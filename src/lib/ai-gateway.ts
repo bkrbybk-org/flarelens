@@ -246,8 +246,25 @@ const TIME_DIMENSION: Record<AiGatewayGranularity, string> = { "15m": "datetimeF
 
 const SERIES_LIMIT = 10_000;
 const BREAKDOWN_LIMIT = 100;
-/** User × gateway × model combinations read for the flow diagram; the busiest first. */
-const FLOW_LIMIT = 500;
+/** User × gateway × provider × model × outcome combinations read for the flow diagram; the busiest first. */
+const FLOW_LIMIT = 1000;
+
+/**
+ * What AI Gateway did with a request, from what the dataset records of it — there is no action
+ * field. Guardrails and DLP refuse with 424, or 422 through the Workers AI binding; a provider's
+ * own 422 or 424 would read as blocked too, so the label says what the status code shows.
+ */
+export const FLOW_ACTIONS = ["Passed", "From cache", "Blocked", "Rate limited", "Cancelled", "Failed"] as const;
+export type AiGatewayFlowAction = (typeof FLOW_ACTIONS)[number];
+
+export function flowAction(statusCode: number, cached: boolean, rateLimited: boolean): AiGatewayFlowAction {
+	if (cached) return "From cache";
+	if (rateLimited || statusCode === 429) return "Rate limited";
+	if (statusCode === 422 || statusCode === 424) return "Blocked";
+	if (statusCode === 499) return "Cancelled";
+	if (statusCode >= 400) return "Failed";
+	return "Passed";
+}
 
 /** 30 days, matching every other AdaptiveGroups-backed section here. */
 export const MAX_AI_GATEWAY_RANGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -296,6 +313,8 @@ export interface AiGatewayFlow {
 	/** null when the schema has no provider dimension. */
 	provider: string | null;
 	model: string;
+	/** What AI Gateway did with the requests (see flowAction); null without a status code dimension. */
+	action: AiGatewayFlowAction | null;
 	requests: number;
 	tokens: number | null;
 	cost: number | null;
@@ -714,7 +733,8 @@ function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["req
 	// The same two over the window before, so the diagram can say which paths are new and which
 	// went quiet.
 	const flowSums = sumSelection([f.tokensIn, f.tokensOut, f.cost, f.erroredRequests, f.cachedRequests]);
-	const pairDims = [f.gateway, f.provider, f.model].filter(Boolean).join(" ");
+	// The outcome dimensions ride along where the schema has them, for the diagram's action column.
+	const pairDims = [f.gateway, f.provider, f.model, ...(f.statusCode ? [f.statusCode, f.cached, f.rateLimited] : [])].filter(Boolean).join(" ");
 	const flowAliases = (prefix: string, tagged: string, all: string) => `
       ${prefix}flows: ${f.name}(filter: ${tagged}, limit: ${FLOW_LIMIT}, orderBy: [count_DESC]) {
         count
@@ -949,6 +969,11 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 	const gatewayOf = (row: RawRow) => text(row.dimensions?.[f.gateway as string]).trim() || "(unknown)";
 	const modelOf = (row: RawRow) => text(row.dimensions?.[f.model as string]).trim() || "(unknown)";
 	const providerOf = (row: RawRow) => (f.provider ? text(row.dimensions?.[f.provider]).trim() || "(unknown)" : null);
+	const actionOf = (row: RawRow): AiGatewayFlowAction | null => {
+		if (!f.statusCode) return null;
+		const dim = (name: string | null) => (name ? row.dimensions?.[name] : undefined);
+		return flowAction(Number(dim(f.statusCode)) || 0, flag(dim(f.cached)), flag(dim(f.rateLimited)));
+	};
 	// Each measure of one row; null where the schema has no such field, as everywhere else here.
 	const measuresOf = (row: RawRow): Measures => ({
 		requests: row.count,
@@ -972,12 +997,13 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 		const gateway = gatewayOf(row);
 		const provider = providerOf(row);
 		const model = modelOf(row);
+		const action = actionOf(row);
 		const measures = measuresOf(row);
-		const path = JSON.stringify([user, gateway, provider, model]);
-		const flow = byPath.get(path) ?? { user, gateway, provider, model, ...empty() };
+		const path = JSON.stringify([user, gateway, provider, model, action]);
+		const flow = byPath.get(path) ?? { user, gateway, provider, model, action, ...empty() };
 		add(flow, measures);
 		byPath.set(path, flow);
-		const pair = JSON.stringify([gateway, provider, model]);
+		const pair = JSON.stringify([gateway, provider, model, action]);
 		const seen = covered.get(pair) ?? empty();
 		add(seen, measures);
 		covered.set(pair, seen);
@@ -987,13 +1013,18 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 		const rest = whole - (part ?? 0);
 		return rest <= Math.abs(whole) * 1e-9 ? 0 : rest;
 	};
-	const untagged: AiGatewayFlow[] = [];
+	// Several status codes can come to one action (402 and 500 both failed), so pairs are summed first.
+	const wholes = new Map<string, { gateway: string; provider: string | null; model: string; action: AiGatewayFlowAction | null; whole: Measures }>();
 	for (const row of pairs) {
-		const gateway = gatewayOf(row);
-		const provider = providerOf(row);
-		const model = modelOf(row);
-		const whole = measuresOf(row);
-		const seen = covered.get(JSON.stringify([gateway, provider, model])) ?? empty();
+		const entry = { gateway: gatewayOf(row), provider: providerOf(row), model: modelOf(row), action: actionOf(row) };
+		const id = JSON.stringify([entry.gateway, entry.provider, entry.model, entry.action]);
+		const into = wholes.get(id) ?? { ...entry, whole: empty() };
+		add(into.whole, measuresOf(row));
+		wholes.set(id, into);
+	}
+	const untagged: AiGatewayFlow[] = [];
+	for (const [id, { gateway, provider, model, action, whole }] of wholes) {
+		const seen = covered.get(id) ?? empty();
 		const requests = whole.requests - seen.requests;
 		if (requests <= 0) continue;
 		untagged.push({
@@ -1001,6 +1032,7 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 			gateway,
 			provider,
 			model,
+			action,
 			requests,
 			tokens: left(whole.tokens, seen.tokens),
 			cost: left(whole.cost, seen.cost),

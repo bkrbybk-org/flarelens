@@ -134,6 +134,8 @@ export interface AiGatewayFlow {
 	gateway: string;
 	provider: string | null;
 	model: string;
+	/** What AI Gateway did: Passed, From cache, Blocked, Rate limited, Cancelled or Failed. */
+	action: string | null;
 	requests: number;
 	tokens: number | null;
 	cost: number | null;
