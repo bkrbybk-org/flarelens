@@ -142,7 +142,10 @@ describe("AiGatewayPage", () => {
 		expect(card("Users")).toHaveTextContent("270.0% of requests name a user · 4 sessions");
 		const health = screen.getByRole("region", { name: "Health" });
 		expect(health).toHaveTextContent("Prompt cache28.6%40 of 140 input tokens read from the provider's cache · 50.0% of requests");
-		expect(screen.getByRole("list", { name: "Legend" })).toHaveTextContent("Spend (right axis)$0.50");
+		// The chart opens on spend, so there is no separate spend line over it.
+		expect(screen.getByRole("heading", { name: /^Spend by day/ })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Spend" })).toHaveAttribute("aria-pressed", "true");
+		expect(screen.getByRole("list", { name: "Legend" })).not.toHaveTextContent("Spend (right axis)");
 		// The detail starts closed: no breakdown tabs, no request rows until asked for.
 		expect(screen.queryByRole("tablist", { name: "Breakdown by" })).toBeNull();
 		expect(screen.getByRole("button", { name: "Recent requests" })).toHaveAttribute("aria-expanded", "false");
@@ -173,6 +176,15 @@ describe("AiGatewayPage", () => {
 		expect(screen.queryByText("Users", { selector: "div" })).toBeNull();
 		// The user donut falls back to gateways.
 		expect(screen.getAllByRole("img", { name: /^Share by / })[0]).toHaveAttribute("aria-label", "Share by Gateway");
+	});
+
+	it("opens the chart on requests when nothing in the window is priced, and keeps a pick", async () => {
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, series: [{ ts: "2026-11-03", requests: 10, tokens: 110, cost: null, errors: 0 }] });
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		expect(await screen.findByRole("heading", { name: /^Requests by day/ })).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Tokens" }));
+		expect(screen.getByRole("heading", { name: /^Tokens by day/ })).toBeInTheDocument();
 	});
 
 	it("breaks spend down by a chosen tag key, and will not offer one that names people", async () => {
@@ -234,8 +246,7 @@ describe("AiGatewayPage", () => {
 		localStorage.clear();
 		const user = userEvent.setup();
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
-		await screen.findByRole("heading", { name: /^Requests by day/ });
-		await user.click(screen.getByRole("button", { name: "Spend" }));
+		await screen.findByRole("heading", { name: /^Spend by day/ });
 		// The finer controls sit behind one toggle.
 		expect(screen.queryByLabelText("Budget")).toBeNull();
 		await user.click(screen.getByRole("button", { name: "Chart options" }));
@@ -281,13 +292,14 @@ describe("AiGatewayPage", () => {
 		expect(within(frames).getByRole("button", { name: "7 days" })).toHaveAttribute("aria-pressed", "true");
 		await user.click(within(frames).getByRole("button", { name: "24 hours" }));
 		expect(setPreset).toHaveBeenCalledWith("24h");
-		expect(await screen.findByRole("heading", { name: "Requests by day, split by Workers AI vs third-party" })).toBeInTheDocument();
+		expect(await screen.findByRole("heading", { name: "Spend by day, split by Workers AI vs third-party" })).toBeInTheDocument();
 	});
 
 	it("splits the chart by Workers AI vs third-party by default, and by gateway or model on request", async () => {
 		const user = userEvent.setup();
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
-		const legend = await screen.findByRole("list", { name: "Legend" });
+		await user.click(await screen.findByRole("button", { name: "Requests" }));
+		const legend = screen.getByRole("list", { name: "Legend" });
 		expect(legend).toHaveTextContent("Workers AI8");
 		expect(legend).toHaveTextContent("Third-party2");
 		await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "gateway");

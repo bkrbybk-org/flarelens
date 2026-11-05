@@ -489,7 +489,10 @@ export function AiGatewayPage({
 	// The slice drilled into: #/ai-gateway?gateway=…&provider=…&model=… — shareable, and kept
 	// across reloads. Read once on arrival (the page remounts on each visit to the route).
 	const [filter, setFilter] = useState<AiGatewayFilter>(readFilter);
-	const [metric, setMetric] = useState<Metric>("requests");
+	// The chart opens on spend, the figure a demo leads with, unless the window carries no cost
+	// at all (no priced models), where requests is the more useful opening. A pick sticks.
+	const [pickedMetric, setMetric] = useState<Metric | null>(null);
+	const metric: Metric = pickedMetric ?? (result && !result.series.some((p) => p.cost !== null) ? "requests" : "cost");
 	const [split, setSplit] = useState<Split>("source");
 	const [showSpend, setShowSpend] = useState(true);
 	// The tag key spend is broken down by, carried in the URL (#/ai-gateway?tag=team) like the slice.
