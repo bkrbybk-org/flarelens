@@ -495,6 +495,8 @@ export interface AiGatewayUsageResult {
 	 * metadata, gateway or model dimension.
 	 */
 	flows: AiGatewayFlow[] | null;
+	/** The same paths over the window before (`previousWindow`), to tell new paths from ones that went quiet. */
+	previousFlows: AiGatewayFlow[] | null;
 	/** The most recent requests in the slice, newest first. Empty when the schema has no request id. */
 	recent: AiGatewayRequestRow[];
 	previous: AiGatewayPrevious | null;
@@ -706,21 +708,22 @@ function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["req
 		: "";
 	// Who uses which gateway for which model: tagged requests by user × gateway × model, and all
 	// requests by gateway × model, so what no user tag covers still shows as its own flow.
+	// The same two over the window before, so the diagram can say which paths are new and which
+	// went quiet.
 	const flowSums = sumSelection([f.tokensIn, f.tokensOut, f.cost, f.erroredRequests, f.cachedRequests]);
-	const flows =
-		users && f.gateway && f.model
-			? `
-      flows: ${f.name}(filter: ${userClause}, limit: ${FLOW_LIMIT}, orderBy: [count_DESC]) {
+	const flowAliases = (prefix: string, tagged: string, all: string) => `
+      ${prefix}flows: ${f.name}(filter: ${tagged}, limit: ${FLOW_LIMIT}, orderBy: [count_DESC]) {
         count
         dimensions { ${f.metadataValue}(key: $userKey) ${f.gateway} ${f.model} }
         ${flowSums}
       }
-      flowPairs: ${f.name}(filter: ${clause}, limit: ${FLOW_LIMIT}, orderBy: [count_DESC]) {
+      ${prefix}flowPairs: ${f.name}(filter: ${all}, limit: ${FLOW_LIMIT}, orderBy: [count_DESC]) {
         count
         dimensions { ${f.gateway} ${f.model} }
         ${flowSums}
-      }`
-			: "";
+      }`;
+	const prevUserClause = users ? previous.clause.replace(/ }$/, `, ${f.metadataKeys}_has: $userKey }`) : "";
+	const flows = users && f.gateway && f.model ? flowAliases("", userClause, clause) + flowAliases("prev_", prevUserClause, previous.clause) : "";
 	const declared = [...new Set([...declarations, ...previous.declarations, ...(tagged ? ["$tagKey: string!"] : []), ...(users ? ["$userKey: string!"] : [])])].map((d) => `, ${d}`).join("");
 
 	return `
@@ -1085,6 +1088,8 @@ export async function fetchAiGatewayUsage(
 		seriesByUser?: RawRow[];
 		flows?: RawRow[];
 		flowPairs?: RawRow[];
+		prev_flows?: RawRow[];
+		prev_flowPairs?: RawRow[];
 		total?: RawRow[];
 		previous?: RawRow[];
 		byGateway?: RawRow[];
@@ -1292,6 +1297,7 @@ export async function fetchAiGatewayUsage(
 		tags,
 		byUser,
 		flows: hasUsers && md.gateway && md.model ? foldFlows(account?.flows || [], account?.flowPairs || [], md) : null,
+		previousFlows: hasUsers && md.gateway && md.model ? foldFlows(account?.prev_flows || [], account?.prev_flowPairs || [], md) : null,
 		recent: foldRecent(account?.recent || [], fields.requests),
 		previous,
 		previousWindow: prev,

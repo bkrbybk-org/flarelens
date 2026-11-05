@@ -158,6 +158,8 @@ export interface AiGatewayUsageResult {
 	byUser: AiGatewayBreakdownRow[] | null;
 	/** One row per user → gateway → model path, busiest first, "(not tagged)" for the rest. null without metadata. */
 	flows: AiGatewayFlow[] | null;
+	/** The same paths over the previous window; null without metadata. */
+	previousFlows: AiGatewayFlow[] | null;
 	recent: AiGatewayRequestRow[];
 	previous: AiGatewayPrevious | null;
 	previousWindow: { since: string; until: string };

@@ -562,6 +562,12 @@ describe("overview and drill-down", () => {
 					row({ gateway: "dev", model: "gpt-x" }, 1, { tokensIn: 10, tokensOut: 1, cost: 0.2, erroredRequests: 0, cachedRequests: 1 }),
 					row({ gateway: "dev", model: "" }, 1, { tokensIn: 0, tokensOut: 0, cost: 0, erroredRequests: 1, cachedRequests: 0 }),
 				],
+				// The window before: carol used dev → gpt-x, and some untagged traffic on prod.
+				prev_flows: [row({ metadataValue: "carol@example.com", gateway: "dev", model: "gpt-x" }, 4, { tokensIn: 40, tokensOut: 4, cost: 0.3, erroredRequests: 0, cachedRequests: 0 })],
+				prev_flowPairs: [
+					row({ gateway: "dev", model: "gpt-x" }, 4, { tokensIn: 40, tokensOut: 4, cost: 0.3, erroredRequests: 0, cachedRequests: 0 }),
+					row({ gateway: "prod", model: "@cf/meta/llama" }, 2, { tokensIn: 20, tokensOut: 2, cost: 0.1, erroredRequests: 0, cachedRequests: 1 }),
+				],
 			},
 		});
 		const res = await usage({ accountId: ACCT, ...win() });
@@ -580,6 +586,13 @@ describe("overview and drill-down", () => {
 		// The user value is a variable-keyed dimension, and the tagged flows only read requests carrying the key.
 		expect(query.query).toMatch(/flows: \w+\(filter: \{[^}]*metadataKeys_has: \$userKey \}, limit: 500, orderBy: \[count_DESC\]\) \{\s*count\s*dimensions \{ metadataValue\(key: \$userKey\) gateway model \}\s*sum \{[^}]*erroredRequests[^}]*cachedRequests[^}]*\}/);
 		expect(query.query).toMatch(/flowPairs: \w+\(filter: \{(?![^}]*metadataKeys_has)[^}]*\}, limit: 500/);
+		// The same paths for the window before, folded the same way, so new and quiet paths can be told apart.
+		expect(result.previousFlows).toEqual([
+			{ user: "carol@example.com", gateway: "dev", model: "gpt-x", requests: 4, tokens: 44, cost: 0.3, errors: 0, cached: 0 },
+			{ user: "(not tagged)", gateway: "prod", model: "@cf/meta/llama", requests: 2, tokens: 22, cost: 0.1, errors: 0, cached: 1 },
+		]);
+		expect(query.query).toMatch(/prev_flows: \w+\(filter: \{ datetime_geq: \$prevSince, datetime_leq: \$prevUntil[^}]*metadataKeys_has: \$userKey \}/);
+		expect(query.query).toMatch(/prev_flowPairs: \w+\(filter: \{ datetime_geq: \$prevSince, datetime_leq: \$prevUntil(?![^}]*metadataKeys_has)[^}]*\}/);
 	});
 
 	it("drills into one user with the value as a variable, and says session analysis cannot follow", async () => {

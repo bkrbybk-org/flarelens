@@ -12,7 +12,7 @@ import { accumulate, budgetFor, bucketMinutes, buildStacks, forecastMonth, sourc
 import { useAiGatewayUsage } from "./useAiGatewayUsage";
 import { UsageChart, type ChartMode, type ChartType } from "./UsageChart";
 import { DonutPanel, type DonutSlice } from "./DonutPanel";
-import { FlowSankey } from "./FlowSankey";
+import { FlowSankey, type FlowColumn, type FlowDrill } from "./FlowSankey";
 import { storageGet, storageSet } from "../../lib/storage";
 import { buildInsights } from "./insights";
 import {
@@ -541,6 +541,14 @@ export function AiGatewayPage({
 		// Splitting by the dimension just pinned would leave a single bar.
 		if (split === key) setSplit("source");
 	};
+	// Several dimensions at once — a flow band's user, gateway and model — as one step back out.
+	const drillMany = (parts: FlowDrill) => {
+		const picked = Object.entries(parts).filter(([, value]) => value && !UNDRILLABLE.has(value)) as [FlowColumn, string][];
+		if (!picked.length) return;
+		applyFilter({ ...filter, ...Object.fromEntries(picked) });
+		setTab(null);
+		if (picked.some(([key]) => key === split)) setSplit("source");
+	};
 
 	const totals = result?.totals ?? EMPTY_TOTALS;
 	const previous = result?.previous ?? null;
@@ -1003,10 +1011,11 @@ export function AiGatewayPage({
 			{result?.flows && result.flows.length > 0 && (
 				<FlowSankey
 					flows={result.flows}
+					previousFlows={result.previousFlows}
 					measure={metric}
 					format={metricSpec.format}
 					label={(column, key) => (column === "model" ? shortModel(key) : key)}
-					onPick={(column, key) => drill(column, key)}
+					onPick={drillMany}
 				/>
 			)}
 

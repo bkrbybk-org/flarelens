@@ -88,6 +88,13 @@ const usage: AiGatewayUsageResult = {
 		{ user: "bob@example.com", gateway: "prod", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
 		{ user: "(not tagged)", gateway: "prod", model: "@cf/a", requests: 1, tokens: 11, cost: 0, errors: 0, cached: 0 },
 	],
+	// The window before: alice already used prod → llama-3 and staging, carol's dev path has since gone quiet.
+	previousFlows: [
+		{ user: "alice@example.com", gateway: "prod", model: "@cf/meta/llama-3", requests: 3, tokens: 33, cost: 0.2, errors: 0, cached: 0 },
+		{ user: "alice@example.com", gateway: "staging", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "carol@example.com", gateway: "dev", model: "@cf/meta/llama-3", requests: 2, tokens: 22, cost: 0.3, errors: 0, cached: 0 },
+		{ user: "(not tagged)", gateway: "prod", model: "@cf/a", requests: 1, tokens: 11, cost: 0.01, errors: 0, cached: 0 },
+	],
 	tags: {
 		keys: [
 			{ key: "team", requests: 8, sensitive: false },
@@ -326,6 +333,69 @@ describe("AiGatewayPage", () => {
 		await user.click(within(flows).getByRole("button", { name: /^Gateway prod/ }));
 		await user.click(within(flows).getByRole("button", { name: "Drill into prod" }));
 		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { gateway: "prod" } });
+	});
+
+	it("traces a band and drills into its user and gateway, or user, gateway and model, at once", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		// A band is a button like a node: alice's traffic into prod.
+		const first = within(flows).getByRole("button", { name: /^alice@example\.com → prod: \$0\.35\. Select to trace/ });
+		await user.click(first);
+		expect(first).toHaveAttribute("aria-pressed", "true");
+		// Only alice's paths through prod light: alice → prod, then (alice, prod) → llama-3.
+		expect(flows.querySelectorAll("path[data-lit]")).toHaveLength(2);
+		expect(within(flows).getByRole("status")).toHaveTextContent("Tracing alice@example.com → prod · $0.35");
+		await user.click(within(flows).getByRole("button", { name: "Drill into alice@example.com · prod" }));
+		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { user: "alice@example.com", gateway: "prod" } });
+	});
+
+	it("drills a second-stage band into all three, and leaves the untagged user out of the filter", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		// Untagged traffic on staging → @cf/a: the drill names only the gateway and model.
+		await user.click(within(flows).getByRole("button", { name: /^\(not tagged\): staging → @cf\/a/ }));
+		expect(within(flows).getByRole("button", { name: "Drill into staging · @cf/a" })).toBeInTheDocument();
+		// Keyboard: a band takes Enter like a node.
+		const second = within(flows).getByRole("button", { name: /^alice@example\.com: prod → llama-3/ });
+		second.focus();
+		await user.keyboard("{Enter}");
+		await user.click(within(flows).getByRole("button", { name: "Drill into alice@example.com · prod · llama-3" }));
+		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { user: "alice@example.com", gateway: "prod", model: "@cf/meta/llama-3" } });
+	});
+
+	it("outlines paths new since the previous window, and lists new and quiet ones", async () => {
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		// alice → prod → llama-3 ran before: not new. bob → prod and alice → staging did not.
+		expect(within(flows).getByRole("button", { name: /^alice@example\.com → prod: .*Select/ })).not.toHaveAttribute("data-new");
+		expect(within(flows).getByRole("button", { name: /^bob@example\.com → prod: \$0\.05, new this window/ })).toHaveAttribute("data-new", "true");
+		expect(within(flows).getByRole("list", { name: "Colour key" })).toHaveTextContent("new this window");
+		const added = within(flows).getByRole("region", { name: "New this window" });
+		expect(added).toHaveTextContent("New this window · 2 paths");
+		expect(added).toHaveTextContent("(not tagged) → staging → @cf/a$0.05");
+		expect(added).toHaveTextContent("Outlined in the diagram.");
+		const quiet = within(flows).getByRole("region", { name: "Gone quiet" });
+		expect(quiet).toHaveTextContent("Gone quiet · 1 path");
+		expect(quiet).toHaveTextContent("carol@example.com → dev → llama-3$0.30");
+		expect(quiet).toHaveTextContent("Spend in the window before.");
+	});
+
+	it("lists but does not outline new paths when most of the diagram is new", async () => {
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, previousFlows: [usage.previousFlows![1]] });
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		expect(flows.querySelectorAll("path[data-new]")).toHaveLength(0);
+		expect(within(flows).getByRole("region", { name: "New this window" })).toHaveTextContent("Most paths are new, so the diagram does not outline them.");
+	});
+
+	it("says nothing about change when the window before had no flows to compare with", async () => {
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, previousFlows: [] });
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		expect(within(flows).queryByRole("region", { name: "New this window" })).toBeNull();
+		expect(flows.querySelectorAll("path[data-new]")).toHaveLength(0);
 	});
 
 	it("colours the flows by error rate or cache hit rate, and sizes them by errors", async () => {
