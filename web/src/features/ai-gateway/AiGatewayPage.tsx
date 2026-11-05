@@ -13,6 +13,7 @@ import { useAiGatewayUsage } from "./useAiGatewayUsage";
 import { UsageChart, type ChartMode, type ChartType } from "./UsageChart";
 import { DonutPanel, type DonutSlice } from "./DonutPanel";
 import { FlowSankey, type FlowColumn, type FlowDrill } from "./FlowSankey";
+import { GatewaySettingsPanel, RefusalsPanel, blockedSummary, routeNote, useAiGatewayExtras } from "./GatewayConfig";
 import { aliasLetters, useHideNames } from "../../hooks/useHideNames";
 import { storageGet, storageSet } from "../../lib/storage";
 import { buildInsights } from "./insights";
@@ -24,6 +25,7 @@ import {
 	SESSION_FLAG_LABEL,
 	activeDays,
 	providerName,
+	shortModel,
 	granularityFor,
 	change,
 	compactCount as compact,
@@ -43,7 +45,6 @@ import {
 
 const ACCENT = "#f6821f";
 /** A model as a donut legend has room for it: "@cf/meta/llama-3.3-70b" reads as "llama-3.3-70b". The full id stays in the tooltip. */
-const shortModel = (id: string) => id.replace(/^@cf\/[^/]+\//, "");
 
 /** "At a glance" opens with this many lines; the rest are one click away. */
 const INSIGHTS_SHOWN = 3;
@@ -525,6 +526,8 @@ export function AiGatewayPage({
 	const chartMode: ChartMode = granChoice === "none" ? "none" : granChoice === "accumulated" ? "accumulated" : "buckets";
 	const { from, to } = timeRange.bounds();
 	const filterKey = FILTER_ORDER.map((k) => filter[k] ?? "").join("\u0000");
+	// Gateway settings, routes and the window's refusals: from the REST API, beside the analytics.
+	const extras = useAiGatewayExtras(session.token, session.accountId, from, to, `${timeRange.minutes}:${reloadKey}`, onAuthError);
 
 	useEffect(() => {
 		load(session.token, session.accountId, from, to, granularity, filter, tag);
@@ -1041,6 +1044,8 @@ export function AiGatewayPage({
 					onPick={drillMany}
 					tagKey={tag || null}
 					blockedHref="#/ai-security"
+					blockedNote={blockedSummary(extras.refusals)}
+					routeNote={(model) => routeNote(extras.config?.routes, model)}
 				/>
 			)}
 
@@ -1091,6 +1096,45 @@ export function AiGatewayPage({
 					<SessionHealthPanel health={result.sessionHealth} />
 				</Collapsible>
 			)}
+
+			<Collapsible
+				id="aig-refusals"
+				title="Why requests were refused"
+				summary={
+					extras.refusals
+						? extras.refusals.error
+							? extras.refusals.error
+							: `${compact(extras.refusals.total)} failed or refused in this window${extras.refusals.groups[0] ? ` · most: ${extras.refusals.groups[0].reason.replace(/-/g, " ")}` : ""}`
+						: (extras.error ?? "loading…")
+				}
+			>
+				{extras.refusals && !extras.refusals.error ? (
+					<RefusalsPanel refusals={extras.refusals} />
+				) : (
+					<p className={`text-xs ${MUTED}`}>
+						{extras.refusals?.error ?? extras.error ?? "Reading the AI Gateway logs…"}
+						{extras.refusals?.error?.includes("AI Gateway: Read") ? " Add it to the token the deployment uses to see why requests were blocked." : ""}
+					</p>
+				)}
+			</Collapsible>
+
+			<Collapsible
+				id="aig-settings"
+				title="Gateway settings"
+				summary={
+					extras.config
+						? extras.config.error
+							? extras.config.error
+							: `${extras.config.gateways.length} gateways · ${extras.config.gateways.filter((g) => g.guardrails).length} with Guardrails · ${extras.config.gateways.filter((g) => g.dlp).length} with DLP · ${extras.config.routes.length} dynamic ${extras.config.routes.length === 1 ? "route" : "routes"}`
+						: (extras.error ?? "loading…")
+				}
+			>
+				{extras.config && !extras.config.error ? (
+					<GatewaySettingsPanel config={extras.config} focus={filter.gateway} hideNames={hideNames} />
+				) : (
+					<p className={`text-xs ${MUTED}`}>{extras.config?.error ?? extras.error ?? "Reading the gateways…"}</p>
+				)}
+			</Collapsible>
 
 			<Collapsible id="aig-recent" title="Recent requests" summary={`${result?.recent.length ?? 0} latest, newest first`}>
 				<p className={`mb-2 text-xs ${MUTED}`}>

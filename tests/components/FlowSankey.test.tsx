@@ -3,6 +3,7 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FlowSankey, type FlowColumn } from "../../web/src/features/ai-gateway/FlowSankey";
 import type { AiGatewayFlow } from "../../web/src/features/ai-gateway/types";
+import { blockedSummary, routeNote } from "../../web/src/features/ai-gateway/GatewayConfig";
 import type * as CsvModule from "../../web/src/lib/csv";
 
 vi.mock("../../web/src/lib/csv", async (importOriginal) => {
@@ -103,6 +104,38 @@ describe("FlowSankey", () => {
 		expect(within(section()).getByRole("link", { name: "AI Security events in this window →" })).toHaveAttribute("href", "#/ai-security");
 		await user.click(within(section()).getByRole("button", { name: /^Action Passed/ }));
 		expect(within(section()).queryByRole("link", { name: /AI Security/ })).toBeNull();
+	});
+
+	it("says why requests were blocked, and where a dynamic route can send one, on the trace that asks", async () => {
+		const user = userEvent.setup();
+		const refusals = {
+			categoryNames: { P1: "Prompt Injection" },
+			error: null,
+			total: 13,
+			read: 13,
+			failed: [],
+			recent: [],
+			groups: [
+				{ reason: "guardrails-unlogged" as const, detail: "422", side: null, count: 11, gateways: ["prod"] },
+				{ reason: "guardrails" as const, detail: "P1", side: "prompt" as const, count: 2, gateways: ["prod"] },
+				{ reason: "rate-limited" as const, detail: "rate_limited", side: null, count: 9, gateways: ["prod"] },
+			],
+		};
+		const routes = [{ gateway: "prod", name: "tiers", model: "dynamic/tiers", models: ["@cf/meta/big", "@cf/meta/small"], steps: [] }];
+		renderSankey({
+			flows: [...FLOWS, flow({ user: "dave@example.com", model: "dynamic/tiers", action: "Blocked", requests: 3, cost: 0 })],
+			blockedNote: blockedSummary(refusals),
+			routeNote: (model) => routeNote(routes, model),
+		});
+		await user.click(within(section()).getByRole("button", { name: /^Action Blocked/ }));
+		// Only blocks are reasons here; rate limits are not.
+		expect(within(section()).getByRole("status")).toHaveTextContent("Why blocked: 11 category not logged, 2 Prompt Injection (P1, prompt).");
+		await user.click(within(section()).getByRole("button", { name: /^Model dynamic\/tiers/ }));
+		expect(within(section()).getByRole("status")).toHaveTextContent("Route tiers on prod can send to big, small; analytics records the route, not the model that answered.");
+		await user.click(within(section()).getByRole("button", { name: /^Model m1/ }));
+		expect(within(section()).getByRole("status")).not.toHaveTextContent("Route");
+		expect(routeNote(routes, "dynamic/other")).toBeUndefined();
+		expect(blockedSummary({ ...refusals, error: "The API token lacks AI Gateway: Read" })).toBeUndefined();
 	});
 
 	it("saves the diagram as a standalone SVG, with column names and no page-only attributes", async () => {

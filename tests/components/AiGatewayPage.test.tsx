@@ -10,7 +10,7 @@ import type * as CsvModule from "../../web/src/lib/csv";
 
 vi.mock("../../web/src/api/client", async (importOriginal) => {
 	const actual = await importOriginal<typeof ApiClientModule>();
-	return { ...actual, fetchAiGatewayUsage: vi.fn() };
+	return { ...actual, fetchAiGatewayUsage: vi.fn(), fetchAiGatewayConfig: vi.fn(), fetchAiGatewayRefusals: vi.fn() };
 });
 
 vi.mock("../../web/src/lib/csv", async (importOriginal) => {
@@ -18,7 +18,8 @@ vi.mock("../../web/src/lib/csv", async (importOriginal) => {
 	return { ...actual, downloadCsv: vi.fn() };
 });
 
-import { fetchAiGatewayUsage } from "../../web/src/api/client";
+import { fetchAiGatewayConfig, fetchAiGatewayRefusals, fetchAiGatewayUsage } from "../../web/src/api/client";
+import type { AiGatewayConfigResult, AiGatewayRefusalsResult } from "../../web/src/features/ai-gateway/types";
 import { downloadCsv } from "../../web/src/lib/csv";
 import { HideNamesContext } from "../../web/src/hooks/useHideNames";
 
@@ -135,10 +136,63 @@ async function openSection(user: ReturnType<typeof userEvent.setup>, title: stri
 	return screen.getByRole("heading", { name: title }).closest("section")!;
 }
 
+const NAMES = { P1: "Prompt Injection", S1: "Violent Crimes", S2: "Non-Violent Crimes" };
+const config: AiGatewayConfigResult = {
+	categoryNames: NAMES,
+	error: null,
+	gateways: [
+		{
+			id: "prod",
+			isDefault: false,
+			cacheTtl: 1800,
+			rateLimit: { limit: 100, intervalSeconds: 60, technique: "sliding" },
+			authentication: true,
+			collectLogs: true,
+			logLimit: 10000,
+			guardrails: { prompt: { block: ["P1", "S1"], flag: ["S2"] }, response: { block: [], flag: [] } },
+			dlp: { policies: [{ name: "Credentials and Secrets", action: "BLOCK", check: ["REQUEST"], profiles: 2, enabled: true }] },
+			spendLimits: true,
+		},
+		{ id: "staging", isDefault: true, cacheTtl: 0, rateLimit: null, authentication: false, collectLogs: false, logLimit: null, guardrails: null, dlp: null, spendLimits: false },
+	],
+	routes: [
+		{
+			gateway: "prod",
+			name: "tiers",
+			model: "dynamic/tiers",
+			models: ["@cf/meta/big", "@cf/meta/small"],
+			steps: [
+				{ id: "START", type: "start", next: { next: "c" } },
+				{ id: "c", type: "conditional", condition: 'metadata.tier = "pro"', next: { true: "big", false: "small" } },
+				{ id: "big", type: "model", model: "@cf/meta/big", provider: "workers-ai", next: { success: "END" } },
+				{ id: "small", type: "model", model: "@cf/meta/small", provider: "workers-ai", next: { success: "END" } },
+				{ id: "END", type: "end", next: {} },
+			],
+		},
+	],
+};
+const refusals: AiGatewayRefusalsResult = {
+	categoryNames: NAMES,
+	error: null,
+	total: 14,
+	read: 14,
+	failed: [],
+	groups: [
+		{ reason: "guardrails-unlogged", detail: "422", side: null, count: 11, gateways: ["prod"] },
+		{ reason: "guardrails", detail: "P1", side: "prompt", count: 2, gateways: ["prod"] },
+		{ reason: "rate-limited", detail: "rate_limited", side: null, count: 1, gateways: ["staging"] },
+	],
+	recent: [{ at: "2026-11-05T10:00:00Z", gateway: "prod", model: "@cf/meta/big", provider: "workers-ai", status: 424, reason: "guardrails", categories: [{ side: "prompt", code: "P1" }], dlpAction: null, rejection: null }],
+};
+
 beforeEach(() => {
 	history.replaceState(null, "", "#/ai-gateway");
 	vi.mocked(fetchAiGatewayUsage).mockReset();
 	vi.mocked(fetchAiGatewayUsage).mockResolvedValue(usage);
+	vi.mocked(fetchAiGatewayConfig).mockReset();
+	vi.mocked(fetchAiGatewayConfig).mockResolvedValue(config);
+	vi.mocked(fetchAiGatewayRefusals).mockReset();
+	vi.mocked(fetchAiGatewayRefusals).mockResolvedValue(refusals);
 });
 
 describe("AiGatewayPage", () => {
@@ -511,6 +565,48 @@ describe("AiGatewayPage", () => {
 		await user.click(within(flows).getByRole("button", { name: "Drill into User A" }));
 		expect(screen.getByRole("navigation", { name: "AI Gateway slice" })).toHaveTextContent("userUser A");
 		expect(leak()).toBeNull();
+	});
+
+	it("says why the window's requests were refused, by reason and Guardrails category", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		expect(await screen.findByText("14 failed or refused in this window · most: guardrails unlogged")).toBeInTheDocument();
+		const section = await openSection(user, "Why requests were refused");
+		const table = within(section).getByRole("table", { name: "Refusals by reason" });
+		const rows = within(table).getAllByRole("row").slice(1).map((r) => r.textContent);
+		expect(rows).toEqual([
+			"Blocked, category not loggedHTTP 422: through the Workers AI binding the log names no category11prod",
+			"Blocked by GuardrailsP1 Prompt Injection · in the prompt2prod",
+			"Rate limitedrate limited1staging",
+		]);
+		expect(section).toHaveTextContent("never its prompt, answer or metadata");
+		expect(vi.mocked(fetchAiGatewayRefusals).mock.lastCall?.[1]).toMatchObject({ accountId: session.accountId });
+	});
+
+	it("shows each gateway's settings and where its dynamic routes can send a request", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const section = await openSection(user, "Gateway settings");
+		expect(section).toHaveTextContent("2 gateways · 1 with Guardrails · 1 with DLP · 1 dynamic route");
+		const table = within(section).getByRole("table", { name: "Gateway settings" });
+		const prod = within(table).getByText("prod").closest("tr")!;
+		expect(prod).toHaveTextContent("Prompt: blocks P1, S1 · flags 1");
+		expect(within(prod).getByTitle("Prompt Injection")).toHaveTextContent("P1");
+		expect(prod).toHaveTextContent("Credentials and Secrets (block)");
+		expect(prod).toHaveTextContent("30 min");
+		expect(prod).toHaveTextContent("100 per 1 min (sliding)");
+		expect(within(table).getByText("staging").closest("tr")).toHaveTextContent("staging(default)OffOffOffOffOffOff");
+		await user.click(within(prod).getByText("Route tiers"));
+		expect(prod).toHaveTextContent('If metadata.tier = "pro": → big (workers-ai)Otherwise: → small (workers-ai)');
+	});
+
+	it("says what the token lacks when it cannot read the gateways or their logs", async () => {
+		vi.mocked(fetchAiGatewayConfig).mockResolvedValue({ ...config, gateways: [], routes: [], error: "The API token lacks AI Gateway: Read" });
+		vi.mocked(fetchAiGatewayRefusals).mockResolvedValue({ ...refusals, groups: [], recent: [], total: 0, read: 0, error: "The API token lacks AI Gateway: Read" });
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		expect(await screen.findAllByText("The API token lacks AI Gateway: Read")).toHaveLength(2);
+		// The analytics above are untouched.
+		expect(screen.getByRole("heading", { name: "Who uses what" })).toBeInTheDocument();
 	});
 
 	it("does not offer the action column where the schema reports no status code", async () => {

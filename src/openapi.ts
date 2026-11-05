@@ -370,6 +370,42 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 					},
 				},
 			},
+			"/api/ai-gateway/config": {
+				post: {
+					tags: ["AI Gateway"],
+					summary: "AI Gateway settings and dynamic routes",
+					description:
+						"Each gateway's settings, trimmed to what explains its traffic — Guardrails categories set to block or flag on prompts and responses, DLP policies (name, action, what they check), cache TTL, rate limit, authentication, logging, spend limits — and each dynamic route's active version as steps (conditions, rate and budget limits, models, fallbacks) with the models it can reach. Needs AI Gateway: Read on the token; without it `error` says so and the lists are empty.",
+					requestBody: jsonBody({ type: "object", required: ["accountId"], properties: { accountId: HEX_ID_SCHEMA } }),
+					responses: {
+						200: okJson(successEnvelope(genericObject)),
+						400: response400,
+						401: response401,
+						403: response403,
+						502: response502,
+					},
+				},
+			},
+			"/api/ai-gateway/refusals": {
+				post: {
+					tags: ["AI Gateway"],
+					summary: "Failed and refused AI Gateway requests, with why",
+					description:
+						"Window of at most 30 days. The failed requests the AI Gateway Logs API holds for each gateway (up to 200 a gateway), grouped by why: the Guardrails categories that blocked them and on which side, a DLP block, a rate limit, a payment refusal, a failing guardrail check, or the status code; plus the 50 latest. Each log is reduced to time, gateway, model, provider, status, categories, DLP action and rejection reason in the Worker — prompts, answers and caller metadata are never returned. Needs AI Gateway: Read.",
+					requestBody: jsonBody({
+						type: "object",
+						required: ["accountId", "from", "to"],
+						properties: { accountId: HEX_ID_SCHEMA, from: { type: "string", format: "date-time" }, to: { type: "string", format: "date-time" } },
+					}),
+					responses: {
+						200: okJson(successEnvelope(genericObject)),
+						400: response400,
+						401: response401,
+						403: response403,
+						502: response502,
+					},
+				},
+			},
 			"/api/ai-security/analyze": {
 				post: {
 					tags: ["AI Security"],

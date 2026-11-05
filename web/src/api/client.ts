@@ -238,6 +238,16 @@ export function fetchAiGatewayUsage<T>(
 	return postJson<T>("/api/ai-gateway/usage", token, body);
 }
 
+/** Gateway settings and dynamic routes (needs AI Gateway: Read on the token). */
+export function fetchAiGatewayConfig<T>(token: string, body: { accountId: string }): Promise<T> {
+	return postJson<T>("/api/ai-gateway/config", token, body);
+}
+
+/** The window's failed and refused requests, with why, from the AI Gateway logs. */
+export function fetchAiGatewayRefusals<T>(token: string, body: { accountId: string; from: string; to: string }): Promise<T> {
+	return postJson<T>("/api/ai-gateway/refusals", token, body);
+}
+
 export function fetchTunnelMap<T>(token: string, accountId: string, opts?: { fresh?: boolean }): Promise<CachedResult<T>> {
 	return apiFetchCached<T>(`/api/access/tunnels?account_id=${encodeURIComponent(accountId)}`, token, opts?.fresh);
 }

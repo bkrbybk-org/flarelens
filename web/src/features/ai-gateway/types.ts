@@ -281,3 +281,83 @@ export const FILTER_ORDER: (keyof AiGatewayFilter)[] = ["gateway", "provider", "
 
 /** Rows that stand for no single name: nothing to drill into. */
 export const UNDRILLABLE = new Set(["(unknown)", "(not tagged)", "(empty)"]);
+
+/** A Workers AI model without its @cf/vendor/ prefix: llama-3 for @cf/meta/llama-3. */
+export const shortModel = (id: string) => id.replace(/^@cf\/[^/]+\//, "");
+
+// --- Gateway settings, dynamic routes and refusals (REST; see src/lib/ai-gateway-config.ts) ---
+
+export interface GuardrailSide {
+	block: string[];
+	flag: string[];
+}
+
+export interface AiGatewaySettings {
+	id: string;
+	isDefault: boolean;
+	cacheTtl: number;
+	rateLimit: { limit: number; intervalSeconds: number; technique: string } | null;
+	authentication: boolean;
+	collectLogs: boolean;
+	logLimit: number | null;
+	guardrails: { prompt: GuardrailSide; response: GuardrailSide } | null;
+	dlp: { policies: { name: string; action: string; check: string[]; profiles: number; enabled: boolean }[] } | null;
+	spendLimits: boolean;
+}
+
+export interface AiGatewayRouteStep {
+	id: string;
+	type: string;
+	model?: string;
+	provider?: string;
+	condition?: string;
+	limit?: { kind: string; key: string; limit: number; windowSeconds: number };
+	next: Record<string, string>;
+}
+
+export interface AiGatewayRoute {
+	gateway: string;
+	name: string;
+	model: string;
+	steps: AiGatewayRouteStep[];
+	models: string[];
+}
+
+export interface AiGatewayConfigResult {
+	gateways: AiGatewaySettings[];
+	routes: AiGatewayRoute[];
+	categoryNames: Record<string, string>;
+	error: string | null;
+}
+
+export type RefusalReason = "guardrails" | "guardrails-unlogged" | "guardrail-check" | "dlp" | "rate-limited" | "payment" | "cancelled" | "error" | "other";
+
+export interface AiGatewayRefusal {
+	at: string;
+	gateway: string;
+	model: string;
+	provider: string;
+	status: number;
+	reason: RefusalReason;
+	categories: { side: "prompt" | "response"; code: string }[];
+	dlpAction: string | null;
+	rejection: string | null;
+}
+
+export interface AiGatewayRefusalGroup {
+	reason: RefusalReason;
+	detail: string;
+	side: "prompt" | "response" | null;
+	count: number;
+	gateways: string[];
+}
+
+export interface AiGatewayRefusalsResult {
+	groups: AiGatewayRefusalGroup[];
+	recent: AiGatewayRefusal[];
+	total: number;
+	read: number;
+	failed: { gateway: string; error: string }[];
+	categoryNames: Record<string, string>;
+	error: string | null;
+}

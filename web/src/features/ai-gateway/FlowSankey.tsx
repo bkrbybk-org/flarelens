@@ -321,6 +321,8 @@ export function FlowSankey({
 	onPick,
 	tagKey = null,
 	blockedHref,
+	blockedNote,
+	routeNote,
 }: {
 	flows: AiGatewayFlow[];
 	/** The same paths over the window before; new and quiet paths are told from these. */
@@ -334,6 +336,10 @@ export function FlowSankey({
 	tagKey?: string | null;
 	/** Where a pinned "Blocked" trace links to: the WAF's AI Security events in the same window. */
 	blockedHref?: string;
+	/** Why the window's requests were blocked, from the AI Gateway logs, said on a pinned Blocked trace. */
+	blockedNote?: string;
+	/** Where a dynamic route (a `dynamic/…` model) can send a request, said when one is traced. */
+	routeNote?: (model: string) => string | undefined;
 }) {
 	// What the pointer is over, and what a click pinned; a pin outlasts the pointer leaving.
 	const [hovered, setHovered] = useState<Selection | null>(null);
@@ -924,6 +930,16 @@ export function FlowSankey({
 		};
 		const pinInfo = pin ? describe(pin) : null;
 		const drillParts = pinInfo ? pathCols.filter((c) => pinInfo.drill[c]) : [];
+		// A trace through a dynamic route says where that route can send a request.
+		const pinnedModel =
+			pin === null
+				? null
+				: pin.kind === "node"
+					? pin.column === "model"
+						? pin.key
+						: null
+					: (([[pin.thread, pin.key], [pin.fromColumn, pin.from], [pin.toColumn, pin.to]] as [FlowColumn, string][]).find(([c]) => c === "model")?.[1] ?? null);
+		const pinnedRoute = pinnedModel?.startsWith("dynamic/") ? routeNote?.(pinnedModel) : undefined;
 		// A trace through "Blocked" links on to the WAF's AI Security events of the same window.
 		const tracesBlocked =
 			pin !== null &&
@@ -965,6 +981,13 @@ export function FlowSankey({
 								Clear <kbd className="font-mono text-[10px] text-zinc-400">Esc</kbd>
 							</button>
 						</span>
+						{tracesBlocked && blockedNote && (
+							<p className={`basis-full ${MUTED}`}>
+								<span className="font-medium text-zinc-700 dark:text-zinc-200">Why blocked: </span>
+								{blockedNote}.
+							</p>
+						)}
+						{pinnedRoute && <p className={`basis-full ${MUTED}`}>{pinnedRoute}.</p>}
 					</div>
 				)}
 				<div>
