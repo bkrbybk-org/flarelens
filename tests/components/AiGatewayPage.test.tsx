@@ -452,10 +452,16 @@ describe("AiGatewayPage", () => {
 		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
 		// The action column opens by default where the data has one.
 		expect(within(flows).getByRole("combobox", { name: "Columns" })).toHaveValue("user-gateway-model-action");
-		// Sized by spend, blocked and cached requests cost nothing: the diagram says so instead of drawing nothing.
-		expect(flows).toHaveTextContent("4 requests carry no spend (blocked, from cache), so they are not drawn; chart requests to see them.");
-		await user.click(screen.getByRole("button", { name: "Requests" }));
+		// With the action column the diagram sizes by requests, though the chart opens on spend: blocked
+		// and cached requests cost nothing, so by spend they would not be drawn.
+		const sizeBy = within(flows).getByRole("combobox", { name: "Size by" });
+		expect(sizeBy).toHaveValue("requests");
+		expect(flows).toHaveTextContent("sized by requests");
 		expect(flows).not.toHaveTextContent("carry no");
+		// Picked otherwise, it holds, and says what is not drawn.
+		await user.selectOptions(sizeBy, "cost");
+		expect(flows).toHaveTextContent("4 requests carry no spend (blocked, from cache), so they are not drawn; size by requests to see them.");
+		await user.selectOptions(sizeBy, "requests");
 		const blocked = within(flows).getByRole("button", { name: /^Action Blocked: 2/ });
 		expect(blocked.querySelector("rect")).toHaveAttribute("fill", "#dc2626");
 		expect(within(flows).getByRole("list", { name: "Actions" })).toHaveTextContent("PassedBlockedFrom cache");
@@ -470,6 +476,8 @@ describe("AiGatewayPage", () => {
 		expect(within(within(flows).getByRole("table")).getAllByRole("row")).toHaveLength(5);
 		await user.click(within(flows).getByRole("button", { name: "Diagram" }));
 		await user.selectOptions(within(flows).getByRole("combobox", { name: "Columns" }), "user-gateway-model");
+		// The size picked stays; without a pick, the diagram would follow the chart again.
+		expect(within(flows).getByRole("combobox", { name: "Size by" })).toHaveValue("requests");
 		await user.click(within(flows).getByRole("button", { name: "Table" }));
 		expect(within(within(flows).getByRole("table")).getAllByRole("row")).toHaveLength(3);
 		// New and quiet are said per path, never twice for one path's two actions.
@@ -479,6 +487,8 @@ describe("AiGatewayPage", () => {
 	it("does not offer the action column where the schema reports no status code", async () => {
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
 		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		// Without it the diagram follows the chart, which opens on spend.
+		expect(within(flows).getByRole("combobox", { name: "Size by" })).toHaveValue("cost");
 		expect([...within(flows).getByRole("combobox", { name: "Columns" }).querySelectorAll("option")].map((o) => o.value)).not.toContain("user-gateway-model-action");
 	});
 

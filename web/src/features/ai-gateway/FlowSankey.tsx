@@ -6,7 +6,8 @@ import { UNDRILLABLE, compactCount, formatCost, type AiGatewayFlow } from "./typ
 
 /**
  * Who uses which gateway for which model: by default users on the left, gateways in the middle,
- * models on the right, each band as wide as its share of the charted measure. The columns can be
+ * models on the right, each band as wide as its share of the charted measure (requests, with the
+ * action column, unless *Size by* says otherwise). The columns can be
  * reordered to start from the model, or widened with the provider between gateway and model.
  *
  * Every row is a whole path, so pointing at a node lights the exact paths through it — a model on
@@ -195,19 +196,27 @@ function topKeys(flows: { path: Path; value: number }[], column: FlowColumn): Se
 
 const TOGGLE = `rounded-md px-2 py-0.5 ${FOCUS_RING}`;
 
+type FlowMeasure = "requests" | "tokens" | "cost" | "errors";
+const MEASURES: { id: FlowMeasure; label: string; format: (value: number) => string }[] = [
+	{ id: "requests", label: "Requests", format: (v) => compactCount(v) },
+	{ id: "tokens", label: "Tokens", format: (v) => compactCount(v) },
+	{ id: "cost", label: "Spend", format: (v) => formatCost(v) },
+	{ id: "errors", label: "Errors", format: (v) => compactCount(v) },
+];
+
 export function FlowSankey({
 	flows,
 	previousFlows,
-	measure,
-	format,
+	measure: chartMeasure,
+	format: chartFormat,
 	label,
 	onPick,
 }: {
 	flows: AiGatewayFlow[];
 	/** The same paths over the window before; new and quiet paths are told from these. */
 	previousFlows?: AiGatewayFlow[] | null;
-	/** Which figure sizes the bands. */
-	measure: "requests" | "tokens" | "cost" | "errors";
+	/** The chart's measure, which sizes the bands unless the diagram is told otherwise. */
+	measure: FlowMeasure;
 	format: (value: number) => string;
 	label: (column: FlowColumn, key: string) => string;
 	onPick?: (drill: FlowDrill) => void;
@@ -219,6 +228,8 @@ export function FlowSankey({
 	const [layoutId, setLayoutId] = useState(FLOW_LAYOUTS[0].id);
 	const [cutoff, setCutoff] = useState(0);
 	const [view, setView] = useState<"diagram" | "table">("diagram");
+	// null: follow the chart, except with the action column (see below).
+	const [sizeBy, setSizeBy] = useState<FlowMeasure | null>(null);
 	const [boxRef, W] = useWidth();
 
 	// The provider column is offered only where the schema reports one per path.
@@ -228,6 +239,14 @@ export function FlowSankey({
 	const layout = layouts.find((l) => l.id === layoutId) ?? layouts[0];
 	const cols = layout.columns;
 	const first = cols[0];
+	// What sizes the bands. With the action column it is requests unless picked otherwise: blocked,
+	// cached and failed requests cost nothing, so by spend the actions worth seeing would not be drawn.
+	const measureOptions = MEASURES.filter(
+		(m) => m.id === "requests" || flows.some((f) => (m.id === "cost" ? f.cost : m.id === "tokens" ? f.tokens : f.errors) !== null),
+	);
+	const picked = sizeBy && measureOptions.some((m) => m.id === sizeBy) ? sizeBy : null;
+	const measure: FlowMeasure = picked ?? (cols.includes("action") ? "requests" : chartMeasure);
+	const format = measure === chartMeasure ? chartFormat : MEASURES.find((m) => m.id === measure)!.format;
 
 	// Geometry in real px. Labels are 0.75rem; each side keeps room for one, up to 17rem or 30% of
 	// the width, and a label longer than its room is cut with an ellipsis (full name on hover).
@@ -388,6 +407,14 @@ export function FlowSankey({
 						</select>
 					</label>
 					<label className="flex items-center gap-1.5">
+						<span className={MUTED}>Size by</span>
+						<select value={measure} onChange={(e) => setSizeBy(e.target.value as FlowMeasure)} className={SELECT_SM}>
+							{measureOptions.map((m) => (
+								<option key={m.id} value={m.id}>{m.label}</option>
+							))}
+						</select>
+					</label>
+					<label className="flex items-center gap-1.5">
 						<span className={MUTED}>Colour by</span>
 						<select value={colour} onChange={(e) => setColourBy(e.target.value as FlowColour)} className={SELECT_SM}>
 							{colourOptions.map((o) => (
@@ -507,7 +534,7 @@ export function FlowSankey({
 		view === "diagram" && unsizedRequests > 0 ? (
 			<p className={`mt-2 text-xs ${MUTED}`}>
 				{compactCount(unsizedRequests)} {unsizedRequests === 1 ? "request carries" : "requests carry"} no {measureName}
-				{unsizedActions.length ? ` (${unsizedActions.join(", ").toLowerCase()})` : ""}, so {unsizedRequests === 1 ? "it is" : "they are"} not drawn; chart requests to see{" "}
+				{unsizedActions.length ? ` (${unsizedActions.join(", ").toLowerCase()})` : ""}, so {unsizedRequests === 1 ? "it is" : "they are"} not drawn; size by requests to see{" "}
 				{unsizedRequests === 1 ? "it" : "them"}.
 			</p>
 		) : null;
