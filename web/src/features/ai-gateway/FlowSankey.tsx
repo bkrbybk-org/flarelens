@@ -1,6 +1,6 @@
-import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { FOCUS_RING, MUTED, CARD, SECTION_TITLE, SELECT_SM } from "../../lib/ui";
-import { downloadCsv, toCsv } from "../../lib/csv";
+import { downloadBlob, downloadCsv, toCsv } from "../../lib/csv";
 import { OTHER, OTHER_COLOR, STACK_COLORS } from "./stack";
 import { UNDRILLABLE, compactCount, formatCost, type AiGatewayFlow } from "./types";
 
@@ -26,8 +26,9 @@ import { UNDRILLABLE, compactCount, formatCost, type AiGatewayFlow } from "./typ
  * can be left out. A table lists every path with all its figures, and exports as CSV.
  */
 
-export type FlowColumn = "user" | "gateway" | "provider" | "model" | "action";
-const COLUMN_LABEL: Record<FlowColumn, string> = { user: "User", gateway: "Gateway", provider: "Provider", model: "Model", action: "Action" };
+export type FlowColumn = "user" | "gateway" | "provider" | "model" | "action" | "tag";
+/** Column names; the tag column is named after the page's tag key (team, cost center…) where one is picked. */
+const COLUMN_LABEL: Record<FlowColumn, string> = { user: "User", gateway: "Gateway", provider: "Provider", model: "Model", action: "Action", tag: "Tag" };
 
 /**
  * The column orders on offer, the first available being the default; one with the provider or the
@@ -40,6 +41,9 @@ export const FLOW_LAYOUTS: { id: string; columns: FlowColumn[] }[] = [
 	{ id: "user-gateway-provider-model", columns: ["user", "gateway", "provider", "model"] },
 	{ id: "user-gateway-action", columns: ["user", "gateway", "action"] },
 	{ id: "model-gateway-user", columns: ["model", "gateway", "user"] },
+	// With a tag key picked on the page (team, cost center…): chargeback by tag rather than by person.
+	{ id: "tag-user-model", columns: ["tag", "user", "model"] },
+	{ id: "tag-gateway-model-action", columns: ["tag", "gateway", "model", "action"] },
 ];
 
 /** One colour per action, the same in every view, so a red band reads as blocked at a glance. */
@@ -51,7 +55,6 @@ export const ACTION_COLORS: Record<string, string> = {
 	Cancelled: "#a1a1aa",
 	Failed: "#ea580c",
 };
-const layoutName = (columns: FlowColumn[]) => columns.map((c, i) => (i ? COLUMN_LABEL[c].toLowerCase() : COLUMN_LABEL[c])).join(" → ");
 
 /** Paths smaller than this share of the measure can be left out, to cut clutter on a big screen. */
 const CUTOFFS = [
@@ -61,6 +64,9 @@ const CUTOFFS = [
 ];
 /** How many of the biggest bands carry their figure. */
 const FIGURES = 3;
+/** The tour: how many of the first column's busiest nodes it traces, and how long it holds each. */
+const TOUR_STOPS = 6;
+const TOUR_MS = 5000;
 
 /** More nodes than this in a column fold into "Other", so the diagram stays readable. */
 const TOP = 8;
@@ -77,7 +83,14 @@ interface Node {
 }
 
 type Path = Record<FlowColumn, string>;
-const pathOf = (f: AiGatewayFlow): Path => ({ user: f.user, gateway: f.gateway, provider: f.provider ?? "(unknown)", model: f.model, action: f.action ?? "(unknown)" });
+const pathOf = (f: AiGatewayFlow): Path => ({
+	user: f.user,
+	gateway: f.gateway,
+	provider: f.provider ?? "(unknown)",
+	model: f.model,
+	action: f.action ?? "(unknown)",
+	tag: f.tag ?? "(unknown)",
+});
 
 /**
  * What is traced: a node, or one band — one key of the band's thread column (the colour column,
@@ -86,49 +99,60 @@ const pathOf = (f: AiGatewayFlow): Path => ({ user: f.user, gateway: f.gateway, 
 type Selection =
 	| { kind: "node"; column: FlowColumn; key: string }
 	| { kind: "band"; thread: FlowColumn; key: string; fromColumn: FlowColumn; from: string; toColumn: FlowColumn; to: string };
-/** The filters a drill applies: one for a node, up to three for a band, all of a table row's. The action is not a page filter. */
-export type FlowDrill = Partial<Record<Exclude<FlowColumn, "action">, string>>;
-const drillable = (column: FlowColumn, key: string): column is Exclude<FlowColumn, "action"> => column !== "action" && key !== OTHER && !UNDRILLABLE.has(key);
+/** The filters a drill applies: one for a node, up to three for a band, all of a table row's. The action and the tag are not page filters. */
+export type FlowDrill = Partial<Record<Exclude<FlowColumn, "action" | "tag">, string>>;
+const drillable = (column: FlowColumn, key: string): column is Exclude<FlowColumn, "action" | "tag"> =>
+	column !== "action" && column !== "tag" && key !== OTHER && !UNDRILLABLE.has(key);
 
 const sameSelection = (a: Selection | null, b: Selection | null) => JSON.stringify(a) === JSON.stringify(b);
-/** A path without its action: new and quiet are said of who reached which model, not of each outcome. */
+/** A path without its action or tag: new and quiet are said of who reached which model, not of each outcome. */
 const pathKey = (f: AiGatewayFlow) => JSON.stringify([f.user, f.gateway, f.provider, f.model]);
 const sumNullable = (a: number | null, b: number | null) => (a === null && b === null ? null : (a ?? 0) + (b ?? 0));
-/** Each path once, its actions summed. */
-function mergeActions(flows: AiGatewayFlow[]): AiGatewayFlow[] {
-	const byPath = new Map<string, AiGatewayFlow>();
+/** Each path once, its actions and/or tags summed unless kept apart; p95 as a request-weighted mean. */
+function mergeFlows(flows: AiGatewayFlow[], keepAction = false, keepTag = false): AiGatewayFlow[] {
+	const byPath = new Map<string, { flow: AiGatewayFlow; latSum: number; latN: number }>();
 	for (const f of flows) {
-		const into = byPath.get(pathKey(f));
-		if (!into) {
-			byPath.set(pathKey(f), { ...f, action: null });
-			continue;
+		const id = JSON.stringify([pathKey(f), keepAction ? f.action : null, keepTag ? f.tag : null]);
+		const into = byPath.get(id) ?? { flow: { ...f, action: keepAction ? f.action : null, tag: keepTag ? f.tag : null, requests: 0, tokens: null, cost: null, errors: null, cached: null }, latSum: 0, latN: 0 };
+		into.flow.requests += f.requests;
+		into.flow.tokens = sumNullable(into.flow.tokens, f.tokens);
+		into.flow.cost = sumNullable(into.flow.cost, f.cost);
+		into.flow.errors = sumNullable(into.flow.errors, f.errors);
+		into.flow.cached = sumNullable(into.flow.cached, f.cached);
+		if (f.p95 !== null) {
+			into.latSum += f.p95 * f.requests;
+			into.latN += f.requests;
 		}
-		into.requests += f.requests;
-		into.tokens = sumNullable(into.tokens, f.tokens);
-		into.cost = sumNullable(into.cost, f.cost);
-		into.errors = sumNullable(into.errors, f.errors);
-		into.cached = sumNullable(into.cached, f.cached);
+		byPath.set(id, into);
 	}
-	return [...byPath.values()];
+	return [...byPath.values()].map(({ flow, latSum, latN }) => ({ ...flow, p95: latN > 0 ? latSum / latN : null }));
 }
 /** How many new or quiet paths are listed before "and N more". */
 const CHANGES_SHOWN = 4;
 
-export type FlowColour = FlowColumn | "errors" | "cache";
-type HealthColour = "errors" | "cache";
-const isHealth = (c: FlowColour): c is HealthColour => c === "errors" || c === "cache";
+export type FlowColour = FlowColumn | "errors" | "cache" | "latency";
+type HealthColour = "errors" | "cache" | "latency";
+const isHealth = (c: FlowColour): c is HealthColour => c === "errors" || c === "cache" || c === "latency";
 
-/** Requests, failures and cache hits behind a band or node, for its health. null: not reported. */
+/**
+ * Requests, failures and cache hits behind a band or node, for its health, and p95 latency as a
+ * request-weighted sum (latSum over latN requests). null / 0: not reported.
+ */
 interface Health {
 	requests: number;
 	errors: number | null;
 	cached: number | null;
+	latSum: number;
+	latN: number;
 }
+const emptyHealth = (): Health => ({ requests: 0, errors: null, cached: null, latSum: 0, latN: 0 });
 
 const addHealth = (into: Health, from: Health) => {
 	into.requests += from.requests;
 	into.errors = from.errors === null ? into.errors : (into.errors ?? 0) + from.errors;
 	into.cached = from.cached === null ? into.cached : (into.cached ?? 0) + from.cached;
+	into.latSum += from.latSum;
+	into.latN += from.latN;
 };
 
 /**
@@ -147,9 +171,17 @@ export const HEALTH_STEPS: Record<HealthColour, { color: string; label: string; 
 		{ color: "#2563eb", label: "10–50%", test: (r) => r >= 0.1 },
 		{ color: "#a1a1aa", label: "under 10%", test: () => true },
 	],
+	// p95 in ms. A model answer takes seconds; past a minute a user has likely given up.
+	latency: [
+		{ color: "#16a34a", label: "p95 under 10 s", test: (ms) => ms < 10_000 },
+		{ color: "#d97706", label: "10–60 s", test: (ms) => ms < 60_000 },
+		{ color: "#dc2626", label: "60 s or more", test: () => true },
+	],
 };
 
+/** The rate a health colour reads — a share of requests, or for latency the p95 in ms. */
 function healthRate(h: Health, by: HealthColour): number | null {
+	if (by === "latency") return h.latN > 0 ? h.latSum / h.latN : null;
 	const part = by === "errors" ? h.errors : h.cached;
 	return part === null || h.requests <= 0 ? null : part / h.requests;
 }
@@ -160,6 +192,7 @@ function healthColor(h: Health, by: HealthColour): string {
 }
 
 const pctText = (rate: number) => `${(rate * 100).toFixed(rate > 0 && rate < 0.1 ? 1 : 0)}%`;
+const msText = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`);
 
 /** The root font size in px: 16 normally, more in presentation mode's larger text. */
 function rootPx(): number {
@@ -195,6 +228,81 @@ function topKeys(flows: { path: Path; value: number }[], column: FlowColumn): Se
 }
 
 const TOGGLE = `rounded-md px-2 py-0.5 ${FOCUS_RING}`;
+const SMALL_BUTTON = `rounded-md border border-zinc-200 px-2.5 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 ${FOCUS_RING}`;
+
+/** Presentation properties the page sets by class; copied onto the export so it looks the same outside the page. */
+const EXPORTED_STYLES = ["fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray", "opacity", "font-size", "font-family", "font-weight", "paint-order"];
+
+/**
+ * The diagram as a standalone SVG: its computed colours and fonts inlined, the column names drawn
+ * above it and the card's background behind, so it reads the same in slides as on the page.
+ */
+function snapshotSvg(svg: SVGSVGElement, headers: { text: string; x: number; anchor: "start" | "middle" | "end" }[]): { markup: string; width: number; height: number } {
+	const width = Number(svg.getAttribute("width"));
+	const top = 28;
+	const height = Number(svg.getAttribute("height")) + top;
+	const clone = svg.cloneNode(true) as SVGSVGElement;
+	const from = [...svg.querySelectorAll("*")];
+	const to = [...clone.querySelectorAll("*")];
+	from.forEach((el, i) => {
+		const style = getComputedStyle(el);
+		const target = to[i] as SVGElement;
+		// What a class set is inlined; what an attribute sets already travels with the element.
+		const inline = EXPORTED_STYLES.filter((name) => !el.hasAttribute(name)).map((name) => `${name}:${style.getPropertyValue(name)}`);
+		target.setAttribute("style", inline.join(";"));
+	});
+	// Page-only attributes go: data-* carry raw keys (a person's email even while names are hidden).
+	for (const target of [clone, ...to]) {
+		for (const attr of target.getAttributeNames()) if (["role", "tabindex", "aria-pressed", "aria-label", "class"].includes(attr) || attr.startsWith("data-")) target.removeAttribute(attr);
+	}
+	let bg = "#ffffff";
+	for (let el: Element | null = svg; el; el = el.parentElement) {
+		const c = getComputedStyle(el).backgroundColor;
+		if (c && c !== "transparent" && !/rgba\(.*,\s*0\)$/.test(c)) {
+			bg = c;
+			break;
+		}
+	}
+	const muted = getComputedStyle(svg.querySelector("text") ?? svg).fill || "#71717a";
+	const font = getComputedStyle(svg).fontFamily;
+	const ns = "http://www.w3.org/2000/svg";
+	const body = document.createElementNS(ns, "g");
+	body.setAttribute("transform", `translate(0,${top})`);
+	while (clone.firstChild) body.appendChild(clone.firstChild);
+	const backdrop = document.createElementNS(ns, "rect");
+	for (const [k, v] of Object.entries({ width: String(width), height: String(height), fill: bg })) backdrop.setAttribute(k, v);
+	clone.appendChild(backdrop);
+	for (const h of headers) {
+		const t = document.createElementNS(ns, "text");
+		for (const [k, v] of Object.entries({ x: String(h.x), y: "16", "text-anchor": h.anchor, style: `fill:${muted};font-family:${font};font-size:12px;font-weight:600;letter-spacing:0.05em` })) t.setAttribute(k, v);
+		t.textContent = h.text.toUpperCase();
+		clone.appendChild(t);
+	}
+	clone.appendChild(body);
+	clone.setAttribute("xmlns", ns);
+	clone.setAttribute("height", String(height));
+	clone.setAttribute("viewBox", `0 0 ${width} ${height}`);
+	clone.removeAttribute("class");
+	return { markup: new XMLSerializer().serializeToString(clone), width, height };
+}
+
+function savePng(markup: string, width: number, height: number, name: string) {
+	const url = URL.createObjectURL(new Blob([markup], { type: "image/svg+xml" }));
+	const img = new Image();
+	img.onload = () => {
+		// Twice the size, so it stays sharp on a projector or a retina slide.
+		const canvas = document.createElement("canvas");
+		canvas.width = width * 2;
+		canvas.height = height * 2;
+		const ctx = canvas.getContext("2d");
+		URL.revokeObjectURL(url);
+		if (!ctx) return;
+		ctx.scale(2, 2);
+		ctx.drawImage(img, 0, 0);
+		canvas.toBlob((blob) => blob && downloadBlob(name, blob), "image/png");
+	};
+	img.src = url;
+}
 
 type FlowMeasure = "requests" | "tokens" | "cost" | "errors";
 const MEASURES: { id: FlowMeasure; label: string; format: (value: number) => string }[] = [
@@ -211,6 +319,8 @@ export function FlowSankey({
 	format: chartFormat,
 	label,
 	onPick,
+	tagKey = null,
+	blockedHref,
 }: {
 	flows: AiGatewayFlow[];
 	/** The same paths over the window before; new and quiet paths are told from these. */
@@ -220,6 +330,10 @@ export function FlowSankey({
 	format: (value: number) => string;
 	label: (column: FlowColumn, key: string) => string;
 	onPick?: (drill: FlowDrill) => void;
+	/** The page's tag key, which names the tag column. */
+	tagKey?: string | null;
+	/** Where a pinned "Blocked" trace links to: the WAF's AI Security events in the same window. */
+	blockedHref?: string;
 }) {
 	// What the pointer is over, and what a click pinned; a pin outlasts the pointer leaving.
 	const [hovered, setHovered] = useState<Selection | null>(null);
@@ -230,12 +344,19 @@ export function FlowSankey({
 	const [view, setView] = useState<"diagram" | "table">("diagram");
 	// null: follow the chart, except with the action column (see below).
 	const [sizeBy, setSizeBy] = useState<FlowMeasure | null>(null);
+	const [touring, setTouring] = useState(false);
 	const [boxRef, W] = useWidth();
+	const svgRef = useRef<SVGSVGElement>(null);
+	const colName = (c: FlowColumn) => (c === "tag" && tagKey ? tagKey : COLUMN_LABEL[c]);
+	const layoutName = (columns: FlowColumn[]) => columns.map((c, i) => (i ? colName(c).toLowerCase() : colName(c))).join(" → ");
 
 	// The provider column is offered only where the schema reports one per path.
 	const hasProvider = flows.some((f) => f.provider !== null);
 	const hasAction = flows.some((f) => f.action !== null);
-	const layouts = FLOW_LAYOUTS.filter((l) => (hasProvider || !l.columns.includes("provider")) && (hasAction || !l.columns.includes("action")));
+	const hasTag = flows.some((f) => f.tag !== null);
+	const layouts = FLOW_LAYOUTS.filter(
+		(l) => (hasProvider || !l.columns.includes("provider")) && (hasAction || !l.columns.includes("action")) && (hasTag || !l.columns.includes("tag")),
+	);
 	const layout = layouts.find((l) => l.id === layoutId) ?? layouts[0];
 	const cols = layout.columns;
 	const first = cols[0];
@@ -250,9 +371,10 @@ export function FlowSankey({
 
 	// Colour by any shown column; health colours only for what the schema reports per path.
 	const colourOptions: { id: FlowColour; label: string }[] = [
-		...cols.map((c) => ({ id: c as FlowColour, label: COLUMN_LABEL[c] })),
+		...cols.map((c) => ({ id: c as FlowColour, label: colName(c) })),
 		...(flows.some((f) => f.errors !== null) ? [{ id: "errors" as const, label: "Error rate" }] : []),
 		...(flows.some((f) => f.cached !== null) ? [{ id: "cache" as const, label: "Cache hit rate" }] : []),
+		...(flows.some((f) => f.p95 !== null) ? [{ id: "latency" as const, label: "Latency (p95)" }] : []),
 	];
 	const colour: FlowColour = colourOptions.some((o) => o.id === colourBy) ? colourBy : first;
 	// The column whose key a band carries across: the colour column, or the first for health colours.
@@ -264,9 +386,9 @@ export function FlowSankey({
 	const before = previousFlows?.length ? new Set(previousFlows.map(pathKey)) : null;
 	const nowSeen = new Set(flows.map(pathKey));
 	const isNewPath = (f: AiGatewayFlow) => Boolean(before) && !before!.has(pathKey(f));
-	const merged = mergeActions(flows);
+	const merged = mergeFlows(flows);
 	const newPaths = before ? merged.filter((f) => isNewPath(f) && valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a)) : [];
-	const quietPaths = before ? mergeActions(previousFlows!).filter((f) => !nowSeen.has(pathKey(f)) && valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a)) : [];
+	const quietPaths = before ? mergeFlows(previousFlows!).filter((f) => !nowSeen.has(pathKey(f)) && valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a)) : [];
 	// An outline marks the exception. When most paths are new (tagging only just started, say),
 	// outlining most of the diagram would mark nothing, so the list says so instead.
 	const outlineNew = Boolean(before) && newPaths.length * 2 <= merged.filter((f) => valueOf(f) > 0).length;
@@ -280,7 +402,11 @@ export function FlowSankey({
 	);
 
 	const valued = flows
-		.map((f) => ({ path: pathOf(f), value: valueOf(f), health: { requests: f.requests, errors: f.errors, cached: f.cached } as Health }))
+		.map((f) => ({
+			path: pathOf(f),
+			value: valueOf(f),
+			health: { requests: f.requests, errors: f.errors, cached: f.cached, latSum: f.p95 === null ? 0 : f.p95 * f.requests, latN: f.p95 === null ? 0 : f.requests } as Health,
+		}))
 		.filter((f) => f.value > 0);
 	const wholeTotal = valued.reduce((n, p) => n + p.value, 0);
 	// Paths under the cut-off are left out of the diagram (never out of the table or the export).
@@ -337,23 +463,31 @@ export function FlowSankey({
 	const SLOT = Math.ceil(font * 1.5);
 
 	const measureName = measure === "cost" ? "spend" : measure;
-	// New and quiet are said per path, so their lines leave the action out.
-	const pathCols = cols.filter((c) => c !== "action");
+	// New and quiet are said per path, so their lines leave the action and the tag out.
+	const pathCols = cols.filter((c) => c !== "action" && c !== "tag");
+	// A full name on hover, except a person's, which stays as the label shows it (an alias while names are hidden).
+	const fullName = (c: FlowColumn, key: string) => (c === "user" ? label(c, key) : key);
 	const pathText = (f: AiGatewayFlow) => pathCols.map((c) => label(c, pathOf(f)[c])).join(" → ");
-	const pathTitle = (f: AiGatewayFlow) => pathCols.map((c) => pathOf(f)[c]).join(" → ");
+	const pathTitle = (f: AiGatewayFlow) => pathCols.map((c) => fullName(c, pathOf(f)[c])).join(" → ");
 
 	// Every path for the table and the export, by the charted measure, then by requests: one row per
-	// action when the action is a column, the actions summed when it is not.
+	// action and tag when they are columns, summed when they are not.
 	const busiest = (list: AiGatewayFlow[]) => list.filter((f) => f.requests > 0 || valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a) || b.requests - a.requests);
-	const rows = busiest(cols.includes("action") ? flows : merged);
-	const rowKey = (f: AiGatewayFlow) => JSON.stringify([pathKey(f), f.action]);
+	const rows = busiest(mergeFlows(flows, cols.includes("action"), cols.includes("tag")));
+	const rowKey = (f: AiGatewayFlow) => JSON.stringify([pathKey(f), f.action, f.tag]);
 	const rowDrill = (f: AiGatewayFlow): FlowDrill => {
 		const p = pathOf(f);
 		const drill: FlowDrill = {};
 		for (const c of cols) if (drillable(c, p[c])) drill[c] = p[c];
 		return drill;
 	};
-	const has = { tokens: flows.some((f) => f.tokens !== null), cost: flows.some((f) => f.cost !== null), errors: flows.some((f) => f.errors !== null), cached: flows.some((f) => f.cached !== null) };
+	const has = {
+		tokens: flows.some((f) => f.tokens !== null),
+		cost: flows.some((f) => f.cost !== null),
+		errors: flows.some((f) => f.errors !== null),
+		cached: flows.some((f) => f.cached !== null),
+		p95: flows.some((f) => f.p95 !== null),
+	};
 	const exportCsv = () => {
 		const csv = toCsv(busiest(flows), [
 			{ header: "user", value: (f) => f.user },
@@ -361,14 +495,55 @@ export function FlowSankey({
 			...(hasProvider ? [{ header: "provider", value: (f: AiGatewayFlow) => f.provider ?? "" }] : []),
 			{ header: "model", value: (f) => f.model },
 			...(hasAction ? [{ header: "action", value: (f: AiGatewayFlow) => f.action ?? "" }] : []),
+			...(hasTag ? [{ header: tagKey ? `tag:${tagKey}` : "tag", value: (f: AiGatewayFlow) => f.tag ?? "" }] : []),
 			{ header: "requests", value: (f) => f.requests },
 			{ header: "tokens", value: (f) => f.tokens ?? "" },
 			{ header: "cost_usd", value: (f) => f.cost ?? "" },
 			{ header: "errors", value: (f) => f.errors ?? "" },
 			{ header: "cached", value: (f) => f.cached ?? "" },
+			...(has.p95 ? [{ header: "p95_ms", value: (f: AiGatewayFlow) => (f.p95 === null ? "" : Math.round(f.p95)) }] : []),
 			...(before ? [{ header: "new_this_window", value: (f: AiGatewayFlow) => (isNewPath(f) ? "yes" : "no") }] : []),
 		]);
 		downloadCsv(`flarelens-ai-gateway-paths-${new Date().toISOString().slice(0, 10)}.csv`, csv);
+	};
+
+	// The tour: on a screen nobody is touching, trace the first column's busiest nodes in turn. Any
+	// pick of the presenter's stops it.
+	const tourSums = new Map<string, number>();
+	for (const p of paths) if (p.path[first] !== OTHER) tourSums.set(p.path[first], (tourSums.get(p.path[first]) ?? 0) + p.value);
+	const tourKeys = [...tourSums].sort((a, b) => b[1] - a[1]).slice(0, TOUR_STOPS).map(([key]) => key);
+	const tourSignature = JSON.stringify([first, tourKeys]);
+	useEffect(() => {
+		if (!touring || view !== "diagram") return;
+		const keys = JSON.parse(tourSignature)[1] as string[];
+		if (!keys.length) return;
+		let step = 0;
+		const show = () => {
+			setPinned({ kind: "node", column: first, key: keys[step % keys.length] });
+			step += 1;
+		};
+		const start = setTimeout(show, 0);
+		const timer = setInterval(show, TOUR_MS);
+		return () => {
+			clearTimeout(start);
+			clearInterval(timer);
+		};
+	}, [touring, view, tourSignature, first]);
+	const stopTour = () => setTouring(false);
+
+	// The diagram as an image, for slides: the same colours, names (aliases while hidden) and figures.
+	const exportImage = (kind: "svg" | "png") => {
+		const svg = svgRef.current;
+		if (!svg) return;
+		const headers = cols.map((c, i) => ({
+			text: colName(c),
+			x: i === 0 ? 0 : i === cols.length - 1 ? W : X[c] + NODE_W / 2,
+			anchor: (i === 0 ? "start" : i === cols.length - 1 ? "end" : "middle") as "start" | "middle" | "end",
+		}));
+		const { markup, width, height } = snapshotSvg(svg, headers);
+		const name = `flarelens-who-uses-what-${new Date().toISOString().slice(0, 10)}`;
+		if (kind === "svg") downloadBlob(`${name}.svg`, new Blob([markup], { type: "image/svg+xml" }));
+		else savePng(markup, width, height, `${name}.png`);
 	};
 
 	const changes =
@@ -460,7 +635,29 @@ export function FlowSankey({
 					</button>
 				))}
 			</span>
-			<button type="button" onClick={exportCsv} className={`rounded-md border border-zinc-200 px-2.5 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 ${FOCUS_RING}`}>
+			{view === "diagram" && total > 0 && (
+				<>
+					<button
+						type="button"
+						aria-pressed={touring}
+						onClick={() => {
+							if (touring) setPinned(null);
+							setTouring(!touring);
+						}}
+						title={`Trace the ${TOUR_STOPS} busiest ${colName(first).toLowerCase()}s in turn, ${TOUR_MS / 1000} s each`}
+						className={`${SMALL_BUTTON} ${touring ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" : ""}`}
+					>
+						{touring ? "Stop tour" : "Tour"}
+					</button>
+					<button type="button" onClick={() => exportImage("png")} className={SMALL_BUTTON}>
+						Save PNG
+					</button>
+					<button type="button" onClick={() => exportImage("svg")} className={SMALL_BUTTON}>
+						Save SVG
+					</button>
+				</>
+			)}
+			<button type="button" onClick={exportCsv} className={SMALL_BUTTON}>
 				Export CSV
 			</button>
 		</div>
@@ -473,13 +670,14 @@ export function FlowSankey({
 				<thead className={`sticky top-0 bg-white dark:bg-zinc-900 ${MUTED}`}>
 					<tr>
 						{cols.map((c) => (
-							<th key={c} scope="col" className="py-1.5 pr-3 font-medium">{COLUMN_LABEL[c]}</th>
+							<th key={c} scope="col" className="py-1.5 pr-3 font-medium">{colName(c)}</th>
 						))}
 						<th scope="col" className="py-1.5 pr-3 text-right font-medium">Requests</th>
 						{has.tokens && <th scope="col" className="py-1.5 pr-3 text-right font-medium">Tokens</th>}
 						{has.cost && <th scope="col" className="py-1.5 pr-3 text-right font-medium">Spend</th>}
 						{has.errors && <th scope="col" className="py-1.5 pr-3 text-right font-medium">Errors</th>}
 						{has.cached && <th scope="col" className="py-1.5 pr-3 text-right font-medium">From cache</th>}
+						{has.p95 && <th scope="col" className="py-1.5 pr-3 text-right font-medium">p95</th>}
 						{onPick && <th scope="col" className="py-1.5"><span className="sr-only">Drill</span></th>}
 					</tr>
 				</thead>
@@ -491,7 +689,7 @@ export function FlowSankey({
 						return (
 							<tr key={rowKey(f)} className="border-t border-zinc-100 dark:border-zinc-800">
 								{cols.map((c, i) => (
-									<td key={c} className="max-w-[16rem] truncate py-1.5 pr-3" title={p[c]}>
+									<td key={c} className="max-w-[16rem] truncate py-1.5 pr-3" title={fullName(c, p[c])}>
 										{label(c, p[c])}
 										{i === 0 && isNewPath(f) && <span className="ml-1.5 rounded bg-cf/10 px-1 text-[0.625rem] font-medium text-cf">new</span>}
 									</td>
@@ -505,6 +703,7 @@ export function FlowSankey({
 									</td>
 								)}
 								{has.cached && <td className="py-1.5 pr-3 text-right tabular-nums">{pct(f.cached, f.requests)}</td>}
+								{has.p95 && <td className="py-1.5 pr-3 text-right tabular-nums">{f.p95 === null ? "—" : msText(f.p95)}</td>}
 								{onPick && (
 									<td className="py-1.5 text-right">
 										{parts.length > 0 && (
@@ -562,6 +761,7 @@ export function FlowSankey({
 				if (e.key === "Escape" && pinned) {
 					e.stopPropagation();
 					setPinned(null);
+					stopTour();
 				}
 			}}
 		>
@@ -620,14 +820,15 @@ export function FlowSankey({
 			column === "action" ? (ACTION_COLORS[key] ?? OTHER_COLOR) : key === OTHER || UNDRILLABLE.has(key) ? OTHER_COLOR : STACK_COLORS[order(column, key) % STACK_COLORS.length];
 		// Health per node, summed over the paths through it.
 		const nodeHealth = (column: FlowColumn, key: string) => {
-			const h: Health = { requests: 0, errors: null, cached: null };
+			const h = emptyHealth();
 			for (const p of paths) if (p.path[column] === key) addHealth(h, p.health);
 			return h;
 		};
 		const healthNote = (h: Health) => {
 			if (!isHealth(colour)) return "";
 			const rate = healthRate(h, colour);
-			return rate === null ? "" : ` · ${pctText(rate)} ${colour === "errors" ? "errors" : "from cache"}`;
+			if (rate === null) return "";
+			return colour === "latency" ? ` · p95 ≈ ${msText(rate)}` : ` · ${pctText(rate)} ${colour === "errors" ? "errors" : "from cache"}`;
 		};
 
 		// Whether a path runs through what is traced.
@@ -640,7 +841,7 @@ export function FlowSankey({
 			const bands = new Map<string, { key: string; from: string; to: string; value: number; lit: number; health: Health }>();
 			for (const p of paths) {
 				const id = JSON.stringify([p.path[thread], p.path[from], p.path[to]]);
-				const band = bands.get(id) ?? { key: p.path[thread], from: p.path[from], to: p.path[to], value: 0, lit: 0, health: { requests: 0, errors: null, cached: null } };
+				const band = bands.get(id) ?? { key: p.path[thread], from: p.path[from], to: p.path[to], value: 0, lit: 0, health: emptyHealth() };
 				band.value += p.value;
 				addHealth(band.health, p.health);
 				if (!active || through(active, p)) band.lit += p.value;
@@ -690,8 +891,11 @@ export function FlowSankey({
 			const mid = (x0 + x1) / 2;
 			return `M${x0},${y0} C${mid},${y0} ${mid},${y1} ${x1},${y1} L${x1},${y1 + h} C${mid},${y1 + h} ${mid},${y0 + h} ${x0},${y0 + h} Z`;
 		};
-		const counts = cols.map((c) => `${nodes[c].size} ${COLUMN_LABEL[c].toLowerCase()}${nodes[c].size === 1 ? "" : "s"}`).join(", ");
-		const toggle = (sel: Selection) => setPinned((now) => (sameSelection(now, sel) ? null : sel));
+		const counts = cols.map((c) => `${nodes[c].size} ${colName(c).toLowerCase()}${nodes[c].size === 1 ? "" : "s"}`).join(", ");
+		const toggle = (sel: Selection) => {
+			stopTour();
+			setPinned((now) => (sameSelection(now, sel) ? null : sel));
+		};
 		const pressKeys = (sel: Selection) => (e: React.KeyboardEvent) => {
 			if (e.key === "Enter" || e.key === " ") {
 				e.preventDefault();
@@ -707,7 +911,7 @@ export function FlowSankey({
 			if (sel.kind === "node") {
 				const node = nodes[sel.column].get(sel.key)!;
 				return {
-					title: `${COLUMN_LABEL[sel.column].toLowerCase()} ${label(sel.column, sel.key)}`,
+					title: `${colName(sel.column).toLowerCase()} ${label(sel.column, sel.key)}`,
 					value: node.value,
 					health: nodeHealth(sel.column, sel.key),
 					drill: drillable(sel.column, sel.key) ? ({ [sel.column]: sel.key } as FlowDrill) : {},
@@ -720,6 +924,12 @@ export function FlowSankey({
 		};
 		const pinInfo = pin ? describe(pin) : null;
 		const drillParts = pinInfo ? pathCols.filter((c) => pinInfo.drill[c]) : [];
+		// A trace through "Blocked" links on to the WAF's AI Security events of the same window.
+		const tracesBlocked =
+			pin !== null &&
+			(pin.kind === "node"
+				? pin.column === "action" && pin.key === "Blocked"
+				: (pin.thread === "action" && pin.key === "Blocked") || (pin.fromColumn === "action" && pin.from === "Blocked") || (pin.toColumn === "action" && pin.to === "Blocked"));
 
 		return (
 			<>
@@ -739,7 +949,19 @@ export function FlowSankey({
 									Drill into {drillParts.map((c) => label(c, pinInfo.drill[c]!)).join(" · ")}
 								</button>
 							)}
-							<button type="button" onClick={() => setPinned(null)} className={`rounded-md border border-zinc-200 px-2.5 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 ${FOCUS_RING}`}>
+							{tracesBlocked && blockedHref && (
+								<a href={blockedHref} className={`${SMALL_BUTTON} text-cf`}>
+									AI Security events in this window →
+								</a>
+							)}
+							<button
+								type="button"
+								onClick={() => {
+									setPinned(null);
+									stopTour();
+								}}
+								className={SMALL_BUTTON}
+							>
 								Clear <kbd className="font-mono text-[10px] text-zinc-400">Esc</kbd>
 							</button>
 						</span>
@@ -753,17 +975,18 @@ export function FlowSankey({
 								className="absolute top-0 whitespace-nowrap"
 								style={i === 0 ? { left: 0 } : i === cols.length - 1 ? { right: 0 } : { left: X[c] + NODE_W / 2, transform: "translateX(-50%)" }}
 							>
-								{COLUMN_LABEL[c]}
+								{colName(c)}
 							</span>
 						))}
 					</div>
 					<svg
+						ref={svgRef}
 						width={W}
 						height={H}
 						viewBox={`0 0 ${W} ${H}`}
 						className="block max-w-full"
 						role="group"
-						aria-label={`Flows from ${cols.map((c) => `${COLUMN_LABEL[c].toLowerCase()}s`).join(" to ")}: ${counts}`}
+						aria-label={`Flows from ${cols.map((c) => `${colName(c).toLowerCase()}s`).join(" to ")}: ${counts}`}
 						onMouseLeave={() => setHovered(null)}
 					>
 						<g>
@@ -848,7 +1071,7 @@ export function FlowSankey({
 										role="button"
 										tabIndex={0}
 										aria-pressed={isPinned}
-										aria-label={`${COLUMN_LABEL[column]} ${label(column, node.key)}: ${format(node.value)}${healthNote(health)}. ${isPinned ? "Tracing; select again to stop" : "Select to trace its paths"}`}
+										aria-label={`${colName(column)} ${label(column, node.key)}: ${format(node.value)}${healthNote(health)}. ${isPinned ? "Tracing; select again to stop" : "Select to trace its paths"}`}
 										className={`cursor-pointer outline-none ${FOCUS_RING}`}
 										onMouseEnter={() => setHovered(sel)}
 										onFocus={() => setHovered(sel)}
@@ -920,8 +1143,9 @@ export function FlowSankey({
 							))}
 						</ul>
 						<p className={`mt-1 ${MUTED}`}>
-							Told from each request's status, as AI Gateway records no action as such: Blocked is HTTP 422 or 424, how Guardrails and DLP refuse a prompt or response (a
-							provider's own 422 or 424 would count too); Cancelled is 499, the client gone before the answer; Failed is any other error.
+							Told from each request's status, as AI Gateway records no action as such: Blocked is HTTP 422 or 424, how Guardrails refuse a prompt or response (a
+							provider's own 422 or 424 would count too); a DLP block answers 400, which reads as Failed like any bad request; Cancelled is 499, the client gone
+							before the answer; Failed is any other error.
 						</p>
 					</div>
 				)}

@@ -36,7 +36,11 @@ export function toCsv<T>(rows: T[], columns: CsvColumn<T>[]): string {
 export function downloadCsv(filename: string, csv: string): void {
 	// The byte-order mark is what makes Excel read the file as UTF-8; without it, non-Latin
 	// names (Thai application names, for one) open as mojibake.
-	const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" });
+	downloadBlob(filename, new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" }));
+}
+
+/** Saves any file the page made (a CSV, a diagram image) under the given name. */
+export function downloadBlob(filename: string, blob: Blob): void {
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement("a");
 	a.href = url;

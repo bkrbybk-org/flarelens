@@ -99,6 +99,8 @@ export function PresentationBar({
 	rotation,
 	textScale,
 	onTextScale,
+	hideNames,
+	onHideNames,
 }: {
 	title: string;
 	accountName: string;
@@ -113,6 +115,9 @@ export function PresentationBar({
 	/** Root text size while presenting, in percent; the picker shows only when both are given. */
 	textScale?: number;
 	onTextScale?: (pct: number) => void;
+	/** Whether people's names show as aliases; the switch shows only when both are given. */
+	hideNames?: boolean;
+	onHideNames?: (hide: boolean) => void;
 }) {
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const running = rotation?.running && rotation.next;
@@ -161,6 +166,12 @@ export function PresentationBar({
 								<option key={o.pct} value={o.pct}>{o.label}</option>
 							))}
 						</select>
+					</label>
+				)}
+				{hideNames !== undefined && onHideNames && (
+					<label className="flex items-center gap-1.5 text-xs" title="Show people as User A, User B… instead of their names or emails">
+						<input type="checkbox" checked={hideNames} onChange={(e) => onHideNames(e.target.checked)} className={FOCUS_RING} />
+						<span className={MUTED}>Hide names</span>
 					</label>
 				)}
 				<label className="flex items-center gap-1.5 text-xs">

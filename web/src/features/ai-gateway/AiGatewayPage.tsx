@@ -13,6 +13,7 @@ import { useAiGatewayUsage } from "./useAiGatewayUsage";
 import { UsageChart, type ChartMode, type ChartType } from "./UsageChart";
 import { DonutPanel, type DonutSlice } from "./DonutPanel";
 import { FlowSankey, type FlowColumn, type FlowDrill } from "./FlowSankey";
+import { aliasLetters, useHideNames } from "../../hooks/useHideNames";
 import { storageGet, storageSet } from "../../lib/storage";
 import { buildInsights } from "./insights";
 import {
@@ -283,7 +284,7 @@ function StatusTable({ rows, total }: { rows: AiGatewayStatusRow[]; total: numbe
 	);
 }
 
-function RecentRequests({ rows, onDrill }: { rows: AiGatewayRequestRow[]; onDrill: (key: Dimension, value: string) => void }) {
+function RecentRequests({ rows, onDrill, userName = (key) => key }: { rows: AiGatewayRequestRow[]; onDrill: (key: Dimension, value: string) => void; userName?: (key: string) => string }) {
 	const [open, setOpen] = useState<string | null>(null);
 	if (!rows.length) return <p className={`py-6 text-center text-sm ${MUTED}`}>No requests in this slice, or the schema carries no request id.</p>;
 	return (
@@ -351,7 +352,7 @@ function RecentRequests({ rows, onDrill }: { rows: AiGatewayRequestRow[]; onDril
 												<dd className="break-all">
 													{row.user ? (
 														<button type="button" className={`text-cf hover:underline ${FOCUS_RING}`} onClick={() => onDrill("user", row.user)}>
-															{row.user}
+															{userName(row.user)}
 														</button>
 													) : (
 														"not tagged"
@@ -550,6 +551,27 @@ export function AiGatewayPage({
 		if (picked.some(([key]) => key === split)) setSplit("source");
 	};
 
+	// While presenting with names hidden, each person shows as a stable alias: User A is the busiest,
+	// then down the users list, then anyone else on the page in alphabetical order.
+	const hideNames = useHideNames();
+	const userAlias = useMemo(() => {
+		const order: string[] = [];
+		const seen = new Set<string>(UNDRILLABLE);
+		const add = (key: string | null | undefined) => {
+			if (key && !seen.has(key)) {
+				seen.add(key);
+				order.push(key);
+			}
+		};
+		for (const row of result?.byUser ?? []) add(row.key);
+		const rest = [...(result?.flows ?? []), ...(result?.previousFlows ?? [])].map((f) => f.user);
+		for (const row of result?.recent ?? []) if (row.user) rest.push(row.user);
+		if (filter.user) rest.push(filter.user);
+		for (const key of [...new Set(rest)].sort()) add(key);
+		return new Map(order.map((key, i) => [key, `User ${aliasLetters(i)}`]));
+	}, [result, filter.user]);
+	const userName = (key: string) => (!hideNames || UNDRILLABLE.has(key) ? key : (userAlias.get(key) ?? "User"));
+
 	const totals = result?.totals ?? EMPTY_TOTALS;
 	const previous = result?.previous ?? null;
 	const datasets = result?.datasets;
@@ -691,7 +713,7 @@ export function AiGatewayPage({
 								<span className={MUTED}>›</span>
 								<span className={`flex items-center gap-1 rounded-full px-3 py-1 ${last ? "bg-zinc-200 font-medium dark:bg-zinc-800" : ""}`}>
 									<span className={`text-xs ${MUTED}`}>{key}</span>
-									<span className="max-w-[20rem] truncate">{filter[key]}</span>
+									<span className="max-w-[20rem] truncate">{key === "user" && filter.user ? userName(filter.user) : filter[key]}</span>
 									<button
 										type="button"
 										aria-label={`Remove ${key} filter`}
@@ -973,7 +995,7 @@ export function AiGatewayPage({
 					format={metricSpec.format}
 					chartType={chartType}
 					mode={chartMode}
-					label={split === "provider" ? providerName : undefined}
+					label={split === "provider" ? providerName : split === "user" ? userName : undefined}
 					onPick={split === "gateway" || split === "model" || split === "provider" || split === "user" ? (key) => drill(split, key) : undefined}
 					spendLine={spendLine}
 					budget={budgetLevel}
@@ -1001,7 +1023,8 @@ export function AiGatewayPage({
 							onDimension={(next) => setDonuts((prev) => prev.map((d, j) => (j === i ? next : d)))}
 							slices={slicesFor(dimension)}
 							format={metricSpec.format}
-							label={dimension === "provider" ? providerName : dimension === "model" ? shortModel : undefined}
+							label={dimension === "provider" ? providerName : dimension === "model" ? shortModel : dimension === "user" ? userName : undefined}
+							title={dimension === "user" ? userName : undefined}
 							onPick={dimension === "gateway" || dimension === "model" || dimension === "provider" || dimension === "user" ? (key) => drill(dimension, key) : undefined}
 						/>
 					);
@@ -1014,8 +1037,10 @@ export function AiGatewayPage({
 					previousFlows={result.previousFlows}
 					measure={metric}
 					format={metricSpec.format}
-					label={(column, key) => (column === "model" ? shortModel(key) : column === "provider" ? providerName(key) : key)}
+					label={(column, key) => (column === "model" ? shortModel(key) : column === "provider" ? providerName(key) : column === "user" ? userName(key) : key)}
 					onPick={drillMany}
+					tagKey={tag || null}
+					blockedHref="#/ai-security"
 				/>
 			)}
 
@@ -1040,7 +1065,7 @@ export function AiGatewayPage({
 							dimension={activeTab}
 							onDrill={activeTab === "client" ? undefined : (value) => drill(activeTab, value)}
 							heading={activeTab === "user" ? "User" : undefined}
-							label={activeTab === "provider" ? providerName : undefined}
+							label={activeTab === "provider" ? providerName : activeTab === "user" ? userName : undefined}
 						/>
 					)}
 				</TabPanel>
@@ -1071,7 +1096,7 @@ export function AiGatewayPage({
 				<p className={`mb-2 text-xs ${MUTED}`}>
 					Analytics rows can be sampled on busy gateways, so this is a picture of the traffic rather than a complete log.
 				</p>
-				<RecentRequests rows={result?.recent ?? []} onDrill={drill} />
+				<RecentRequests rows={result?.recent ?? []} onDrill={drill} userName={userName} />
 			</Collapsible>
 
 			<p className={`text-xs ${MUTED}`}>

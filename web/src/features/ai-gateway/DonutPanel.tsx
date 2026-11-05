@@ -31,6 +31,7 @@ export function DonutPanel<D extends string>({
 	slices,
 	format,
 	label = (key) => key,
+	title = (key) => key,
 	onPick,
 	idPrefix,
 }: {
@@ -40,6 +41,8 @@ export function DonutPanel<D extends string>({
 	slices: DonutSlice[];
 	format: (value: number) => string;
 	label?: (key: string) => string;
+	/** A slice's full name on hover: its key unless told otherwise (an alias while names are hidden). */
+	title?: (key: string) => string;
 	onPick?: (key: string) => void;
 	idPrefix: string;
 }) {
@@ -93,7 +96,7 @@ export function DonutPanel<D extends string>({
 							const content = (
 								<>
 									<span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: colorFor(s.key, i, "model") }} />
-									<span className="min-w-0 flex-1 truncate" title={s.key}>
+									<span className="min-w-0 flex-1 truncate" title={title(s.key)}>
 										{label(s.key)}
 									</span>
 									<span className="shrink-0 font-semibold tabular-nums">{format(s.value)}</span>
@@ -103,7 +106,7 @@ export function DonutPanel<D extends string>({
 							return (
 								<li key={s.key}>
 									{onPick && s.key !== OTHER && s.key !== "(unknown)" && s.key !== "(not tagged)" ? (
-										<button type="button" onClick={() => onPick(s.key)} className={`flex w-full items-center gap-2 text-left hover:underline ${FOCUS_RING}`} title={`Drill into ${s.key}`}>
+										<button type="button" onClick={() => onPick(s.key)} className={`flex w-full items-center gap-2 text-left hover:underline ${FOCUS_RING}`} title={`Drill into ${title(s.key)}`}>
 											{content}
 										</button>
 									) : (

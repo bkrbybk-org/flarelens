@@ -20,6 +20,7 @@ vi.mock("../../web/src/lib/csv", async (importOriginal) => {
 
 import { fetchAiGatewayUsage } from "../../web/src/api/client";
 import { downloadCsv } from "../../web/src/lib/csv";
+import { HideNamesContext } from "../../web/src/hooks/useHideNames";
 
 /** The AI Gateway overview: headline changes, and drilling into a slice and back out. */
 
@@ -89,18 +90,18 @@ const usage: AiGatewayUsageResult = {
 	byClient: [slice("opencode", 10)],
 	byUser: [slice("alice@example.com", 6, { cost: 0.4 }), slice("bob@example.com", 1, { cost: 0.05 }), slice("(not tagged)", 3, { cost: 0.05 })],
 	flows: [
-		{ user: "alice@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/meta/llama-3", action: null, requests: 5, tokens: 55, cost: 0.35, errors: 1, cached: 2 },
-		{ user: "alice@example.com", gateway: "staging", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "(not tagged)", gateway: "staging", provider: "workers-ai", model: "@cf/a", action: null, requests: 2, tokens: 22, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "bob@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "(not tagged)", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 11, cost: 0, errors: 0, cached: 0 },
+		{ user: "alice@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/meta/llama-3", action: null, tag: null, p95: null, requests: 5, tokens: 55, cost: 0.35, errors: 1, cached: 2 },
+		{ user: "alice@example.com", gateway: "staging", provider: "workers-ai", model: "@cf/a", action: null, tag: null, p95: null, requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "(not tagged)", gateway: "staging", provider: "workers-ai", model: "@cf/a", action: null, tag: null, p95: null, requests: 2, tokens: 22, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "bob@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, tag: null, p95: null, requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "(not tagged)", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, tag: null, p95: null, requests: 1, tokens: 11, cost: 0, errors: 0, cached: 0 },
 	],
 	// The window before: alice already used prod → llama-3 and staging, carol's dev path has since gone quiet.
 	previousFlows: [
-		{ user: "alice@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/meta/llama-3", action: null, requests: 3, tokens: 33, cost: 0.2, errors: 0, cached: 0 },
-		{ user: "alice@example.com", gateway: "staging", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "carol@example.com", gateway: "dev", provider: "workers-ai", model: "@cf/meta/llama-3", action: null, requests: 2, tokens: 22, cost: 0.3, errors: 0, cached: 0 },
-		{ user: "(not tagged)", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 11, cost: 0.01, errors: 0, cached: 0 },
+		{ user: "alice@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/meta/llama-3", action: null, tag: null, p95: null, requests: 3, tokens: 33, cost: 0.2, errors: 0, cached: 0 },
+		{ user: "alice@example.com", gateway: "staging", provider: "workers-ai", model: "@cf/a", action: null, tag: null, p95: null, requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "carol@example.com", gateway: "dev", provider: "workers-ai", model: "@cf/meta/llama-3", action: null, tag: null, p95: null, requests: 2, tokens: 22, cost: 0.3, errors: 0, cached: 0 },
+		{ user: "(not tagged)", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, tag: null, p95: null, requests: 1, tokens: 11, cost: 0.01, errors: 0, cached: 0 },
 	],
 	tags: {
 		keys: [
@@ -484,6 +485,34 @@ describe("AiGatewayPage", () => {
 		expect(within(flows).getByRole("region", { name: "New this window" })).toHaveTextContent("New this window · 1 path");
 	});
 
+	it("shows people as stable aliases while presenting with names hidden, in text, tooltips and labels alike", async () => {
+		const user = userEvent.setup();
+		const { container } = render(
+			<HideNamesContext value={true}>
+				<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />
+			</HideNamesContext>,
+		);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		// The busiest user is User A, the same in the diagram as in the users list.
+		expect(within(flows).getByRole("button", { name: /^User User A: / })).toBeInTheDocument();
+		expect(within(flows).getByRole("button", { name: /^User \(not tagged\)/ })).toBeInTheDocument();
+		const breakdown = await openSection(user, "Breakdown");
+		await user.click(within(breakdown).getByRole("tab", { name: "Users" }));
+		expect(within(breakdown).getByRole("button", { name: "User A" })).toBeInTheDocument();
+		await openSection(user, "Recent requests");
+		const leak = () => {
+			// Everything a viewer could read: text, tooltips, accessible names. data-* stay in the DOM only.
+			const html = container.innerHTML.replace(/ data-[\w-]+="[^"]*"/g, "");
+			return /(alice|bob|carol)@example\.com/.exec(html)?.[0] ?? null;
+		};
+		expect(leak()).toBeNull();
+		// Drilling into an alias names the alias in the breadcrumb, not the person.
+		await user.click(within(flows).getByRole("button", { name: /^User User A: / }));
+		await user.click(within(flows).getByRole("button", { name: "Drill into User A" }));
+		expect(screen.getByRole("navigation", { name: "AI Gateway slice" })).toHaveTextContent("userUser A");
+		expect(leak()).toBeNull();
+	});
+
 	it("does not offer the action column where the schema reports no status code", async () => {
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
 		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
@@ -541,7 +570,7 @@ describe("AiGatewayPage", () => {
 
 	it("writes the figure on the biggest bands, and leaves small paths out on request", async () => {
 		const user = userEvent.setup();
-		const tiny = { user: "carol@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, requests: 1, tokens: 1, cost: 0.001, errors: 0, cached: 0 };
+		const tiny = { user: "carol@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/a", action: null, tag: null, p95: null, requests: 1, tokens: 1, cost: 0.001, errors: 0, cached: 0 };
 		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, flows: [...usage.flows!, tiny] });
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
 		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;

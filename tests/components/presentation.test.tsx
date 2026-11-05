@@ -3,6 +3,7 @@ import { act, render, renderHook, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useAutoRefresh, usePresentation, usePresentationTextScale } from "../../web/src/hooks/usePresentation";
 import { PresentationBar } from "../../web/src/components/shell/PresentationBar";
+import { aliasLetters, useHideNamesPreference } from "../../web/src/hooks/useHideNames";
 import { Topbar } from "../../web/src/components/shell/Topbar";
 
 /** Presentation mode: full screen when the browser allows, the mode either way, and auto-refresh. */
@@ -167,6 +168,35 @@ describe("controls", () => {
 		expect([...picker.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Normal", "Large", "Extra large"]);
 		await user.selectOptions(picker, "150");
 		expect(onTextScale).toHaveBeenCalledWith(150);
+	});
+
+	it("hides people's names by default while presenting, and remembers turning that off", async () => {
+		localStorage.removeItem("flarelens_present_hide_names");
+		const { result } = renderHook(() => useHideNamesPreference());
+		expect(result.current[0]).toBe(true);
+		act(() => result.current[1](false));
+		expect(renderHook(() => useHideNamesPreference()).result.current[0]).toBe(false);
+		const onHideNames = vi.fn();
+		const user = userEvent.setup();
+		render(
+			<PresentationBar
+				title="AI Gateway"
+				accountName="Acme"
+				updatedAt={null}
+				refreshing={false}
+				autoRefreshMs={0}
+				onAutoRefresh={vi.fn()}
+				onExit={vi.fn()}
+				hideNames={true}
+				onHideNames={onHideNames}
+			/>,
+		);
+		const box = screen.getByRole("checkbox", { name: "Hide names" });
+		expect(box).toBeChecked();
+		await user.click(box);
+		expect(onHideNames).toHaveBeenCalledWith(false);
+		localStorage.removeItem("flarelens_present_hide_names");
+		expect(aliasLetters(0) + aliasLetters(25) + aliasLetters(26) + aliasLetters(27)).toBe("AZAAAB");
 	});
 
 	it("the top bar offers full screen", async () => {

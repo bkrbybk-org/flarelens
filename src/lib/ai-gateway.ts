@@ -251,8 +251,9 @@ const FLOW_LIMIT = 1000;
 
 /**
  * What AI Gateway did with a request, from what the dataset records of it — there is no action
- * field. Guardrails and DLP refuse with 424, or 422 through the Workers AI binding; a provider's
- * own 422 or 424 would read as blocked too, so the label says what the status code shows.
+ * field. Guardrails refuse with 424, or 422 through the Workers AI binding; a provider's own 422
+ * or 424 would read as blocked too, so the label says what the status code shows. A DLP block
+ * answers 400, which cannot be told from any other bad request, so it reads as failed.
  */
 export const FLOW_ACTIONS = ["Passed", "From cache", "Blocked", "Rate limited", "Cancelled", "Failed"] as const;
 export type AiGatewayFlowAction = (typeof FLOW_ACTIONS)[number];
@@ -315,6 +316,14 @@ export interface AiGatewayFlow {
 	model: string;
 	/** What AI Gateway did with the requests (see flowAction); null without a status code dimension. */
 	action: AiGatewayFlowAction | null;
+	/** The value of the page's tag key ("(not tagged)" where absent); null when no tag key is picked. */
+	tag: string | null;
+	/**
+	 * p95 latency in ms. Where several groups fold into one path (status codes into an action) it is
+	 * their request-weighted mean, and an untagged remainder takes its whole pair's: an estimate,
+	 * good enough to colour a band. null where the dataset has no quantiles.
+	 */
+	p95: number | null;
 	requests: number;
 	tokens: number | null;
 	cost: number | null;
@@ -735,16 +744,22 @@ function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["req
 	const flowSums = sumSelection([f.tokensIn, f.tokensOut, f.cost, f.erroredRequests, f.cachedRequests]);
 	// The outcome dimensions ride along where the schema has them, for the diagram's action column.
 	const pairDims = [f.gateway, f.provider, f.model, ...(f.statusCode ? [f.statusCode, f.cached, f.rateLimited] : [])].filter(Boolean).join(" ");
+	// The page's tag key, when one is picked, as a second metadata value under its own alias (probed
+	// live: two aliased metadataValue fields group together), and p95 latency per path.
+	const flowTag = tagged ? `flowTag: ${f.metadataValue}(key: $tagKey) ` : "";
+	const flowLatency = quantileSelection([f.latencyP95]);
 	const flowAliases = (prefix: string, tagged: string, all: string) => `
       ${prefix}flows: ${f.name}(filter: ${tagged}, limit: ${FLOW_LIMIT}, orderBy: [count_DESC]) {
         count
-        dimensions { ${f.metadataValue}(key: $userKey) ${pairDims} }
+        dimensions { ${f.metadataValue}(key: $userKey) ${flowTag}${pairDims} }
         ${flowSums}
+        ${flowLatency}
       }
       ${prefix}flowPairs: ${f.name}(filter: ${all}, limit: ${FLOW_LIMIT}, orderBy: [count_DESC]) {
         count
-        dimensions { ${pairDims} }
+        dimensions { ${flowTag}${pairDims} }
         ${flowSums}
+        ${flowLatency}
       }`;
 	const prevUserClause = users ? previous.clause.replace(/ }$/, `, ${f.metadataKeys}_has: $userKey }`) : "";
 	const flows = users && f.gateway && f.model ? flowAliases("", userClause, clause) + flowAliases("prev_", prevUserClause, previous.clause) : "";
@@ -964,11 +979,26 @@ function withUntagged(rows: AiGatewayBreakdownRow[], totals: AiGatewayTotals): A
  * model, whatever the tagged rows leave of all requests as a "(not tagged)" flow. A float measure's
  * residue within a billionth of the pair's total is 0, as in withUntagged.
  */
-function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFields["requests"]>): AiGatewayFlow[] {
+function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFields["requests"]>, withTag = false): AiGatewayFlow[] {
 	type Measures = Pick<AiGatewayFlow, "requests" | "tokens" | "cost" | "errors" | "cached">;
 	const gatewayOf = (row: RawRow) => text(row.dimensions?.[f.gateway as string]).trim() || "(unknown)";
 	const modelOf = (row: RawRow) => text(row.dimensions?.[f.model as string]).trim() || "(unknown)";
 	const providerOf = (row: RawRow) => (f.provider ? text(row.dimensions?.[f.provider]).trim() || "(unknown)" : null);
+	const tagOf = (row: RawRow) => (withTag ? text(row.dimensions?.flowTag).trim() || "(not tagged)" : null);
+	// Latency weights per path: the sum of p95 × requests, and the requests that carried a p95.
+	const latency = new Map<string, { sum: number; n: number }>();
+	const weigh = (id: string, row: RawRow) => {
+		const p95 = quantile(row, f.latencyP95);
+		if (p95 === null) return;
+		const w = latency.get(id) ?? { sum: 0, n: 0 };
+		w.sum += p95 * row.count;
+		w.n += row.count;
+		latency.set(id, w);
+	};
+	const p95Of = (id: string) => {
+		const w = latency.get(id);
+		return w && w.n > 0 ? w.sum / w.n : null;
+	};
 	const actionOf = (row: RawRow): AiGatewayFlowAction | null => {
 		if (!f.statusCode) return null;
 		const dim = (name: string | null) => (name ? row.dimensions?.[name] : undefined);
@@ -998,12 +1028,14 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 		const provider = providerOf(row);
 		const model = modelOf(row);
 		const action = actionOf(row);
+		const tag = tagOf(row);
 		const measures = measuresOf(row);
-		const path = JSON.stringify([user, gateway, provider, model, action]);
-		const flow = byPath.get(path) ?? { user, gateway, provider, model, action, ...empty() };
+		const path = JSON.stringify([user, gateway, provider, model, action, tag]);
+		const flow = byPath.get(path) ?? { user, gateway, provider, model, action, tag, p95: null, ...empty() };
 		add(flow, measures);
 		byPath.set(path, flow);
-		const pair = JSON.stringify([gateway, provider, model, action]);
+		weigh(path, row);
+		const pair = JSON.stringify([gateway, provider, model, action, tag]);
 		const seen = covered.get(pair) ?? empty();
 		add(seen, measures);
 		covered.set(pair, seen);
@@ -1014,16 +1046,17 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 		return rest <= Math.abs(whole) * 1e-9 ? 0 : rest;
 	};
 	// Several status codes can come to one action (402 and 500 both failed), so pairs are summed first.
-	const wholes = new Map<string, { gateway: string; provider: string | null; model: string; action: AiGatewayFlowAction | null; whole: Measures }>();
+	const wholes = new Map<string, { gateway: string; provider: string | null; model: string; action: AiGatewayFlowAction | null; tag: string | null; whole: Measures }>();
 	for (const row of pairs) {
-		const entry = { gateway: gatewayOf(row), provider: providerOf(row), model: modelOf(row), action: actionOf(row) };
-		const id = JSON.stringify([entry.gateway, entry.provider, entry.model, entry.action]);
+		const entry = { gateway: gatewayOf(row), provider: providerOf(row), model: modelOf(row), action: actionOf(row), tag: tagOf(row) };
+		const id = JSON.stringify([entry.gateway, entry.provider, entry.model, entry.action, entry.tag]);
 		const into = wholes.get(id) ?? { ...entry, whole: empty() };
 		add(into.whole, measuresOf(row));
 		wholes.set(id, into);
+		weigh(`pair:${id}`, row);
 	}
 	const untagged: AiGatewayFlow[] = [];
-	for (const [id, { gateway, provider, model, action, whole }] of wholes) {
+	for (const [id, { gateway, provider, model, action, tag, whole }] of wholes) {
 		const seen = covered.get(id) ?? empty();
 		const requests = whole.requests - seen.requests;
 		if (requests <= 0) continue;
@@ -1033,6 +1066,8 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 			provider,
 			model,
 			action,
+			tag,
+			p95: p95Of(`pair:${id}`),
 			requests,
 			tokens: left(whole.tokens, seen.tokens),
 			cost: left(whole.cost, seen.cost),
@@ -1040,6 +1075,7 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 			cached: left(whole.cached, seen.cached),
 		});
 	}
+	for (const [path, flow] of byPath) flow.p95 = p95Of(path);
 	return [...byPath.values(), ...untagged].sort((a, b) => b.requests - a.requests);
 }
 
@@ -1297,6 +1333,8 @@ export async function fetchAiGatewayUsage(
 	}
 	// Per user, values as sent (the decision recorded at USER_TAG_KEY), with what nobody tagged.
 	const hasUsers = Boolean(md.metadataValue && md.metadataKeys);
+	// The query reads each path's tag value only when a tag key is picked and the schema can say it.
+	const flowTagged = Boolean(tag && md.metadataValue && md.metadataKeys);
 	const byUser = hasUsers ? withUntagged(foldBreakdown(account?.byUser || [], md.metadataValue as string, md, userLabel), totals) : null;
 
 	const prevRow = account?.previous?.[0];
@@ -1336,8 +1374,8 @@ export async function fetchAiGatewayUsage(
 		sessionHealth,
 		tags,
 		byUser,
-		flows: hasUsers && md.gateway && md.model ? foldFlows(account?.flows || [], account?.flowPairs || [], md) : null,
-		previousFlows: hasUsers && md.gateway && md.model ? foldFlows(account?.prev_flows || [], account?.prev_flowPairs || [], md) : null,
+		flows: hasUsers && md.gateway && md.model ? foldFlows(account?.flows || [], account?.flowPairs || [], md, flowTagged) : null,
+		previousFlows: hasUsers && md.gateway && md.model ? foldFlows(account?.prev_flows || [], account?.prev_flowPairs || [], md, flowTagged) : null,
 		recent: foldRecent(account?.recent || [], fields.requests),
 		previous,
 		previousWindow: prev,

@@ -136,6 +136,10 @@ export interface AiGatewayFlow {
 	model: string;
 	/** What AI Gateway did: Passed, From cache, Blocked, Rate limited, Cancelled or Failed. */
 	action: string | null;
+	/** The page's tag key's value on the path; null when no tag key is picked. */
+	tag: string | null;
+	/** p95 latency in ms (an estimate where groups fold); null where not reported. */
+	p95: number | null;
 	requests: number;
 	tokens: number | null;
 	cost: number | null;
