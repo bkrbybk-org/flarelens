@@ -1,26 +1,49 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { FOCUS_RING, MUTED, CARD, SECTION_TITLE, SELECT_SM } from "../../lib/ui";
+import { downloadCsv, toCsv } from "../../lib/csv";
 import { OTHER, OTHER_COLOR, STACK_COLORS } from "./stack";
-import { UNDRILLABLE, type AiGatewayFlow } from "./types";
+import { UNDRILLABLE, compactCount, formatCost, type AiGatewayFlow } from "./types";
 
 /**
- * Who uses which gateway for which model: users on the left, gateways in the middle, models on
- * the right, each band as wide as its share of the charted measure.
+ * Who uses which gateway for which model: by default users on the left, gateways in the middle,
+ * models on the right, each band as wide as its share of the charted measure. The columns can be
+ * reordered to start from the model, or widened with the provider between gateway and model.
  *
- * Every row is a whole user → gateway → model path, so pointing at a node lights the exact paths
- * through it — a model on the right shows which users reach it and by which gateways, not just
- * the gateways next to it. A band traces the same way: the paths along that one segment. A click
- * (or tap, or Enter) pins the trace so it holds while you talk over it, with a button to drill
- * into what it names — one filter for a node, two or three at once for a band; Esc or Clear lets go.
+ * Every row is a whole path, so pointing at a node lights the exact paths through it — a model on
+ * the right shows which users reach it and by which gateways, not just the gateways next to it. A
+ * band traces the same way: the paths along that one segment. A click (or tap, or Enter) pins the
+ * trace so it holds while you talk over it, with a button to drill into what it names — one filter
+ * for a node, two or three at once for a band; Esc or Clear lets go.
  *
- * Bands can be coloured by user, or by the health of the path they carry — its error rate or its
- * gateway cache hit rate — so a failing user → gateway → model combination shows up red. Against
- * the window before, a path seen for the first time is outlined, and new and quiet paths are listed.
+ * Bands are coloured by one column (the user, by default), and each band carries that column's key
+ * the whole way across, so a colour can be followed from end to end. They can instead be coloured
+ * by the health of the path they carry — its error rate or its gateway cache hit rate — so a
+ * failing combination shows up red. Against the window before, a path seen for the first time is
+ * outlined, and new and quiet paths are listed.
+ *
+ * For a screen across a room, the three biggest bands carry their figure, and paths under 1% or 5%
+ * can be left out. A table lists every path with all its figures, and exports as CSV.
  */
 
-export type FlowColumn = "user" | "gateway" | "model";
-const COLUMNS: FlowColumn[] = ["user", "gateway", "model"];
-const COLUMN_LABEL: Record<FlowColumn, string> = { user: "User", gateway: "Gateway", model: "Model" };
+export type FlowColumn = "user" | "gateway" | "provider" | "model";
+const COLUMN_LABEL: Record<FlowColumn, string> = { user: "User", gateway: "Gateway", provider: "Provider", model: "Model" };
+
+/** The column orders on offer; the provider one only where the schema reports a provider. */
+export const FLOW_LAYOUTS: { id: string; columns: FlowColumn[] }[] = [
+	{ id: "user-gateway-model", columns: ["user", "gateway", "model"] },
+	{ id: "user-gateway-provider-model", columns: ["user", "gateway", "provider", "model"] },
+	{ id: "model-gateway-user", columns: ["model", "gateway", "user"] },
+];
+const layoutName = (columns: FlowColumn[]) => columns.map((c, i) => (i ? COLUMN_LABEL[c].toLowerCase() : COLUMN_LABEL[c])).join(" → ");
+
+/** Paths smaller than this share of the measure can be left out, to cut clutter on a big screen. */
+const CUTOFFS = [
+	{ share: 0, label: "All paths" },
+	{ share: 0.01, label: "Hide under 1%" },
+	{ share: 0.05, label: "Hide under 5%" },
+];
+/** How many of the biggest bands carry their figure. */
+const FIGURES = 3;
 
 /** More nodes than this in a column fold into "Other", so the diagram stays readable. */
 const TOP = 8;
@@ -36,17 +59,27 @@ interface Node {
 	h: number;
 }
 
-/** What is traced: a node, or one band — a user's traffic along one segment between two columns. */
-type Selection = { kind: "node"; column: FlowColumn; key: string } | { kind: "band"; user: string; fromColumn: FlowColumn; from: string; toColumn: FlowColumn; to: string };
-/** The filters a drill applies: one for a node, up to all three for a band. */
+type Path = Record<FlowColumn, string>;
+const pathOf = (f: AiGatewayFlow): Path => ({ user: f.user, gateway: f.gateway, provider: f.provider ?? "(unknown)", model: f.model });
+
+/**
+ * What is traced: a node, or one band — one key of the band's thread column (the colour column,
+ * or the first) along one segment between two neighbouring columns.
+ */
+type Selection =
+	| { kind: "node"; column: FlowColumn; key: string }
+	| { kind: "band"; thread: FlowColumn; key: string; fromColumn: FlowColumn; from: string; toColumn: FlowColumn; to: string };
+/** The filters a drill applies: one for a node, up to three for a band, all four for a table row. */
 export type FlowDrill = Partial<Record<FlowColumn, string>>;
 
 const sameSelection = (a: Selection | null, b: Selection | null) => JSON.stringify(a) === JSON.stringify(b);
-const pathKey = (f: { user: string; gateway: string; model: string }) => JSON.stringify([f.user, f.gateway, f.model]);
+const pathKey = (f: AiGatewayFlow) => JSON.stringify([f.user, f.gateway, f.provider, f.model]);
 /** How many new or quiet paths are listed before "and N more". */
 const CHANGES_SHOWN = 4;
 
-export type FlowColour = "user" | "errors" | "cache";
+export type FlowColour = FlowColumn | "errors" | "cache";
+type HealthColour = "errors" | "cache";
+const isHealth = (c: FlowColour): c is HealthColour => c === "errors" || c === "cache";
 
 /** Requests, failures and cache hits behind a band or node, for its health. null: not reported. */
 interface Health {
@@ -66,7 +99,7 @@ const addHealth = (into: Health, from: Health) => {
  * up to 5% worth a look, above that failing; a cache serving half the requests is working, a
  * tenth some, less than that hardly at all — grey rather than red, since not caching is a choice.
  */
-export const HEALTH_STEPS: Record<Exclude<FlowColour, "user">, { color: string; label: string; test: (rate: number) => boolean }[]> = {
+export const HEALTH_STEPS: Record<HealthColour, { color: string; label: string; test: (rate: number) => boolean }[]> = {
 	errors: [
 		{ color: "#16a34a", label: "under 1% errors", test: (r) => r < 0.01 },
 		{ color: "#d97706", label: "1–5%", test: (r) => r < 0.05 },
@@ -79,12 +112,12 @@ export const HEALTH_STEPS: Record<Exclude<FlowColour, "user">, { color: string; 
 	],
 };
 
-function healthRate(h: Health, by: Exclude<FlowColour, "user">): number | null {
+function healthRate(h: Health, by: HealthColour): number | null {
 	const part = by === "errors" ? h.errors : h.cached;
 	return part === null || h.requests <= 0 ? null : part / h.requests;
 }
 
-function healthColor(h: Health, by: Exclude<FlowColour, "user">): string {
+function healthColor(h: Health, by: HealthColour): string {
 	const rate = healthRate(h, by);
 	return rate === null ? OTHER_COLOR : HEALTH_STEPS[by].find((step) => step.test(rate))!.color;
 }
@@ -117,12 +150,14 @@ function useWidth(): [RefObject<HTMLDivElement | null>, number] {
 }
 
 /** Each column's keys, busiest first, the tail folded into "Other". */
-function topKeys(flows: { path: Record<FlowColumn, string>; value: number }[], column: FlowColumn): Set<string> {
+function topKeys(flows: { path: Path; value: number }[], column: FlowColumn): Set<string> {
 	const totals = new Map<string, number>();
 	for (const f of flows) totals.set(f.path[column], (totals.get(f.path[column]) ?? 0) + f.value);
 	const sorted = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key);
 	return new Set(sorted.length <= TOP + 1 ? sorted : sorted.slice(0, TOP));
 }
+
+const TOGGLE = `rounded-md px-2 py-0.5 ${FOCUS_RING}`;
 
 export function FlowSankey({
 	flows,
@@ -145,64 +180,118 @@ export function FlowSankey({
 	const [hovered, setHovered] = useState<Selection | null>(null);
 	const [pinned, setPinned] = useState<Selection | null>(null);
 	const [colourBy, setColourBy] = useState<FlowColour>("user");
+	const [layoutId, setLayoutId] = useState(FLOW_LAYOUTS[0].id);
+	const [cutoff, setCutoff] = useState(0);
+	const [view, setView] = useState<"diagram" | "table">("diagram");
 	const [boxRef, W] = useWidth();
+
+	// The provider column is offered only where the schema reports one per path.
+	const hasProvider = flows.some((f) => f.provider !== null);
+	const layouts = FLOW_LAYOUTS.filter((l) => hasProvider || !l.columns.includes("provider"));
+	const layout = layouts.find((l) => l.id === layoutId) ?? layouts[0];
+	const cols = layout.columns;
+	const first = cols[0];
+
 	// Geometry in real px. Labels are 0.75rem; each side keeps room for one, up to 17rem or 30% of
 	// the width, and a label longer than its room is cut with an ellipsis (full name on hover).
 	const font = 0.75 * rootPx();
 	const LABEL_ROOM = Math.min(17 * rootPx(), W * 0.3);
-	const X: Record<FlowColumn, number> = { user: LABEL_ROOM, gateway: (W - NODE_W) / 2, model: W - LABEL_ROOM - NODE_W };
-	// Room for a label in px: either margin for users and models, the gap up to the model column for
-	// gateways. The name is cut to what fits beside its value, which is never cut.
-	const room: Record<FlowColumn, number> = { user: LABEL_ROOM - 10, gateway: X.model - X.gateway - NODE_W - 14, model: LABEL_ROOM - 10 };
+	// Columns spaced evenly between the two label margins.
+	const span = W - 2 * LABEL_ROOM - NODE_W;
+	const X = Object.fromEntries(cols.map((c, i) => [c, LABEL_ROOM + (span * i) / (cols.length - 1)])) as Record<FlowColumn, number>;
+	// Room for a label in px: either margin for the outer columns. A middle column's labels run into
+	// the gap to the next one: its near half when the gap is wide, so the far half can carry a band's
+	// figure; the whole gap when it is narrow, where names matter more and figures stay in the first
+	// gap, which no label reaches.
+	const gapW = span / (cols.length - 1) - NODE_W;
+	const wideGaps = gapW >= 20 * rootPx();
+	const room = Object.fromEntries(
+		cols.map((c, i) => [c, i === 0 || i === cols.length - 1 ? LABEL_ROOM - 10 : wideGaps ? gapW / 2 - 8 : gapW - 14]),
+	) as Record<FlowColumn, number>;
 	// In a narrow card names matter more than figures: the value moves to the tooltip.
 	const showValues = W >= 640;
+	// A column too tight for a readable name beside its value drops the value too (it stays in the tooltip).
 	const fit = (column: FlowColumn, name: string, value: string) => {
-		const suffix = showValues ? ` · ${value}` : "";
-		const chars = Math.max(4, Math.floor(room[column] / (font * 0.6)) - suffix.length);
+		const fits = Math.floor(room[column] / (font * 0.6));
+		const suffix = showValues && fits - value.length - 3 >= Math.min(name.length, 8) ? ` · ${value}` : "";
+		const chars = Math.max(4, fits - suffix.length);
 		return `${name.length > chars ? `${name.slice(0, chars - 1)}…` : name}${suffix}`;
 	};
 	// A node is never given less height than a line of its label, so neighbours' labels cannot overlap.
 	const SLOT = Math.ceil(font * 1.5);
 
-	// Health colours are offered only for what the schema reports per path.
+	// Colour by any shown column; health colours only for what the schema reports per path.
 	const colourOptions: { id: FlowColour; label: string }[] = [
-		{ id: "user", label: "User" },
+		...cols.map((c) => ({ id: c as FlowColour, label: COLUMN_LABEL[c] })),
 		...(flows.some((f) => f.errors !== null) ? [{ id: "errors" as const, label: "Error rate" }] : []),
 		...(flows.some((f) => f.cached !== null) ? [{ id: "cache" as const, label: "Cache hit rate" }] : []),
 	];
-	const colour: FlowColour = colourOptions.some((o) => o.id === colourBy) ? colourBy : "user";
+	const colour: FlowColour = colourOptions.some((o) => o.id === colourBy) ? colourBy : first;
+	// The column whose key a band carries across: the colour column, or the first for health colours.
+	const thread: FlowColumn = isHealth(colour) ? first : colour;
 	const valueOf = (f: AiGatewayFlow) => (measure === "cost" ? f.cost : measure === "tokens" ? f.tokens : measure === "errors" ? f.errors : f.requests) ?? 0;
 
 	// Against the window before. Said only when that window had traffic to compare with — against
 	// an empty one every path would read as new.
 	const before = previousFlows?.length ? new Set(previousFlows.map(pathKey)) : null;
 	const nowSeen = new Set(flows.map(pathKey));
-	const newPaths = before ? flows.filter((f) => !before.has(pathKey(f)) && valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a)) : [];
+	const isNewPath = (f: AiGatewayFlow) => Boolean(before) && !before!.has(pathKey(f));
+	const newPaths = before ? flows.filter((f) => isNewPath(f) && valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a)) : [];
 	const quietPaths = before ? previousFlows!.filter((f) => !nowSeen.has(pathKey(f)) && valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a)) : [];
 	// An outline marks the exception. When most paths are new (tagging only just started, say),
 	// outlining most of the diagram would mark nothing, so the list says so instead.
 	const outlineNew = Boolean(before) && newPaths.length * 2 <= flows.filter((f) => valueOf(f) > 0).length;
-	// A band is new when no path of the window before ran along the same user and segment.
+	// A band is new when no path of the window before ran along the same thread key and segment.
+	const segmentId = (key: string, from: FlowColumn, a: string, to: FlowColumn, b: string) => JSON.stringify([key, from, a, to, b]);
 	const seenSegments = new Set(
-		(previousFlows ?? []).flatMap((f) => [JSON.stringify([f.user, "user", f.user, "gateway", f.gateway]), JSON.stringify([f.user, "gateway", f.gateway, "model", f.model])]),
+		(previousFlows ?? []).flatMap((f) => {
+			const p = pathOf(f);
+			return cols.slice(1).map((to, i) => segmentId(p[thread], cols[i], p[cols[i]], to, p[to]));
+		}),
 	);
 
 	const valued = flows
-		.map((f) => ({
-			path: { user: f.user, gateway: f.gateway, model: f.model },
-			value: valueOf(f),
-			health: { requests: f.requests, errors: f.errors, cached: f.cached } as Health,
-		}))
+		.map((f) => ({ path: pathOf(f), value: valueOf(f), health: { requests: f.requests, errors: f.errors, cached: f.cached } as Health }))
 		.filter((f) => f.value > 0);
-	const kept = Object.fromEntries(COLUMNS.map((c) => [c, topKeys(valued, c)])) as Record<FlowColumn, Set<string>>;
-	const paths = valued.map((f) => ({
+	const wholeTotal = valued.reduce((n, p) => n + p.value, 0);
+	// Paths under the cut-off are left out of the diagram (never out of the table or the export).
+	const drawn = cutoff > 0 ? valued.filter((f) => f.value >= cutoff * wholeTotal) : valued;
+	const hidden = { count: valued.length - drawn.length, value: wholeTotal - drawn.reduce((n, p) => n + p.value, 0) };
+	const kept = Object.fromEntries(cols.map((c) => [c, topKeys(drawn, c)])) as Record<FlowColumn, Set<string>>;
+	const paths = drawn.map((f) => ({
 		value: f.value,
 		health: f.health,
-		path: Object.fromEntries(COLUMNS.map((c) => [c, kept[c].has(f.path[c]) ? f.path[c] : OTHER])) as Record<FlowColumn, string>,
+		path: { ...f.path, ...Object.fromEntries(cols.map((c) => [c, kept[c].has(f.path[c]) ? f.path[c] : OTHER])) } as Path,
 	}));
 	const total = paths.reduce((n, p) => n + p.value, 0);
 	const measureName = measure === "cost" ? "spend" : measure;
-	const pathText = (f: AiGatewayFlow) => `${label("user", f.user)} → ${label("gateway", f.gateway)} → ${label("model", f.model)}`;
+	const pathText = (f: AiGatewayFlow) => cols.map((c) => label(c, pathOf(f)[c])).join(" → ");
+	const pathTitle = (f: AiGatewayFlow) => cols.map((c) => pathOf(f)[c]).join(" → ");
+
+	// Every path for the table and the export, by the charted measure, then by requests.
+	const rows = [...flows].filter((f) => f.requests > 0 || valueOf(f) > 0).sort((a, b) => valueOf(b) - valueOf(a) || b.requests - a.requests);
+	const rowDrill = (f: AiGatewayFlow): FlowDrill => {
+		const p = pathOf(f);
+		const drill: FlowDrill = {};
+		for (const c of cols) if (p[c] !== OTHER && !UNDRILLABLE.has(p[c])) drill[c] = p[c];
+		return drill;
+	};
+	const has = { tokens: flows.some((f) => f.tokens !== null), cost: flows.some((f) => f.cost !== null), errors: flows.some((f) => f.errors !== null), cached: flows.some((f) => f.cached !== null) };
+	const exportCsv = () => {
+		const csv = toCsv(rows, [
+			{ header: "user", value: (f) => f.user },
+			{ header: "gateway", value: (f) => f.gateway },
+			...(hasProvider ? [{ header: "provider", value: (f: AiGatewayFlow) => f.provider ?? "" }] : []),
+			{ header: "model", value: (f) => f.model },
+			{ header: "requests", value: (f) => f.requests },
+			{ header: "tokens", value: (f) => f.tokens ?? "" },
+			{ header: "cost_usd", value: (f) => f.cost ?? "" },
+			{ header: "errors", value: (f) => f.errors ?? "" },
+			{ header: "cached", value: (f) => f.cached ?? "" },
+			...(before ? [{ header: "new_this_window", value: (f: AiGatewayFlow) => (isNewPath(f) ? "yes" : "no") }] : []),
+		]);
+		downloadCsv(`flarelens-ai-gateway-paths-${new Date().toISOString().slice(0, 10)}.csv`, csv);
+	};
 
 	const changes =
 		before && (newPaths.length > 0 || quietPaths.length > 0) ? (
@@ -222,7 +311,7 @@ export function FlowSankey({
 								<ul className="space-y-0.5">
 									{list.slice(0, CHANGES_SHOWN).map((f) => (
 										<li key={pathKey(f)} className="flex gap-2">
-											<span className="min-w-0 flex-1 truncate" title={`${f.user} → ${f.gateway} → ${f.model}`}>
+											<span className="min-w-0 flex-1 truncate" title={pathTitle(f)}>
 												{pathText(f)}
 											</span>
 											<span className="shrink-0 tabular-nums">{format(valueOf(f))}</span>
@@ -242,146 +331,129 @@ export function FlowSankey({
 			</div>
 		) : null;
 
-	if (!total) {
-		return (
-			<section className={CARD} aria-labelledby="aig-flows-title">
-				<h2 id="aig-flows-title" className={SECTION_TITLE}>Who uses what</h2>
-				<p className={`py-8 text-center text-sm ${MUTED}`}>No user → gateway → model {measureName} to show in this window.</p>
-				{changes}
-			</section>
-		);
-	}
+	const controls = (
+		<div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+			{view === "diagram" && (
+				<>
+					<label className="flex items-center gap-1.5">
+						<span className={MUTED}>Columns</span>
+						<select value={layout.id} onChange={(e) => setLayoutId(e.target.value)} className={SELECT_SM}>
+							{layouts.map((l) => (
+								<option key={l.id} value={l.id}>{layoutName(l.columns)}</option>
+							))}
+						</select>
+					</label>
+					<label className="flex items-center gap-1.5">
+						<span className={MUTED}>Colour by</span>
+						<select value={colour} onChange={(e) => setColourBy(e.target.value as FlowColour)} className={SELECT_SM}>
+							{colourOptions.map((o) => (
+								<option key={o.id} value={o.id}>{o.label}</option>
+							))}
+						</select>
+					</label>
+					<label className="flex items-center gap-1.5">
+						<span className={MUTED}>Small paths</span>
+						<select value={cutoff} onChange={(e) => setCutoff(Number(e.target.value))} className={SELECT_SM}>
+							{CUTOFFS.map((c) => (
+								<option key={c.share} value={c.share}>{c.label}</option>
+							))}
+						</select>
+					</label>
+				</>
+			)}
+			<span role="group" aria-label="View" className="flex rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-700">
+				{(["diagram", "table"] as const).map((v) => (
+					<button
+						key={v}
+						type="button"
+						aria-pressed={view === v}
+						onClick={() => setView(v)}
+						className={`${TOGGLE} ${view === v ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900" : "hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+					>
+						{v === "diagram" ? "Diagram" : "Table"}
+					</button>
+				))}
+			</span>
+			<button type="button" onClick={exportCsv} className={`rounded-md border border-zinc-200 px-2.5 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 ${FOCUS_RING}`}>
+				Export CSV
+			</button>
+		</div>
+	);
 
-	// Node order and size per column; every column sums to the same total, so one scale fits all.
-	const keysOf = (column: FlowColumn) => {
-		const sums = new Map<string, number>();
-		for (const p of paths) sums.set(p.path[column], (sums.get(p.path[column]) ?? 0) + p.value);
-		// "Other" and the untagged remainder sit last, whatever their size.
-		const last = (key: string) => key === OTHER || UNDRILLABLE.has(key);
-		return [...sums.entries()].sort((a, b) => Number(last(a[0])) - Number(last(b[0])) || b[1] - a[1]);
-	};
-	const sorted = Object.fromEntries(COLUMNS.map((c) => [c, keysOf(c)])) as Record<FlowColumn, [string, number][]>;
-	const most = Math.max(...COLUMNS.map((c) => sorted[c].length));
-	// Bands share one scale; the plot is as tall as the busiest column needs, at least 14rem.
-	const target = Math.max(14 * rootPx(), most * (SLOT + GAP) * 1.6);
-	const scale = Math.min(...COLUMNS.map((c) => (target - GAP * (sorted[c].length - 1)) / total));
-	const advance = (value: number) => Math.max(value * scale, SLOT) + GAP;
-	const extent = (c: FlowColumn) => sorted[c].reduce((n, [, v]) => n + advance(v), 0) - GAP;
-	const H = Math.ceil(Math.max(...COLUMNS.map(extent)));
-	const nodes = Object.fromEntries(
-		COLUMNS.map((c) => {
-			// Centre a shorter column vertically against the tallest; a node below a line's height
-			// keeps its true thickness but takes a line's room.
-			let y = (H - extent(c)) / 2;
-			const list = sorted[c].map(([key, value]) => {
-				const h = Math.max(1, value * scale);
-				const room = Math.max(h, SLOT);
-				const node: Node = { key, value, y: y + (room - h) / 2, h };
-				y += room + GAP;
-				return node;
-			});
-			return [c, new Map(list.map((n) => [n.key, n]))];
-		}),
-	) as Record<FlowColumn, Map<string, Node>>;
-	const order = (column: FlowColumn, key: string) => [...nodes[column].keys()].indexOf(key);
-	const userColor = (key: string) => (key === OTHER || UNDRILLABLE.has(key) ? OTHER_COLOR : STACK_COLORS[order("user", key) % STACK_COLORS.length]);
-	// Health per node, summed over the paths through it.
-	const nodeHealth = (column: FlowColumn, key: string) => {
-		const h: Health = { requests: 0, errors: null, cached: null };
-		for (const p of paths) if (p.path[column] === key) addHealth(h, p.health);
-		return h;
-	};
-	const healthNote = (h: Health) => {
-		if (colour === "user") return "";
-		const rate = healthRate(h, colour);
-		return rate === null ? "" : ` · ${pctText(rate)} ${colour === "errors" ? "errors" : "from cache"}`;
-	};
+	const pct = (part: number | null, whole: number) => (part === null ? "—" : whole > 0 ? pctText(part / whole) : "—");
+	const table = (
+		<div className="max-h-[32rem] overflow-auto">
+			<table className="w-full text-left text-xs" aria-label="Every path">
+				<thead className={`sticky top-0 bg-white dark:bg-zinc-900 ${MUTED}`}>
+					<tr>
+						{cols.map((c) => (
+							<th key={c} scope="col" className="py-1.5 pr-3 font-medium">{COLUMN_LABEL[c]}</th>
+						))}
+						<th scope="col" className="py-1.5 pr-3 text-right font-medium">Requests</th>
+						{has.tokens && <th scope="col" className="py-1.5 pr-3 text-right font-medium">Tokens</th>}
+						{has.cost && <th scope="col" className="py-1.5 pr-3 text-right font-medium">Spend</th>}
+						{has.errors && <th scope="col" className="py-1.5 pr-3 text-right font-medium">Errors</th>}
+						{has.cached && <th scope="col" className="py-1.5 pr-3 text-right font-medium">From cache</th>}
+						{onPick && <th scope="col" className="py-1.5"><span className="sr-only">Drill</span></th>}
+					</tr>
+				</thead>
+				<tbody>
+					{rows.map((f) => {
+						const p = pathOf(f);
+						const drill = rowDrill(f);
+						const parts = cols.filter((c) => drill[c]);
+						return (
+							<tr key={pathKey(f)} className="border-t border-zinc-100 dark:border-zinc-800">
+								{cols.map((c, i) => (
+									<td key={c} className="max-w-[16rem] truncate py-1.5 pr-3" title={p[c]}>
+										{label(c, p[c])}
+										{i === 0 && isNewPath(f) && <span className="ml-1.5 rounded bg-cf/10 px-1 text-[0.625rem] font-medium text-cf">new</span>}
+									</td>
+								))}
+								<td className="py-1.5 pr-3 text-right tabular-nums">{compactCount(f.requests)}</td>
+								{has.tokens && <td className="py-1.5 pr-3 text-right tabular-nums">{compactCount(f.tokens)}</td>}
+								{has.cost && <td className="py-1.5 pr-3 text-right tabular-nums">{formatCost(f.cost)}</td>}
+								{has.errors && (
+									<td className="py-1.5 pr-3 text-right tabular-nums">
+										{compactCount(f.errors)} <span className={MUTED}>({pct(f.errors, f.requests)})</span>
+									</td>
+								)}
+								{has.cached && <td className="py-1.5 pr-3 text-right tabular-nums">{pct(f.cached, f.requests)}</td>}
+								{onPick && (
+									<td className="py-1.5 text-right">
+										{parts.length > 0 && (
+											<button type="button" onClick={() => onPick(drill)} aria-label={`Drill into ${parts.map((c) => label(c, drill[c]!)).join(" · ")}`} className={`text-cf hover:underline ${FOCUS_RING}`}>
+												Drill
+											</button>
+										)}
+									</td>
+								)}
+							</tr>
+						);
+					})}
+				</tbody>
+			</table>
+			<p className={`mt-2 text-xs ${MUTED}`}>
+				{rows.length} {rows.length === 1 ? "path" : "paths"}, busiest by {measureName} first; every path, whatever the diagram folds or leaves out.
+			</p>
+		</div>
+	);
 
-	// Whether a path runs through what is traced.
-	const through = (sel: Selection, p: (typeof paths)[number]) =>
-		sel.kind === "node" ? p.path[sel.column] === sel.key : p.path.user === sel.user && p.path[sel.fromColumn] === sel.from && p.path[sel.toColumn] === sel.to;
-
-	// The two link stages, aggregated, each band keyed by its user so it carries the user's colour
-	// across the gateway: user → gateway, then (user, gateway) → model.
-	const stage = (from: FlowColumn, to: FlowColumn, active: Selection | null) => {
-		const bands = new Map<string, { user: string; from: string; to: string; value: number; lit: number; health: Health }>();
-		for (const p of paths) {
-			const id = JSON.stringify([p.path.user, p.path[from], p.path[to]]);
-			const band = bands.get(id) ?? { user: p.path.user, from: p.path[from], to: p.path[to], value: 0, lit: 0, health: { requests: 0, errors: null, cached: null } };
-			band.value += p.value;
-			addHealth(band.health, p.health);
-			if (!active || through(active, p)) band.lit += p.value;
-			bands.set(id, band);
-		}
-		// Stack bands at each end in the order of the node at the other end, so they cross least.
-		const list = [...bands.values()];
-		const outOffset = new Map<string, number>();
-		const inOffset = new Map<string, number>();
-		const placed = list
-			.map((b) => ({ ...b }))
-			.sort((a, b) => order(to, a.to) - order(to, b.to) || order("user", a.user) - order("user", b.user))
-			.map((b) => {
-				const offset = outOffset.get(b.from) ?? 0;
-				outOffset.set(b.from, offset + b.value * scale);
-				return { ...b, y0: nodes[from].get(b.from)!.y + offset };
-			})
-			.sort((a, b) => order(from, a.from) - order(from, b.from) || order("user", a.user) - order("user", b.user))
-			.map((b) => {
-				const offset = inOffset.get(b.to) ?? 0;
-				inOffset.set(b.to, offset + b.value * scale);
-				return { ...b, y1: nodes[to].get(b.to)!.y + offset };
-			});
-		return placed.map((b) => {
-			const selection: Selection = { kind: "band", user: b.user, fromColumn: from, from: b.from, toColumn: to, to: b.to };
-			const folded = b.user === OTHER || b.from === OTHER || b.to === OTHER;
-			const isNew = outlineNew && !folded && !seenSegments.has(JSON.stringify([b.user, from, b.from, to, b.to]));
-			return { ...b, selection, isNew, fromColumn: from, toColumn: to, x0: X[from] + NODE_W, x1: X[to] };
-		});
-	};
-
-	// A pin on something no longer drawn (another window, another measure) is simply not shown.
-	const drawnBands = [...stage("user", "gateway", null), ...stage("gateway", "model", null)];
-	const shown = (sel: Selection | null): Selection | null =>
-		!sel ? null : sel.kind === "node" ? (nodes[sel.column].has(sel.key) ? sel : null) : drawnBands.some((b) => sameSelection(b.selection, sel)) ? sel : null;
-	const pin = shown(pinned);
-	const active = pin ?? shown(hovered);
-	const bands = active ? [...stage("user", "gateway", active), ...stage("gateway", "model", active)] : drawnBands;
-
-	const bandColor = (b: (typeof bands)[number]) => (colour === "user" ? userColor(b.user) : healthColor(b.health, colour));
-	const ribbon = (x0: number, y0: number, x1: number, y1: number, h: number) => {
-		const mid = (x0 + x1) / 2;
-		return `M${x0},${y0} C${mid},${y0} ${mid},${y1} ${x1},${y1} L${x1},${y1 + h} C${mid},${y1 + h} ${mid},${y0 + h} ${x0},${y0 + h} Z`;
-	};
-	const drillable = (key: string) => key !== OTHER && !UNDRILLABLE.has(key);
-	const counts = COLUMNS.map((c) => `${nodes[c].size} ${COLUMN_LABEL[c].toLowerCase()}${nodes[c].size === 1 ? "" : "s"}`).join(", ");
-	const toggle = (sel: Selection) => setPinned((now) => (sameSelection(now, sel) ? null : sel));
-	const pressKeys = (sel: Selection) => (e: React.KeyboardEvent) => {
-		if (e.key === "Enter" || e.key === " ") {
-			e.preventDefault();
-			toggle(sel);
-		}
-	};
-
-	// What a selection says and drills into. A band carries its user, so its drill is the user (when
-	// drillable) plus both ends; anything folded or untagged is left out of the filter.
-	const describe = (sel: Selection) => {
-		if (sel.kind === "node") {
-			const node = nodes[sel.column].get(sel.key)!;
-			return {
-				title: `${COLUMN_LABEL[sel.column].toLowerCase()} ${label(sel.column, sel.key)}`,
-				value: node.value,
-				health: nodeHealth(sel.column, sel.key),
-				drill: drillable(sel.key) ? ({ [sel.column]: sel.key } as FlowDrill) : {},
-			};
-		}
-		const band = drawnBands.find((b) => sameSelection(b.selection, sel))!;
-		const drill: FlowDrill = {};
-		for (const [column, key] of [["user", sel.user], [sel.fromColumn, sel.from], [sel.toColumn, sel.to]] as [FlowColumn, string][]) if (drillable(key)) drill[column] = key;
-		const ends = `${label(sel.fromColumn, sel.from)} → ${label(sel.toColumn, sel.to)}`;
-		return { title: sel.fromColumn === "user" ? ends : `${label("user", sel.user)}: ${ends}`, value: band.value, health: band.health, drill };
-	};
-	const pinInfo = pin ? describe(pin) : null;
-	const drillParts = pinInfo ? (COLUMNS.filter((c) => pinInfo.drill[c]) as FlowColumn[]) : [];
+	const header = (
+		<div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+			<h2 id="aig-flows-title" className={SECTION_TITLE}>Who uses what</h2>
+			<span className={`text-xs ${MUTED}`}>
+				{layoutName(cols)}, sized by {measureName}.{view === "diagram" ? " Point at or tap a node or band to trace it." : ""}
+			</span>
+			{controls}
+		</div>
+	);
+	const hiddenNote =
+		view === "diagram" && hidden.count > 0 ? (
+			<p className={`mt-2 text-xs ${MUTED}`}>
+				{hidden.count} small {hidden.count === 1 ? "path" : "paths"} ({format(hidden.value)}, under {Math.round(cutoff * 100)}% each) left out; the table lists them.
+			</p>
+		) : null;
 
 	return (
 		<section
@@ -394,167 +466,343 @@ export function FlowSankey({
 				}
 			}}
 		>
-			<div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-				<h2 id="aig-flows-title" className={SECTION_TITLE}>Who uses what</h2>
-				<span className={`text-xs ${MUTED}`}>User → gateway → model, sized by {measureName}. Point at or tap a node or band to trace it.</span>
-				{colourOptions.length > 1 && (
-					<label className="ml-auto flex items-center gap-1.5 text-xs">
-						<span className={MUTED}>Colour by</span>
-						<select value={colour} onChange={(e) => setColourBy(e.target.value as FlowColour)} className={SELECT_SM}>
-							{colourOptions.map((o) => (
-								<option key={o.id} value={o.id}>{o.label}</option>
-							))}
-						</select>
-					</label>
-				)}
-			</div>
-			{pin && pinInfo && (
-				<div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-zinc-50 px-3 py-1.5 text-xs dark:bg-zinc-950/40" role="status">
-					<span>
-						<span className={MUTED}>Tracing </span>
-						<span className="font-medium">{pinInfo.title}</span>
-						<span className={MUTED}>
-							{" "}· {format(pinInfo.value)}
-							{healthNote(pinInfo.health)}
-						</span>
-					</span>
-					<span className="ml-auto flex gap-2">
-						{onPick && drillParts.length > 0 && (
-							<button type="button" onClick={() => onPick(pinInfo.drill)} className={`rounded-md bg-cf px-2.5 py-1 font-medium text-white hover:opacity-90 ${FOCUS_RING}`}>
-								Drill into {drillParts.map((c) => label(c, pinInfo.drill[c]!)).join(" · ")}
-							</button>
-						)}
-						<button type="button" onClick={() => setPinned(null)} className={`rounded-md border border-zinc-200 px-2.5 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 ${FOCUS_RING}`}>
-							Clear <kbd className="font-mono text-[10px] text-zinc-400">Esc</kbd>
-						</button>
-					</span>
-				</div>
-			)}
-			<div className={`mb-1 grid grid-cols-3 text-xs font-medium uppercase tracking-wide ${MUTED}`} aria-hidden>
-				<span>User</span>
-				<span className="text-center">Gateway</span>
-				<span className="text-right">Model</span>
-			</div>
+			{header}
+			{/* Measured whichever view shows, so the diagram has its width the moment it is drawn. */}
 			<div ref={boxRef}>
-			<svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="block max-w-full" role="group" aria-label={`Flows from users to gateways to models: ${counts}`} onMouseLeave={() => setHovered(null)}>
-				<g>
-					{bands.map((b) => {
-						const isPinned = sameSelection(pin, b.selection);
-						const name = `${b.fromColumn === "user" ? "" : `${label("user", b.user)}: `}${label(b.fromColumn, b.from)} → ${label(b.toColumn, b.to)}`;
-						return (
-							<path
-								key={JSON.stringify(b.selection)}
-								d={ribbon(b.x0, b.y0, b.x1, b.y1, Math.max(0.5, b.value * scale))}
-								fill={bandColor(b)}
-								fillOpacity={active ? 0.08 : colour === "user" ? 0.35 : 0.55}
-								stroke={isPinned ? "currentColor" : b.isNew ? bandColor(b) : "none"}
-								strokeWidth={isPinned ? 1.5 : b.isNew ? 1.5 : 0}
-								strokeDasharray={!isPinned && b.isNew ? "5 3" : undefined}
-								className={`cursor-pointer outline-none ${isPinned ? "text-zinc-900 dark:text-white" : ""} ${FOCUS_RING}`}
-								data-band={`${b.fromColumn}:${b.from}>${b.toColumn}:${b.to}`}
-								data-new={b.isNew || undefined}
-								role="button"
-								tabIndex={0}
-								aria-pressed={isPinned}
-								aria-label={`${name}: ${format(b.value)}${healthNote(b.health)}${b.isNew ? ", new this window" : ""}. ${isPinned ? "Tracing; select again to stop" : "Select to trace"}`}
-								onMouseEnter={() => setHovered(b.selection)}
-								onFocus={() => setHovered(b.selection)}
-								onBlur={() => setHovered(null)}
-								onClick={() => toggle(b.selection)}
-								onKeyDown={pressKeys(b.selection)}
-							>
-								<title>{`${name}: ${format(b.value)}${healthNote(b.health)}${b.isNew ? " · new this window" : ""}`}</title>
-							</path>
-						);
-					})}
-					{/* The paths along what is traced, drawn over their bands at the same place. */}
-					{active &&
-						bands
-							.filter((b) => b.lit > 0)
-							.map((b) => (
-								<path key={`lit-${JSON.stringify(b.selection)}`} d={ribbon(b.x0, b.y0, b.x1, b.y1, Math.max(0.5, b.lit * scale))} fill={bandColor(b)} fillOpacity={0.75} pointerEvents="none" data-lit />
-							))}
-				</g>
-				{COLUMNS.map((column) =>
-					[...nodes[column].values()].map((node) => {
-						const sel: Selection = { kind: "node", column, key: node.key };
-						const text = fit(column, label(column, node.key), format(node.value));
-						const health = nodeHealth(column, node.key);
-						const fill = colour !== "user" ? healthColor(health, colour) : column === "user" ? userColor(node.key) : node.key === OTHER ? OTHER_COLOR : "#71717a";
-						const isPinned = sameSelection(pin, sel);
-						const isActive = sameSelection(active, sel);
-						// The node and its label, so a thin node is still easy to point at.
-						const hit = column === "user" ? { x: 0, w: X.user + NODE_W } : column === "model" ? { x: X.model, w: W - X.model } : { x: X.gateway, w: LABEL_ROOM };
-						const labelX = column === "user" ? X.user - 8 : column === "model" ? X.model + NODE_W + 8 : X.gateway + NODE_W + 6;
-						const anchor = column === "user" ? "end" : "start";
-						return (
-							<g
-								key={`${column}-${node.key}`}
-								role="button"
-								tabIndex={0}
-								aria-pressed={isPinned}
-								aria-label={`${COLUMN_LABEL[column]} ${label(column, node.key)}: ${format(node.value)}${healthNote(health)}. ${isPinned ? "Tracing; select again to stop" : "Select to trace its paths"}`}
-								className={`cursor-pointer outline-none ${FOCUS_RING}`}
-								onMouseEnter={() => setHovered(sel)}
-								onFocus={() => setHovered(sel)}
-								onBlur={() => setHovered(null)}
-								onClick={() => toggle(sel)}
-								onKeyDown={pressKeys(sel)}
-							>
-								<title>{`${label(column, node.key)}: ${format(node.value)} (${Math.round((node.value / total) * 100)}%)${healthNote(health)}`}</title>
-								<rect
-									x={X[column]}
-									y={node.y}
-									width={NODE_W}
-									height={node.h}
-									rx={2}
-									fill={fill}
-									className={isPinned ? "stroke-zinc-900 dark:stroke-white" : undefined}
-									strokeWidth={isPinned ? 2 : 0}
-								/>
-								<rect x={hit.x} y={node.y + node.h / 2 - Math.max(node.h, SLOT) / 2} width={hit.w} height={Math.max(node.h, SLOT)} fill="transparent" />
-								<text
-									x={labelX}
-									y={node.y + node.h / 2}
-									dominantBaseline="middle"
-									textAnchor={anchor}
-									className={`text-[0.75rem] ${isActive ? "font-semibold" : ""} pointer-events-none fill-zinc-700 stroke-white dark:fill-zinc-200 dark:stroke-zinc-900`}
-									strokeWidth={3}
-									paintOrder="stroke"
-								>
-									{text}
-								</text>
-							</g>
-						);
-					}),
+				{view === "table" ? (
+					table
+				) : total ? (
+					renderDiagram()
+				) : (
+					<p className={`py-8 text-center text-sm ${MUTED}`}>No {layoutName(cols).toLowerCase()} {measureName} to show in this window.</p>
 				)}
-			</svg>
 			</div>
-			{(colour !== "user" || drawnBands.some((b) => b.isNew)) && (
-				<ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Colour key">
-					{colour !== "user" && (
-						<>
-							{HEALTH_STEPS[colour].map((step) => (
-								<li key={step.label} className="flex items-center gap-1.5">
-									<span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: step.color }} />
-									{step.label}
-								</li>
-							))}
-							<li className={`flex items-center gap-1.5 ${MUTED}`}>
-								<span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: OTHER_COLOR }} />
-								not reported
-							</li>
-						</>
-					)}
-					{drawnBands.some((b) => b.isNew) && (
-						<li className="flex items-center gap-1.5">
-							<span aria-hidden className="inline-block h-2.5 w-4 rounded-sm border border-dashed border-zinc-500" />
-							new this window
-						</li>
-					)}
-				</ul>
-			)}
+			{hiddenNote}
 			{changes}
 		</section>
 	);
+
+	// The diagram itself; drawn only when there is something to draw.
+	function renderDiagram() {
+		// Node order and size per column; every column sums to the same total, so one scale fits all.
+		const keysOf = (column: FlowColumn) => {
+			const sums = new Map<string, number>();
+			for (const p of paths) sums.set(p.path[column], (sums.get(p.path[column]) ?? 0) + p.value);
+			// "Other" and the untagged remainder sit last, whatever their size.
+			const last = (key: string) => key === OTHER || UNDRILLABLE.has(key);
+			return [...sums.entries()].sort((a, b) => Number(last(a[0])) - Number(last(b[0])) || b[1] - a[1]);
+		};
+		const sorted = Object.fromEntries(cols.map((c) => [c, keysOf(c)])) as Record<FlowColumn, [string, number][]>;
+		const most = Math.max(...cols.map((c) => sorted[c].length));
+		// Bands share one scale; the plot is as tall as the busiest column needs, at least 14rem.
+		const target = Math.max(14 * rootPx(), most * (SLOT + GAP) * 1.6);
+		const scale = Math.min(...cols.map((c) => (target - GAP * (sorted[c].length - 1)) / total));
+		const advance = (value: number) => Math.max(value * scale, SLOT) + GAP;
+		const extent = (c: FlowColumn) => sorted[c].reduce((n, [, v]) => n + advance(v), 0) - GAP;
+		const H = Math.ceil(Math.max(...cols.map(extent)));
+		const nodes = Object.fromEntries(
+			cols.map((c) => {
+				// Centre a shorter column vertically against the tallest; a node below a line's height
+				// keeps its true thickness but takes a line's room.
+				let y = (H - extent(c)) / 2;
+				const list = sorted[c].map(([key, value]) => {
+					const h = Math.max(1, value * scale);
+					const slot = Math.max(h, SLOT);
+					const node: Node = { key, value, y: y + (slot - h) / 2, h };
+					y += slot + GAP;
+					return node;
+				});
+				return [c, new Map(list.map((n) => [n.key, n]))];
+			}),
+		) as Record<FlowColumn, Map<string, Node>>;
+		const order = (column: FlowColumn, key: string) => [...nodes[column].keys()].indexOf(key);
+		const catColor = (column: FlowColumn, key: string) => (key === OTHER || UNDRILLABLE.has(key) ? OTHER_COLOR : STACK_COLORS[order(column, key) % STACK_COLORS.length]);
+		// Health per node, summed over the paths through it.
+		const nodeHealth = (column: FlowColumn, key: string) => {
+			const h: Health = { requests: 0, errors: null, cached: null };
+			for (const p of paths) if (p.path[column] === key) addHealth(h, p.health);
+			return h;
+		};
+		const healthNote = (h: Health) => {
+			if (!isHealth(colour)) return "";
+			const rate = healthRate(h, colour);
+			return rate === null ? "" : ` · ${pctText(rate)} ${colour === "errors" ? "errors" : "from cache"}`;
+		};
+
+		// Whether a path runs through what is traced.
+		const through = (sel: Selection, p: (typeof paths)[number]) =>
+			sel.kind === "node" ? p.path[sel.column] === sel.key : p.path[sel.thread] === sel.key && p.path[sel.fromColumn] === sel.from && p.path[sel.toColumn] === sel.to;
+
+		// One link stage per pair of neighbouring columns, aggregated, each band keyed by its thread
+		// key so it carries that key's colour across every column.
+		const stage = (from: FlowColumn, to: FlowColumn, active: Selection | null) => {
+			const bands = new Map<string, { key: string; from: string; to: string; value: number; lit: number; health: Health }>();
+			for (const p of paths) {
+				const id = JSON.stringify([p.path[thread], p.path[from], p.path[to]]);
+				const band = bands.get(id) ?? { key: p.path[thread], from: p.path[from], to: p.path[to], value: 0, lit: 0, health: { requests: 0, errors: null, cached: null } };
+				band.value += p.value;
+				addHealth(band.health, p.health);
+				if (!active || through(active, p)) band.lit += p.value;
+				bands.set(id, band);
+			}
+			// Stack bands at each end in the order of the node at the other end, so they cross least.
+			const outOffset = new Map<string, number>();
+			const inOffset = new Map<string, number>();
+			const placed = [...bands.values()]
+				.sort((a, b) => order(to, a.to) - order(to, b.to) || order(thread, a.key) - order(thread, b.key))
+				.map((b) => {
+					const offset = outOffset.get(b.from) ?? 0;
+					outOffset.set(b.from, offset + b.value * scale);
+					return { ...b, y0: nodes[from].get(b.from)!.y + offset };
+				})
+				.sort((a, b) => order(from, a.from) - order(from, b.from) || order(thread, a.key) - order(thread, b.key))
+				.map((b) => {
+					const offset = inOffset.get(b.to) ?? 0;
+					inOffset.set(b.to, offset + b.value * scale);
+					return { ...b, y1: nodes[to].get(b.to)!.y + offset };
+				});
+			return placed.map((b) => {
+				const selection: Selection = { kind: "band", thread, key: b.key, fromColumn: from, from: b.from, toColumn: to, to: b.to };
+				const folded = b.key === OTHER || b.from === OTHER || b.to === OTHER;
+				const isNew = outlineNew && !folded && !seenSegments.has(segmentId(b.key, from, b.from, to, b.to));
+				return { ...b, selection, isNew, fromColumn: from, toColumn: to, x0: X[from] + NODE_W, x1: X[to] };
+			});
+		};
+		const stages = (active: Selection | null) => cols.slice(1).flatMap((to, i) => stage(cols[i], to, active));
+
+		// A pin on something no longer drawn (another window, measure or layout) is simply not shown.
+		const drawnBands = stages(null);
+		const shown = (sel: Selection | null): Selection | null =>
+			!sel ? null : sel.kind === "node" ? (nodes[sel.column]?.has(sel.key) ? sel : null) : drawnBands.some((b) => sameSelection(b.selection, sel)) ? sel : null;
+		const pin = shown(pinned);
+		const active = pin ?? shown(hovered);
+		const bands = active ? stages(active) : drawnBands;
+		// The biggest bands carry their figure, at the near side of the node they run into — where no
+		// label reaches. A band thinner than a line of text carries none.
+		const figures = [...drawnBands]
+			.filter((b) => b.value * scale >= SLOT && (wideGaps || b.fromColumn === first))
+			.sort((a, b) => b.value - a.value)
+			.slice(0, FIGURES);
+
+		const bandColor = (b: (typeof bands)[number]) => (isHealth(colour) ? healthColor(b.health, colour) : catColor(colour, b.key));
+		const ribbon = (x0: number, y0: number, x1: number, y1: number, h: number) => {
+			const mid = (x0 + x1) / 2;
+			return `M${x0},${y0} C${mid},${y0} ${mid},${y1} ${x1},${y1} L${x1},${y1 + h} C${mid},${y1 + h} ${mid},${y0 + h} ${x0},${y0 + h} Z`;
+		};
+		const drillable = (key: string) => key !== OTHER && !UNDRILLABLE.has(key);
+		const counts = cols.map((c) => `${nodes[c].size} ${COLUMN_LABEL[c].toLowerCase()}${nodes[c].size === 1 ? "" : "s"}`).join(", ");
+		const toggle = (sel: Selection) => setPinned((now) => (sameSelection(now, sel) ? null : sel));
+		const pressKeys = (sel: Selection) => (e: React.KeyboardEvent) => {
+			if (e.key === "Enter" || e.key === " ") {
+				e.preventDefault();
+				toggle(sel);
+			}
+		};
+		const bandName = (b: { fromColumn: FlowColumn; from: string; toColumn: FlowColumn; to: string; key: string }) =>
+			`${b.fromColumn === thread ? "" : `${label(thread, b.key)}: `}${label(b.fromColumn, b.from)} → ${label(b.toColumn, b.to)}`;
+
+		// What a selection says and drills into. A band carries its thread key, so its drill is that
+		// key (when drillable) plus both ends; anything folded or untagged is left out of the filter.
+		const describe = (sel: Selection) => {
+			if (sel.kind === "node") {
+				const node = nodes[sel.column].get(sel.key)!;
+				return {
+					title: `${COLUMN_LABEL[sel.column].toLowerCase()} ${label(sel.column, sel.key)}`,
+					value: node.value,
+					health: nodeHealth(sel.column, sel.key),
+					drill: drillable(sel.key) ? ({ [sel.column]: sel.key } as FlowDrill) : {},
+				};
+			}
+			const band = drawnBands.find((b) => sameSelection(b.selection, sel))!;
+			const drill: FlowDrill = {};
+			for (const [column, key] of [[sel.thread, sel.key], [sel.fromColumn, sel.from], [sel.toColumn, sel.to]] as [FlowColumn, string][]) if (drillable(key)) drill[column] = key;
+			return { title: bandName(band), value: band.value, health: band.health, drill };
+		};
+		const pinInfo = pin ? describe(pin) : null;
+		const drillParts = pinInfo ? cols.filter((c) => pinInfo.drill[c]) : [];
+
+		return (
+			<>
+				{pin && pinInfo && (
+					<div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-zinc-50 px-3 py-1.5 text-xs dark:bg-zinc-950/40" role="status">
+						<span>
+							<span className={MUTED}>Tracing </span>
+							<span className="font-medium">{pinInfo.title}</span>
+							<span className={MUTED}>
+								{" "}· {format(pinInfo.value)}
+								{healthNote(pinInfo.health)}
+							</span>
+						</span>
+						<span className="ml-auto flex gap-2">
+							{onPick && drillParts.length > 0 && (
+								<button type="button" onClick={() => onPick(pinInfo.drill)} className={`rounded-md bg-cf px-2.5 py-1 font-medium text-white hover:opacity-90 ${FOCUS_RING}`}>
+									Drill into {drillParts.map((c) => label(c, pinInfo.drill[c]!)).join(" · ")}
+								</button>
+							)}
+							<button type="button" onClick={() => setPinned(null)} className={`rounded-md border border-zinc-200 px-2.5 py-1 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 ${FOCUS_RING}`}>
+								Clear <kbd className="font-mono text-[10px] text-zinc-400">Esc</kbd>
+							</button>
+						</span>
+					</div>
+				)}
+				<div>
+					<div className={`relative mb-1 h-4 text-xs font-medium uppercase tracking-wide ${MUTED}`} aria-hidden>
+						{cols.map((c, i) => (
+							<span
+								key={c}
+								className="absolute top-0 whitespace-nowrap"
+								style={i === 0 ? { left: 0 } : i === cols.length - 1 ? { right: 0 } : { left: X[c] + NODE_W / 2, transform: "translateX(-50%)" }}
+							>
+								{COLUMN_LABEL[c]}
+							</span>
+						))}
+					</div>
+					<svg
+						width={W}
+						height={H}
+						viewBox={`0 0 ${W} ${H}`}
+						className="block max-w-full"
+						role="group"
+						aria-label={`Flows from ${cols.map((c) => `${COLUMN_LABEL[c].toLowerCase()}s`).join(" to ")}: ${counts}`}
+						onMouseLeave={() => setHovered(null)}
+					>
+						<g>
+							{bands.map((b) => {
+								const isPinned = sameSelection(pin, b.selection);
+								const name = bandName(b);
+								return (
+									<path
+										key={JSON.stringify(b.selection)}
+										d={ribbon(b.x0, b.y0, b.x1, b.y1, Math.max(0.5, b.value * scale))}
+										fill={bandColor(b)}
+										fillOpacity={active ? 0.08 : isHealth(colour) ? 0.55 : 0.35}
+										stroke={isPinned ? "currentColor" : b.isNew ? bandColor(b) : "none"}
+										strokeWidth={isPinned ? 1.5 : b.isNew ? 1.5 : 0}
+										strokeDasharray={!isPinned && b.isNew ? "5 3" : undefined}
+										className={`cursor-pointer outline-none ${isPinned ? "text-zinc-900 dark:text-white" : ""} ${FOCUS_RING}`}
+										data-band={`${b.fromColumn}:${b.from}>${b.toColumn}:${b.to}`}
+										data-new={b.isNew || undefined}
+										role="button"
+										tabIndex={0}
+										aria-pressed={isPinned}
+										aria-label={`${name}: ${format(b.value)}${healthNote(b.health)}${b.isNew ? ", new this window" : ""}. ${isPinned ? "Tracing; select again to stop" : "Select to trace"}`}
+										onMouseEnter={() => setHovered(b.selection)}
+										onFocus={() => setHovered(b.selection)}
+										onBlur={() => setHovered(null)}
+										onClick={() => toggle(b.selection)}
+										onKeyDown={pressKeys(b.selection)}
+									>
+										<title>{`${name}: ${format(b.value)}${healthNote(b.health)}${b.isNew ? " · new this window" : ""}`}</title>
+									</path>
+								);
+							})}
+							{/* The paths along what is traced, drawn over their bands at the same place. */}
+							{active &&
+								bands
+									.filter((b) => b.lit > 0)
+									.map((b) => (
+										<path key={`lit-${JSON.stringify(b.selection)}`} d={ribbon(b.x0, b.y0, b.x1, b.y1, Math.max(0.5, b.lit * scale))} fill={bandColor(b)} fillOpacity={0.75} pointerEvents="none" data-lit />
+									))}
+						</g>
+						<g pointerEvents="none" aria-hidden>
+							{figures.map((b) => (
+								<text
+									key={`figure-${JSON.stringify(b.selection)}`}
+									x={b.x1 - 6}
+									y={b.y1 + (b.value * scale) / 2}
+									dominantBaseline="middle"
+									textAnchor="end"
+									className="fill-zinc-900 stroke-white text-[0.75rem] font-semibold tabular-nums dark:fill-white dark:stroke-zinc-900"
+									strokeWidth={3}
+									paintOrder="stroke"
+									opacity={active && !b.lit ? 0.3 : 1}
+									data-figure={`${b.fromColumn}:${b.from}>${b.toColumn}:${b.to}`}
+								>
+									{format(b.value)}
+								</text>
+							))}
+						</g>
+						{cols.map((column, i) =>
+							[...nodes[column].values()].map((node) => {
+								const sel: Selection = { kind: "node", column, key: node.key };
+								const text = fit(column, label(column, node.key), format(node.value));
+								const health = nodeHealth(column, node.key);
+								const fill = isHealth(colour) ? healthColor(health, colour) : column === colour ? catColor(column, node.key) : node.key === OTHER ? OTHER_COLOR : "#71717a";
+								const isPinned = sameSelection(pin, sel);
+								const isActive = sameSelection(active, sel);
+								const isFirst = i === 0;
+								const isLast = i === cols.length - 1;
+								// The node and its label, so a thin node is still easy to point at.
+								const hit = isFirst ? { x: 0, w: X[column] + NODE_W } : isLast ? { x: X[column], w: W - X[column] } : { x: X[column], w: NODE_W + room[column] + 6 };
+								const labelX = isFirst ? X[column] - 8 : isLast ? X[column] + NODE_W + 8 : X[column] + NODE_W + 6;
+								return (
+									<g
+										key={`${column}-${node.key}`}
+										role="button"
+										tabIndex={0}
+										aria-pressed={isPinned}
+										aria-label={`${COLUMN_LABEL[column]} ${label(column, node.key)}: ${format(node.value)}${healthNote(health)}. ${isPinned ? "Tracing; select again to stop" : "Select to trace its paths"}`}
+										className={`cursor-pointer outline-none ${FOCUS_RING}`}
+										onMouseEnter={() => setHovered(sel)}
+										onFocus={() => setHovered(sel)}
+										onBlur={() => setHovered(null)}
+										onClick={() => toggle(sel)}
+										onKeyDown={pressKeys(sel)}
+									>
+										<title>{`${label(column, node.key)}: ${format(node.value)} (${Math.round((node.value / total) * 100)}%)${healthNote(health)}`}</title>
+										<rect
+											x={X[column]}
+											y={node.y}
+											width={NODE_W}
+											height={node.h}
+											rx={2}
+											fill={fill}
+											className={isPinned ? "stroke-zinc-900 dark:stroke-white" : undefined}
+											strokeWidth={isPinned ? 2 : 0}
+										/>
+										<rect x={hit.x} y={node.y + node.h / 2 - Math.max(node.h, SLOT) / 2} width={hit.w} height={Math.max(node.h, SLOT)} fill="transparent" />
+										<text
+											x={labelX}
+											y={node.y + node.h / 2}
+											dominantBaseline="middle"
+											textAnchor={isFirst ? "end" : "start"}
+											className={`text-[0.75rem] ${isActive ? "font-semibold" : ""} pointer-events-none fill-zinc-700 stroke-white dark:fill-zinc-200 dark:stroke-zinc-900`}
+											strokeWidth={3}
+											paintOrder="stroke"
+										>
+											{text}
+										</text>
+									</g>
+								);
+							}),
+						)}
+					</svg>
+				</div>
+				{(isHealth(colour) || drawnBands.some((b) => b.isNew)) && (
+					<ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Colour key">
+						{isHealth(colour) && (
+							<>
+								{HEALTH_STEPS[colour].map((step) => (
+									<li key={step.label} className="flex items-center gap-1.5">
+										<span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: step.color }} />
+										{step.label}
+									</li>
+								))}
+								<li className={`flex items-center gap-1.5 ${MUTED}`}>
+									<span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: OTHER_COLOR }} />
+									not reported
+								</li>
+							</>
+						)}
+						{drawnBands.some((b) => b.isNew) && (
+							<li className="flex items-center gap-1.5">
+								<span aria-hidden className="inline-block h-2.5 w-4 rounded-sm border border-dashed border-zinc-500" />
+								new this window
+							</li>
+						)}
+					</ul>
+				)}
+			</>
+		);
+	}
 }

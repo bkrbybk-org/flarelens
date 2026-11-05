@@ -576,11 +576,11 @@ describe("overview and drill-down", () => {
 		// Errors and cache hits ride along per path, so the diagram can colour a path by its health;
 		// the untagged remainder takes what the tagged rows leave of each.
 		expect(result.flows).toEqual([
-			{ user: "alice@example.com", gateway: "prod", model: "@cf/meta/llama", requests: 5, tokens: 55, cost: 0.7, errors: 1, cached: 2 },
-			{ user: "(not tagged)", gateway: "prod", model: "@cf/meta/llama", requests: 3, tokens: 33, cost: 0, errors: 2, cached: 0 },
-			{ user: "bob@example.com", gateway: "prod", model: "@cf/meta/llama", requests: 2, tokens: 22, cost: 0.1, errors: 0, cached: 0 },
-			{ user: "alice@example.com", gateway: "dev", model: "gpt-x", requests: 1, tokens: 11, cost: 0.2, errors: 0, cached: 1 },
-			{ user: "(not tagged)", gateway: "dev", model: "(unknown)", requests: 1, tokens: 0, cost: 0, errors: 1, cached: 0 },
+			{ user: "alice@example.com", gateway: "prod", provider: null, model: "@cf/meta/llama", requests: 5, tokens: 55, cost: 0.7, errors: 1, cached: 2 },
+			{ user: "(not tagged)", gateway: "prod", provider: null, model: "@cf/meta/llama", requests: 3, tokens: 33, cost: 0, errors: 2, cached: 0 },
+			{ user: "bob@example.com", gateway: "prod", provider: null, model: "@cf/meta/llama", requests: 2, tokens: 22, cost: 0.1, errors: 0, cached: 0 },
+			{ user: "alice@example.com", gateway: "dev", provider: null, model: "gpt-x", requests: 1, tokens: 11, cost: 0.2, errors: 0, cached: 1 },
+			{ user: "(not tagged)", gateway: "dev", provider: null, model: "(unknown)", requests: 1, tokens: 0, cost: 0, errors: 1, cached: 0 },
 		]);
 		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string };
 		// The user value is a variable-keyed dimension, and the tagged flows only read requests carrying the key.
@@ -588,11 +588,42 @@ describe("overview and drill-down", () => {
 		expect(query.query).toMatch(/flowPairs: \w+\(filter: \{(?![^}]*metadataKeys_has)[^}]*\}, limit: 500/);
 		// The same paths for the window before, folded the same way, so new and quiet paths can be told apart.
 		expect(result.previousFlows).toEqual([
-			{ user: "carol@example.com", gateway: "dev", model: "gpt-x", requests: 4, tokens: 44, cost: 0.3, errors: 0, cached: 0 },
-			{ user: "(not tagged)", gateway: "prod", model: "@cf/meta/llama", requests: 2, tokens: 22, cost: 0.1, errors: 0, cached: 1 },
+			{ user: "carol@example.com", gateway: "dev", provider: null, model: "gpt-x", requests: 4, tokens: 44, cost: 0.3, errors: 0, cached: 0 },
+			{ user: "(not tagged)", gateway: "prod", provider: null, model: "@cf/meta/llama", requests: 2, tokens: 22, cost: 0.1, errors: 0, cached: 1 },
 		]);
 		expect(query.query).toMatch(/prev_flows: \w+\(filter: \{ datetime_geq: \$prevSince, datetime_leq: \$prevUntil[^}]*metadataKeys_has: \$userKey \}/);
 		expect(query.query).toMatch(/prev_flowPairs: \w+\(filter: \{ datetime_geq: \$prevSince, datetime_leq: \$prevUntil(?![^}]*metadataKeys_has)[^}]*\}/);
+	});
+
+	it("carries each path's provider where the schema has one, and keeps providers of one model apart", async () => {
+		const ACCT = "6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a";
+		mockUpstream({
+			schema: {
+				sums: { aiGatewayRequestsAdaptiveGroupsType: ["cost"] },
+				dimensions: { aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "gateway", "provider", "model", "metadataKey", "metadataValue", "metadataKeys", "metadataValues"] },
+			},
+			primary: {
+				series: [],
+				total: [row({}, 6, { cost: 1 })],
+				flows: [row({ metadataValue: "alice@example.com", gateway: "prod", provider: "openai", model: "gpt-x" }, 3, { cost: 0.6 })],
+				flowPairs: [
+					row({ gateway: "prod", provider: "openai", model: "gpt-x" }, 3, { cost: 0.6 }),
+					// The same model through another provider is its own pair, so its traffic is not taken as covered.
+					row({ gateway: "prod", provider: "azure-openai", model: "gpt-x" }, 2, { cost: 0.4 }),
+					row({ gateway: "prod", provider: "", model: "m" }, 1, { cost: 0 }),
+				],
+			},
+		});
+		const res = await usage({ accountId: ACCT, ...win() });
+		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		expect(result.flows).toEqual([
+			{ user: "alice@example.com", gateway: "prod", provider: "openai", model: "gpt-x", requests: 3, tokens: null, cost: 0.6, errors: null, cached: null },
+			{ user: "(not tagged)", gateway: "prod", provider: "azure-openai", model: "gpt-x", requests: 2, tokens: null, cost: 0.4, errors: null, cached: null },
+			{ user: "(not tagged)", gateway: "prod", provider: "(unknown)", model: "m", requests: 1, tokens: null, cost: 0, errors: null, cached: null },
+		]);
+		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string };
+		expect(query.query).toContain("dimensions { metadataValue(key: $userKey) gateway provider model }");
+		expect(query.query).toContain("dimensions { gateway provider model }");
 	});
 
 	it("drills into one user with the value as a variable, and says session analysis cannot follow", async () => {

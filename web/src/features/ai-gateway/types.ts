@@ -132,6 +132,7 @@ export interface AiGatewayPrevious {
 export interface AiGatewayFlow {
 	user: string;
 	gateway: string;
+	provider: string | null;
 	model: string;
 	requests: number;
 	tokens: number | null;

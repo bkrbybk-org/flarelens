@@ -6,13 +6,20 @@ import type { Session } from "../../web/src/hooks/useSession";
 import type { TimeRange } from "../../web/src/hooks/useTimeRange";
 import type { AiGatewayBreakdownRow, AiGatewayUsageResult } from "../../web/src/features/ai-gateway/types";
 import type * as ApiClientModule from "../../web/src/api/client";
+import type * as CsvModule from "../../web/src/lib/csv";
 
 vi.mock("../../web/src/api/client", async (importOriginal) => {
 	const actual = await importOriginal<typeof ApiClientModule>();
 	return { ...actual, fetchAiGatewayUsage: vi.fn() };
 });
 
+vi.mock("../../web/src/lib/csv", async (importOriginal) => {
+	const actual = await importOriginal<typeof CsvModule>();
+	return { ...actual, downloadCsv: vi.fn() };
+});
+
 import { fetchAiGatewayUsage } from "../../web/src/api/client";
+import { downloadCsv } from "../../web/src/lib/csv";
 
 /** The AI Gateway overview: headline changes, and drilling into a slice and back out. */
 
@@ -82,18 +89,18 @@ const usage: AiGatewayUsageResult = {
 	byClient: [slice("opencode", 10)],
 	byUser: [slice("alice@example.com", 6, { cost: 0.4 }), slice("bob@example.com", 1, { cost: 0.05 }), slice("(not tagged)", 3, { cost: 0.05 })],
 	flows: [
-		{ user: "alice@example.com", gateway: "prod", model: "@cf/meta/llama-3", requests: 5, tokens: 55, cost: 0.35, errors: 1, cached: 2 },
-		{ user: "alice@example.com", gateway: "staging", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "(not tagged)", gateway: "staging", model: "@cf/a", requests: 2, tokens: 22, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "bob@example.com", gateway: "prod", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "(not tagged)", gateway: "prod", model: "@cf/a", requests: 1, tokens: 11, cost: 0, errors: 0, cached: 0 },
+		{ user: "alice@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/meta/llama-3", requests: 5, tokens: 55, cost: 0.35, errors: 1, cached: 2 },
+		{ user: "alice@example.com", gateway: "staging", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "(not tagged)", gateway: "staging", provider: "workers-ai", model: "@cf/a", requests: 2, tokens: 22, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "bob@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "(not tagged)", gateway: "prod", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 11, cost: 0, errors: 0, cached: 0 },
 	],
 	// The window before: alice already used prod → llama-3 and staging, carol's dev path has since gone quiet.
 	previousFlows: [
-		{ user: "alice@example.com", gateway: "prod", model: "@cf/meta/llama-3", requests: 3, tokens: 33, cost: 0.2, errors: 0, cached: 0 },
-		{ user: "alice@example.com", gateway: "staging", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
-		{ user: "carol@example.com", gateway: "dev", model: "@cf/meta/llama-3", requests: 2, tokens: 22, cost: 0.3, errors: 0, cached: 0 },
-		{ user: "(not tagged)", gateway: "prod", model: "@cf/a", requests: 1, tokens: 11, cost: 0.01, errors: 0, cached: 0 },
+		{ user: "alice@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/meta/llama-3", requests: 3, tokens: 33, cost: 0.2, errors: 0, cached: 0 },
+		{ user: "alice@example.com", gateway: "staging", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05, errors: 0, cached: 0 },
+		{ user: "carol@example.com", gateway: "dev", provider: "workers-ai", model: "@cf/meta/llama-3", requests: 2, tokens: 22, cost: 0.3, errors: 0, cached: 0 },
+		{ user: "(not tagged)", gateway: "prod", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 11, cost: 0.01, errors: 0, cached: 0 },
 	],
 	tags: {
 		keys: [
@@ -403,7 +410,7 @@ describe("AiGatewayPage", () => {
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
 		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
 		const colour = within(flows).getByRole("combobox", { name: "Colour by" });
-		expect([...colour.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["User", "Error rate", "Cache hit rate"]);
+		expect([...colour.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["User", "Gateway", "Model", "Error rate", "Cache hit rate"]);
 		await user.selectOptions(colour, "errors");
 		// alice → prod → llama-3 failed 1 of 5 (20%): red. bob → prod → @cf/a failed none: green.
 		const band = (id: string) => flows.querySelector(`path[data-band="${id}"]`)!;
@@ -429,7 +436,98 @@ describe("AiGatewayPage", () => {
 		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, flows: usage.flows!.map((f) => ({ ...f, errors: null, cached: null })) });
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
 		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
-		expect(within(flows).queryByRole("combobox", { name: "Colour by" })).toBeNull();
+		const colour = within(flows).getByRole("combobox", { name: "Colour by" });
+		expect([...colour.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["User", "Gateway", "Model"]);
+	});
+
+	it("reorders the columns, adds the provider, and colours by any column", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		const columns = within(flows).getByRole("combobox", { name: "Columns" });
+		expect([...columns.querySelectorAll("option")].map((o) => o.textContent)).toEqual([
+			"User → gateway → model",
+			"User → gateway → provider → model",
+			"Model → gateway → user",
+		]);
+		// Colour by gateway: both of prod's bands into models share a colour, staging's differ.
+		const colour = within(flows).getByRole("combobox", { name: "Colour by" });
+		await user.selectOptions(colour, "gateway");
+		const fill = (id: string) => flows.querySelector(`path[data-band="${id}"]`)!.getAttribute("fill");
+		expect(fill("gateway:prod>model:@cf/meta/llama-3")).toBe(fill("gateway:prod>model:@cf/a"));
+		expect(fill("gateway:prod>model:@cf/a")).not.toBe(fill("gateway:staging>model:@cf/a"));
+		// The provider between gateway and model, named as everywhere else on the page.
+		await user.selectOptions(columns, "user-gateway-provider-model");
+		expect(flows).toHaveTextContent("User → gateway → provider → model, sized by spend");
+		expect(within(flows).getByRole("button", { name: /^Provider Workers AI: \$0\.50/ })).toBeInTheDocument();
+		expect(flows.querySelector('path[data-band="provider:workers-ai>model:@cf/meta/llama-3"]')).not.toBeNull();
+		// Starting from the model: a band still carries its colour column's key, and drills on it.
+		await user.selectOptions(columns, "model-gateway-user");
+		await user.selectOptions(colour, "user");
+		await user.click(within(flows).getByRole("button", { name: /^alice@example\.com: llama-3 → prod: \$0\.35/ }));
+		await user.click(within(flows).getByRole("button", { name: "Drill into llama-3 · prod · alice@example.com" }));
+		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { user: "alice@example.com", gateway: "prod", model: "@cf/meta/llama-3" } });
+	});
+
+	it("does not offer the provider column where the schema reports no provider per path", async () => {
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, flows: usage.flows!.map((f) => ({ ...f, provider: null })) });
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		const columns = within(flows).getByRole("combobox", { name: "Columns" });
+		expect([...columns.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["User → gateway → model", "Model → gateway → user"]);
+	});
+
+	it("writes the figure on the biggest bands, and leaves small paths out on request", async () => {
+		const user = userEvent.setup();
+		const tiny = { user: "carol@example.com", gateway: "prod", provider: "workers-ai", model: "@cf/a", requests: 1, tokens: 1, cost: 0.001, errors: 0, cached: 0 };
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, flows: [...usage.flows!, tiny] });
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		const figures = [...flows.querySelectorAll("text[data-figure]")];
+		expect(figures).toHaveLength(3);
+		// At the default 960px the gaps are narrow, so labels take them and figures stay in the first.
+		expect(figures.map((f) => f.getAttribute("data-figure"))[0]).toBe("user:alice@example.com>gateway:prod");
+		expect(figures.every((f) => f.getAttribute("data-figure")!.startsWith("user:"))).toBe(true);
+		expect(figures[0]).toHaveTextContent("$0.35");
+		expect(within(flows).getByRole("button", { name: /^User carol@example\.com/ })).toBeInTheDocument();
+		await user.selectOptions(within(flows).getByRole("combobox", { name: "Small paths" }), "0.01");
+		expect(within(flows).queryByRole("button", { name: /^User carol@example\.com/ })).toBeNull();
+		expect(flows).toHaveTextContent("1 small path ($0.0010, under 1% each) left out; the table lists them.");
+	});
+
+	it("lists every path as a table, drills from a row, and exports it as CSV", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		await user.click(within(flows).getByRole("button", { name: "Table" }));
+		expect(flows.querySelector("svg[role=group]")).toBeNull();
+		const table = within(flows).getByRole("table", { name: "Every path" });
+		const rows = within(table).getAllByRole("row").slice(1);
+		expect(rows).toHaveLength(5);
+		// Busiest by spend first, with every figure; a path new this window is marked.
+		expect(rows[0]).toHaveTextContent("alice@example.comprodllama-35");
+		expect(rows[0]).toHaveTextContent("$0.35");
+		expect(rows[0]).toHaveTextContent("1 (20%)");
+		expect(rows[0]).toHaveTextContent("40%");
+		expect(within(table).getByText("bob@example.com").closest("tr")).toHaveTextContent("new");
+		// The untagged row drills into its gateway and model only.
+		await user.click(within(table).getByRole("button", { name: "Drill into staging · @cf/a" }));
+		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { gateway: "staging", model: "@cf/a" } });
+	});
+
+	it("exports every path, with raw names and the provider, as CSV", async () => {
+		const user = userEvent.setup();
+		vi.mocked(downloadCsv).mockClear();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		await user.click(within(flows).getByRole("button", { name: "Export CSV" }));
+		const [name, csv] = vi.mocked(downloadCsv).mock.lastCall!;
+		expect(name).toMatch(/^flarelens-ai-gateway-paths-\d{4}-\d{2}-\d{2}\.csv$/);
+		const lines = csv.split("\r\n");
+		expect(lines[0]).toBe("user,gateway,provider,model,requests,tokens,cost_usd,errors,cached,new_this_window");
+		// A model name starting with @ is guarded like any cell a spreadsheet could take for a formula.
+		expect(lines[1]).toBe("alice@example.com,prod,workers-ai,'@cf/meta/llama-3,5,55,0.35,1,2,no");
+		expect(lines).toHaveLength(6);
 	});
 
 	it("leaves the flow diagram out where the schema has no user, gateway or model to map", async () => {

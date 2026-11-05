@@ -1014,7 +1014,7 @@ export function AiGatewayPage({
 					previousFlows={result.previousFlows}
 					measure={metric}
 					format={metricSpec.format}
-					label={(column, key) => (column === "model" ? shortModel(key) : key)}
+					label={(column, key) => (column === "model" ? shortModel(key) : column === "provider" ? providerName(key) : key)}
 					onPick={drillMany}
 				/>
 			)}

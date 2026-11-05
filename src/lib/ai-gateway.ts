@@ -289,10 +289,12 @@ export interface AiGatewaySplitPoint {
 	errors: number | null;
 }
 
-/** One user → gateway → model path, for the flow diagram. A measure the schema lacks is null. */
+/** One user → gateway → provider → model path, for the flow diagram. A measure the schema lacks is null. */
 export interface AiGatewayFlow {
 	user: string;
 	gateway: string;
+	/** null when the schema has no provider dimension. */
+	provider: string | null;
 	model: string;
 	requests: number;
 	tokens: number | null;
@@ -706,20 +708,22 @@ function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["req
         ${sumSelection([f.tokensIn, f.tokensOut, f.erroredRequests, f.cost])}
       }`
 		: "";
-	// Who uses which gateway for which model: tagged requests by user × gateway × model, and all
-	// requests by gateway × model, so what no user tag covers still shows as its own flow.
+	// Who uses which gateway for which model: tagged requests by user × gateway × provider × model,
+	// and all requests by gateway × provider × model, so what no user tag covers still shows as its
+	// own flow. Provider rides along where the schema has it, for the diagram's provider column.
 	// The same two over the window before, so the diagram can say which paths are new and which
 	// went quiet.
 	const flowSums = sumSelection([f.tokensIn, f.tokensOut, f.cost, f.erroredRequests, f.cachedRequests]);
+	const pairDims = [f.gateway, f.provider, f.model].filter(Boolean).join(" ");
 	const flowAliases = (prefix: string, tagged: string, all: string) => `
       ${prefix}flows: ${f.name}(filter: ${tagged}, limit: ${FLOW_LIMIT}, orderBy: [count_DESC]) {
         count
-        dimensions { ${f.metadataValue}(key: $userKey) ${f.gateway} ${f.model} }
+        dimensions { ${f.metadataValue}(key: $userKey) ${pairDims} }
         ${flowSums}
       }
       ${prefix}flowPairs: ${f.name}(filter: ${all}, limit: ${FLOW_LIMIT}, orderBy: [count_DESC]) {
         count
-        dimensions { ${f.gateway} ${f.model} }
+        dimensions { ${pairDims} }
         ${flowSums}
       }`;
 	const prevUserClause = users ? previous.clause.replace(/ }$/, `, ${f.metadataKeys}_has: $userKey }`) : "";
@@ -944,6 +948,7 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 	type Measures = Pick<AiGatewayFlow, "requests" | "tokens" | "cost" | "errors" | "cached">;
 	const gatewayOf = (row: RawRow) => text(row.dimensions?.[f.gateway as string]).trim() || "(unknown)";
 	const modelOf = (row: RawRow) => text(row.dimensions?.[f.model as string]).trim() || "(unknown)";
+	const providerOf = (row: RawRow) => (f.provider ? text(row.dimensions?.[f.provider]).trim() || "(unknown)" : null);
 	// Each measure of one row; null where the schema has no such field, as everywhere else here.
 	const measuresOf = (row: RawRow): Measures => ({
 		requests: row.count,
@@ -965,13 +970,14 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 	for (const row of tagged) {
 		const user = userLabel(text(row.dimensions?.[f.metadataValue as string]));
 		const gateway = gatewayOf(row);
+		const provider = providerOf(row);
 		const model = modelOf(row);
 		const measures = measuresOf(row);
-		const path = JSON.stringify([user, gateway, model]);
-		const flow = byPath.get(path) ?? { user, gateway, model, ...empty() };
+		const path = JSON.stringify([user, gateway, provider, model]);
+		const flow = byPath.get(path) ?? { user, gateway, provider, model, ...empty() };
 		add(flow, measures);
 		byPath.set(path, flow);
-		const pair = JSON.stringify([gateway, model]);
+		const pair = JSON.stringify([gateway, provider, model]);
 		const seen = covered.get(pair) ?? empty();
 		add(seen, measures);
 		covered.set(pair, seen);
@@ -984,14 +990,16 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 	const untagged: AiGatewayFlow[] = [];
 	for (const row of pairs) {
 		const gateway = gatewayOf(row);
+		const provider = providerOf(row);
 		const model = modelOf(row);
 		const whole = measuresOf(row);
-		const seen = covered.get(JSON.stringify([gateway, model])) ?? empty();
+		const seen = covered.get(JSON.stringify([gateway, provider, model])) ?? empty();
 		const requests = whole.requests - seen.requests;
 		if (requests <= 0) continue;
 		untagged.push({
 			user: "(not tagged)",
 			gateway,
+			provider,
 			model,
 			requests,
 			tokens: left(whole.tokens, seen.tokens),

@@ -83,7 +83,7 @@ describe("buildInsights", () => {
 	});
 
 	describe("the gateway whose traffic carries no user tag", () => {
-		const flow = (user: string, gateway: string, requests: number, cost: number | null) => ({ user, gateway, model: "m", requests, tokens: null, cost, errors: null, cached: null });
+		const flow = (user: string, gateway: string, requests: number, cost: number | null) => ({ user, gateway, provider: null, model: "m", requests, tokens: null, cost, errors: null, cached: null });
 		const untaggedLine = (r: AiGatewayUsageResult) => buildInsights(r).find((l) => l.text.includes("no user tag"));
 
 		it("names it by spend, with its share, and drills into it", () => {
