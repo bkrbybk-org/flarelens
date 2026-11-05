@@ -823,10 +823,12 @@ export function AiGatewayPage({
 				/>
 			</section>
 
-			{/* On a wide screen the commentary sits beside the chart, so the donuts stay above a 1080p fold. */}
-			<div className="grid gap-4 2xl:grid-cols-3">
+			{/* On a wide screen the commentary sits beside the chart, so the donuts stay above a 1080p fold.
+			    The breakpoint is in px, not 2xl: presentation mode's larger text raises the root size,
+			    and a rem breakpoint would move with it (2xl is 2304px at 150%). */}
+			<div className="grid gap-4 min-[1536px]:grid-cols-3">
 			{insights.length > 0 && (
-				<section className={`${CARD} 2xl:self-start`} aria-labelledby="aig-insights">
+				<section className={`${CARD} min-[1536px]:self-start`} aria-labelledby="aig-insights">
 					<h2 id="aig-insights" className={`mb-2 ${SECTION_TITLE}`}>At a glance</h2>
 					<ul className="space-y-1 text-sm">
 						{shownInsights.map((item) => (
@@ -854,7 +856,7 @@ export function AiGatewayPage({
 				</section>
 			)}
 
-			<section className={`${CARD} min-w-0 2xl:order-first ${insights.length > 0 ? "2xl:col-span-2" : "2xl:col-span-3"}`} aria-labelledby="aig-chart-title">
+			<section className={`${CARD} min-w-0 min-[1536px]:order-first ${insights.length > 0 ? "min-[1536px]:col-span-2" : "min-[1536px]:col-span-3"}`} aria-labelledby="aig-chart-title">
 				<div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
 					<h2 id="aig-chart-title" className={SECTION_TITLE}>
 						{chartTitle}

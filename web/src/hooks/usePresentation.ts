@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { storageGet, storageSet } from "../lib/storage";
 
 /**
  * Run `refresh` every `intervalMs` (0 is off). The latest refresh and busy flag are read at each
@@ -63,6 +64,42 @@ export function usePresentation() {
 	}, [active]);
 
 	return { active, enter, exit };
+}
+
+/** Text sizes for a screen read from across a room, as a percentage of the normal root size. */
+export const TEXT_SCALE_OPTIONS = [
+	{ pct: 100, label: "Normal" },
+	{ pct: 125, label: "Large" },
+	{ pct: 150, label: "Extra large" },
+] as const;
+const TEXT_SCALE_KEY = "flarelens_present_text";
+const DEFAULT_TEXT_SCALE = 125;
+
+function loadTextScale(): number {
+	const saved = Number(storageGet("local", TEXT_SCALE_KEY));
+	return TEXT_SCALE_OPTIONS.some((o) => o.pct === saved) ? saved : DEFAULT_TEXT_SCALE;
+}
+
+/**
+ * Larger text while presenting. Sizes and spacing are in rem throughout, so raising the root font
+ * size scales the page as a whole, like browser zoom, without touching any page. Only while the
+ * mode is on; leaving it puts the normal size back. The choice is remembered per browser.
+ */
+export function usePresentationTextScale(active: boolean) {
+	const [scale, setScale] = useState(loadTextScale);
+	useEffect(() => {
+		if (!active || scale === 100) return;
+		const root = document.documentElement;
+		root.style.fontSize = `${scale}%`;
+		return () => {
+			root.style.fontSize = "";
+		};
+	}, [active, scale]);
+	const choose = useCallback((pct: number) => {
+		setScale(pct);
+		storageSet("local", TEXT_SCALE_KEY, String(pct));
+	}, []);
+	return [scale, choose] as const;
 }
 
 /** Auto-refresh choices for an unattended screen, in milliseconds; 0 is off. */

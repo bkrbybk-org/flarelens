@@ -29,7 +29,7 @@ import { ShieldsPage } from "./features/shields/ShieldsPage";
 import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
 import { Topbar } from "./components/shell/Topbar";
 import { PresentationBar } from "./components/shell/PresentationBar";
-import { useAutoRefresh, usePresentation } from "./hooks/usePresentation";
+import { useAutoRefresh, usePresentation, usePresentationTextScale } from "./hooks/usePresentation";
 import { loadRotation, saveRotation, usePageRotation, type RotationConfig } from "./hooks/usePageRotation";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { NameDialog } from "./components/shell/NameDialog";
@@ -323,6 +323,7 @@ export default function App() {
 	const refreshing = DATA_ROUTES.has(route) ? data.loading : (sectionRefresh?.loading ?? false);
 	const [autoRefreshMs, setAutoRefreshMs] = useState(0);
 	useAutoRefresh(presentation.active ? autoRefreshMs : 0, currentRefresh, refreshing);
+	const [textScale, setTextScale] = usePresentationTextScale(presentation.active);
 	// Page rotation: an unattended screen loops through chosen pages. Only while presenting —
 	// leaving full screen, by any means, stops it.
 	const [rotationConfig, setRotationConfig] = useState<RotationConfig>(loadRotation);
@@ -407,6 +408,8 @@ export default function App() {
 						refreshing={refreshing}
 						autoRefreshMs={autoRefreshMs}
 						onAutoRefresh={setAutoRefreshMs}
+						textScale={textScale}
+						onTextScale={setTextScale}
 						onRefresh={currentRefresh}
 						onExit={presentation.exit}
 						rotation={{

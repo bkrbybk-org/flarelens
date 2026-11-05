@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AUTO_REFRESH_OPTIONS } from "../../hooks/usePresentation";
+import { AUTO_REFRESH_OPTIONS, TEXT_SCALE_OPTIONS } from "../../hooks/usePresentation";
 import { ROTATION_INTERVALS, type RotationConfig } from "../../hooks/usePageRotation";
 import type { Route } from "../../hooks/useRoute";
 import { MinimizeIcon, RefreshIcon } from "../Icons";
@@ -97,6 +97,8 @@ export function PresentationBar({
 	onRefresh,
 	onExit,
 	rotation,
+	textScale,
+	onTextScale,
 }: {
 	title: string;
 	accountName: string;
@@ -108,6 +110,9 @@ export function PresentationBar({
 	onRefresh?: () => void;
 	onExit: () => void;
 	rotation?: RotationControls;
+	/** Root text size while presenting, in percent; the picker shows only when both are given. */
+	textScale?: number;
+	onTextScale?: (pct: number) => void;
 }) {
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const running = rotation?.running && rotation.next;
@@ -148,6 +153,16 @@ export function PresentationBar({
 							Rotate pages…
 						</button>
 					))}
+				{textScale !== undefined && onTextScale && (
+					<label className="flex items-center gap-1.5 text-xs">
+						<span className={MUTED}>Text size</span>
+						<select value={textScale} onChange={(e) => onTextScale(Number(e.target.value))} className={CONTROL}>
+							{TEXT_SCALE_OPTIONS.map((o) => (
+								<option key={o.pct} value={o.pct}>{o.label}</option>
+							))}
+						</select>
+					</label>
+				)}
 				<label className="flex items-center gap-1.5 text-xs">
 					<span className={MUTED}>Auto-refresh</span>
 					<select value={autoRefreshMs} onChange={(e) => onAutoRefresh(Number(e.target.value))} className={CONTROL}>

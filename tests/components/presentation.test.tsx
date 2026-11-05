@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, renderHook, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useAutoRefresh, usePresentation } from "../../web/src/hooks/usePresentation";
+import { useAutoRefresh, usePresentation, usePresentationTextScale } from "../../web/src/hooks/usePresentation";
 import { PresentationBar } from "../../web/src/components/shell/PresentationBar";
 import { Topbar } from "../../web/src/components/shell/Topbar";
 
@@ -65,6 +65,39 @@ describe("usePresentation", () => {
 	});
 });
 
+describe("usePresentationTextScale", () => {
+	beforeEach(() => {
+		localStorage.clear();
+		document.documentElement.style.fontSize = "";
+	});
+
+	it("enlarges the text only while presenting, Large by default, and puts it back on leaving", () => {
+		const { result, rerender } = renderHook(({ active }) => usePresentationTextScale(active), { initialProps: { active: false } });
+		expect(result.current[0]).toBe(125);
+		expect(document.documentElement.style.fontSize).toBe("");
+		rerender({ active: true });
+		expect(document.documentElement.style.fontSize).toBe("125%");
+		rerender({ active: false });
+		expect(document.documentElement.style.fontSize).toBe("");
+	});
+
+	it("remembers the size picked, and Normal leaves the page as it is", () => {
+		const { result, unmount } = renderHook(() => usePresentationTextScale(true));
+		act(() => result.current[1](150));
+		expect(document.documentElement.style.fontSize).toBe("150%");
+		act(() => result.current[1](100));
+		expect(document.documentElement.style.fontSize).toBe("");
+		unmount();
+		act(() => {
+			localStorage.setItem("flarelens_present_text", "150");
+		});
+		expect(renderHook(() => usePresentationTextScale(false)).result.current[0]).toBe(150);
+		// A value that is not one of the choices falls back to Large.
+		localStorage.setItem("flarelens_present_text", "999");
+		expect(renderHook(() => usePresentationTextScale(false)).result.current[0]).toBe(125);
+	});
+});
+
 describe("useAutoRefresh", () => {
 	it("refreshes on the interval, skips a tick while a reload runs, and stops when off", () => {
 		vi.useFakeTimers();
@@ -109,6 +142,31 @@ describe("controls", () => {
 		expect(onRefresh).toHaveBeenCalled();
 		await user.click(screen.getByRole("button", { name: /Exit full screen/ }));
 		expect(onExit).toHaveBeenCalled();
+		// No text size picker unless the shell wires one.
+		expect(screen.queryByRole("combobox", { name: "Text size" })).toBeNull();
+	});
+
+	it("the bar offers a text size for a screen read from across the room", async () => {
+		const onTextScale = vi.fn();
+		const user = userEvent.setup();
+		render(
+			<PresentationBar
+				title="AI Gateway"
+				accountName="Acme"
+				updatedAt={null}
+				refreshing={false}
+				autoRefreshMs={0}
+				onAutoRefresh={vi.fn()}
+				onExit={vi.fn()}
+				textScale={125}
+				onTextScale={onTextScale}
+			/>,
+		);
+		const picker = screen.getByRole("combobox", { name: "Text size" });
+		expect(picker).toHaveValue("125");
+		expect([...picker.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Normal", "Large", "Extra large"]);
+		await user.selectOptions(picker, "150");
+		expect(onTextScale).toHaveBeenCalledWith(150);
 	});
 
 	it("the top bar offers full screen", async () => {
