@@ -868,7 +868,13 @@ function foldBreakdown(
 /** What the tagged rows leave of the totals: requests nobody has tagged with the key. */
 function withUntagged(rows: AiGatewayBreakdownRow[], totals: AiGatewayTotals): AiGatewayBreakdownRow[] {
 	const sumOf = (pick: (r: AiGatewayBreakdownRow) => number | null) => rows.reduce((n, r) => n + (pick(r) ?? 0), 0);
-	const rest = (whole: number | null, pick: (r: AiGatewayBreakdownRow) => number | null) => (whole === null ? null : Math.max(0, whole - sumOf(pick)));
+	// Spend is a float: the total less the tagged rows can leave 4e-16 where the answer is 0.
+	// Anything within a billionth of the whole is that residue, not an untagged share.
+	const rest = (whole: number | null, pick: (r: AiGatewayBreakdownRow) => number | null) => {
+		if (whole === null) return null;
+		const left = whole - sumOf(pick);
+		return left <= Math.abs(whole) * 1e-9 ? 0 : left;
+	};
 	const untagged = totals.requests - sumOf((r) => r.requests);
 	if (untagged <= 0) return rows;
 	return [

@@ -48,7 +48,7 @@ export function DonutPanel<D extends string>({
 	// Where each slice starts around the ring.
 	const starts = shown.map((_, i) => shown.slice(0, i).reduce((n, s) => n + (s.value / total) * C, 0));
 	return (
-		<section className={CARD}>
+		<section className={`${CARD} @container`}>
 			<label className="mb-3 flex items-center gap-2 text-sm font-semibold">
 				<span className="sr-only">Donut dimension</span>
 				<select
@@ -65,7 +65,9 @@ export function DonutPanel<D extends string>({
 			{!total ? (
 				<p className={`py-8 text-center text-sm ${MUTED}`}>Nothing to show for this measure.</p>
 			) : (
-				<div className="flex flex-col items-center gap-4">
+				// Ring above the legend in a narrow card; side by side once the card has room for both
+				// (a wide screen), which keeps the row short enough to stay above the fold.
+				<div className="flex flex-col items-center gap-4 @lg:flex-row @lg:gap-6">
 					<svg viewBox="0 0 140 140" className="h-36 w-36 shrink-0" role="img" aria-label={`Share by ${dimensions.find((d) => d.id === dimension)?.label ?? dimension}`}>
 						<g transform="rotate(-90 70 70)">
 							{shown.map((s, i) => {

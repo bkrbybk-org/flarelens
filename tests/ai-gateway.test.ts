@@ -519,6 +519,27 @@ describe("overview and drill-down", () => {
 		expect(query.variables.userKey).toBe("user");
 	});
 
+	it("leaves no float residue as untagged spend when the tagged rows account for all of it", async () => {
+		const ACCT = "68686868686868686868686868686868";
+		mockUpstream({
+			schema: {
+				sums: { aiGatewayRequestsAdaptiveGroupsType: ["cost"] },
+				dimensions: { aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "metadataKey", "metadataValue", "metadataKeys", "metadataValues"] },
+			},
+			// 0.7 + 0.2 + 0.1 is 0.9999999999999999 in floating point, not 1.
+			primary: {
+				series: [],
+				total: [row({}, 10, { cost: 1 })],
+				byUser: [row({ metadataValue: "a@example.com" }, 3, { cost: 0.7 }), row({ metadataValue: "b@example.com" }, 3, { cost: 0.2 }), row({ metadataValue: "c@example.com" }, 3, { cost: 0.1 })],
+			},
+		});
+		const res = await usage({ accountId: ACCT, ...win() });
+		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		const untagged = result.byUser!.find((r) => r.key === "(not tagged)")!;
+		expect(untagged.requests).toBe(1);
+		expect(untagged.cost).toBe(0);
+	});
+
 	it("drills into one user with the value as a variable, and says session analysis cannot follow", async () => {
 		const ACCT = "77777777777777777777777777777777";
 		mockUpstream({
