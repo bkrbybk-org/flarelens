@@ -93,5 +93,45 @@ export function buildInsights(result: AiGatewayUsageResult): Insight[] {
 	if (totals.rateLimited) {
 		out.push({ tone: "warn", text: `${compactCount(totals.rateLimited)} requests were rate limited by the gateway.` });
 	}
+	const untagged = untaggedGateway(result);
+	if (untagged) out.push(untagged);
 	return out;
+}
+
+/**
+ * Where user tagging is missing: the gateway whose traffic most often arrives without a `user`
+ * tag. Spend first, as the gap chargeback feels; failing that, requests — untagged traffic that
+ * happens to be cheap (cached, small models) is still traffic nobody can be asked about. Only on
+ * an account that tags some traffic — one that tags none is not using the feature, not leaving
+ * gaps in it — and only when the gap is worth acting on: at least a tenth of the window, and a
+ * fifth of that gateway.
+ */
+function untaggedGateway(result: AiGatewayUsageResult): Insight | null {
+	const { flows, filter } = result;
+	if (!flows?.length || filter.user) return null;
+	type Flow = (typeof flows)[number];
+	const gap = (value: (f: Flow) => number) => {
+		if (!flows.some((f) => f.user !== "(not tagged)" && value(f) > 0)) return null;
+		const perGateway = new Map<string, { all: number; untagged: number }>();
+		let whole = 0;
+		for (const f of flows) {
+			const entry = perGateway.get(f.gateway) ?? { all: 0, untagged: 0 };
+			entry.all += value(f);
+			if (f.user === "(not tagged)") entry.untagged += value(f);
+			perGateway.set(f.gateway, entry);
+			whole += value(f);
+		}
+		const [gateway, worst] = [...perGateway.entries()].sort((a, b) => b[1].untagged - a[1].untagged)[0] ?? [];
+		return gateway && worst && whole && worst.untagged / whole >= 0.1 && worst.untagged / worst.all >= 0.2 ? { gateway, worst } : null;
+	};
+	const bySpend = gap((f) => f.cost ?? 0);
+	const found = bySpend ?? gap((f) => f.requests);
+	if (!found) return null;
+	const { gateway, worst } = found;
+	const amount = bySpend ? `spend (${formatCost(worst.untagged)}), so that spend` : `requests (${compactCount(worst.untagged)}), so those requests`;
+	return {
+		tone: "warn",
+		text: `Gateway "${gateway}" carries no user tag on ${pct(worst.untagged, worst.all)} of its ${amount} cannot be put down to anyone. Have its clients send cf-aig-metadata with a "user" key.`,
+		drill: filter.gateway ? undefined : { key: "gateway", value: gateway },
+	};
 }

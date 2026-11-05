@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-11-04** against a read of the tree, the ga
 probe of the deployed Worker (running version and response headers). See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,296 tests green across 96 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-two sections, 28 API routes (26 under `/api/*`, plus `/health` and `/docs`), 1,303 tests green across 96 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `aacdabff`, deployed 2026-11-05 (AI Gateway user → gateway → model Sankey, chart axis labels scale with presentation text; before it the same day, `be6b68a9`: larger text in presentation mode; before it the same day, `59a89e1b`: AI Gateway fits a 1080p presentation screen, no float residue as untagged spend; before it the same day, `1f977c7a`: AI Gateway chart opens on spend; before it, `326b382b` on 2026-11-04: AI Gateway page laid out for a demo; before it the same day, `46b2b954`: AI Gateway cost and tokens per user; before it the same day, `61d851f8`: AI Gateway cost view: budget, forecast, granularity, chart types, donuts; before it the same day, `72fe6709`: AI Gateway spend by tag; before it the same day, `720c787b`: AI Gateway sessions, clients, provider names, spend line, active days, session health, prompt cache; before it the same day, `a9e33353`: page rotation in presentation mode; before it the same day, `662526be`: full-screen presentation mode on every page; before it the same day, `59db4f87`: AI Gateway timeframe buttons and stacked chart by gateway, model, Workers AI vs third-party; before it the same day, `19bcacaa`: AI Gateway overview and drill-down; before it, 2026-10-28, `1ba2856c`: Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
+Running version `b35e5903`, deployed 2026-11-05 (Sankey health colours, tap-to-pin traces and the untagged-gateway insight; before it the same day, `aacdabff`: AI Gateway user → gateway → model Sankey, chart axis labels scale with presentation text; before it the same day, `be6b68a9`: larger text in presentation mode; before it the same day, `59a89e1b`: AI Gateway fits a 1080p presentation screen, no float residue as untagged spend; before it the same day, `1f977c7a`: AI Gateway chart opens on spend; before it, `326b382b` on 2026-11-04: AI Gateway page laid out for a demo; before it the same day, `46b2b954`: AI Gateway cost and tokens per user; before it the same day, `61d851f8`: AI Gateway cost view: budget, forecast, granularity, chart types, donuts; before it the same day, `72fe6709`: AI Gateway spend by tag; before it the same day, `720c787b`: AI Gateway sessions, clients, provider names, spend line, active days, session health, prompt cache; before it the same day, `a9e33353`: page rotation in presentation mode; before it the same day, `662526be`: full-screen presentation mode on every page; before it the same day, `59db4f87`: AI Gateway timeframe buttons and stacked chart by gateway, model, Workers AI vs third-party; before it the same day, `19bcacaa`: AI Gateway overview and drill-down; before it, 2026-10-28, `1ba2856c`: Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -261,7 +261,7 @@ DOM; and a `component` project, `environment: "jsdom"` + `@testing-library/react
 rendered components — `tests/components/setup.ts` wires jest-dom matchers and RTL's auto-cleanup
 into that project only, so the node project's Workers-shaped globals stay untouched).
 
-96 test files, 1,296 tests. [README.md](README.md#tests) keeps the per-file table by layer (unit,
+96 test files, 1,303 tests. [README.md](README.md#tests) keeps the per-file table by layer (unit,
 component, integration, system, compatibility, security, regression, opt-in E2E) and is the one
 place that list is maintained — this file used to carry a second copy that had fallen a dozen
 files behind.
@@ -400,6 +400,20 @@ files behind.
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **Sankey health, pinned traces, and the untagged-gateway insight (2026-11-05, `b35e5903`).**
+  `flows` now carries `errors` and `cached` per path (untagged remainder included; probed live
+  first, and on prod they equal the page totals: 3 errors, 221 cache hits over 29 days). The
+  diagram can be coloured by error rate (under 1% / 1–5% / 5%+) or cache hit rate (50%+ / 10–50% /
+  under 10%, grey not red — not caching is a choice), with a key, and sized by errors. A click, tap
+  or Enter now pins a trace instead of drilling in: it holds after the pointer leaves (a touch
+  screen has no hover), a status row names the node with its figure and health, and *Drill into*
+  is a separate button; Esc, *Clear* or a second click lets go. *At a glance* gains a line naming
+  the gateway whose traffic most often carries no user tag — by spend first, by requests where
+  the untagged traffic is cheap — only on an account that tags some traffic, and only when the gap
+  is at least a tenth of the window and a fifth of that gateway. The request fallback came from the
+  live check: untagged spend was 2.4% (quiet), but one gateway had 71% of its requests untagged.
+  `SELECT_SM` moved to `lib/ui` for the page and the diagram to share.
 
 - **AI Gateway "Who uses what" Sankey, and chart axis labels that scale (2026-11-05, `aacdabff`).**
   The usage route returns `flows`: tagged requests grouped by `metadataValue(key: $userKey)` ×

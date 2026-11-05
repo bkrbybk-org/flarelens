@@ -289,7 +289,7 @@ export interface AiGatewaySplitPoint {
 	errors: number | null;
 }
 
-/** One user → gateway → model path, for the flow diagram. */
+/** One user → gateway → model path, for the flow diagram. A measure the schema lacks is null. */
 export interface AiGatewayFlow {
 	user: string;
 	gateway: string;
@@ -297,6 +297,10 @@ export interface AiGatewayFlow {
 	requests: number;
 	tokens: number | null;
 	cost: number | null;
+	/** Failed requests on the path, for its error rate. */
+	errors: number | null;
+	/** Requests served from the gateway cache, for its hit rate. */
+	cached: number | null;
 }
 
 /** One slice of traffic — a gateway, provider, model — with every measure the dataset carries. */
@@ -702,7 +706,7 @@ function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["req
 		: "";
 	// Who uses which gateway for which model: tagged requests by user × gateway × model, and all
 	// requests by gateway × model, so what no user tag covers still shows as its own flow.
-	const flowSums = sumSelection([f.tokensIn, f.tokensOut, f.cost]);
+	const flowSums = sumSelection([f.tokensIn, f.tokensOut, f.cost, f.erroredRequests, f.cachedRequests]);
 	const flows =
 		users && f.gateway && f.model
 			? `
@@ -930,30 +934,43 @@ function withUntagged(rows: AiGatewayBreakdownRow[], totals: AiGatewayTotals): A
 
 /**
  * The flow rows: tagged requests per user, gateway and model as they come, then, per gateway and
- * model, whatever the tagged rows leave of all requests as a "(not tagged)" flow. Spend residue
- * within a billionth of the pair's total is 0, as in withUntagged.
+ * model, whatever the tagged rows leave of all requests as a "(not tagged)" flow. A float measure's
+ * residue within a billionth of the pair's total is 0, as in withUntagged.
  */
 function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFields["requests"]>): AiGatewayFlow[] {
+	type Measures = Pick<AiGatewayFlow, "requests" | "tokens" | "cost" | "errors" | "cached">;
 	const gatewayOf = (row: RawRow) => text(row.dimensions?.[f.gateway as string]).trim() || "(unknown)";
 	const modelOf = (row: RawRow) => text(row.dimensions?.[f.model as string]).trim() || "(unknown)";
-	const tokensOf = (row: RawRow) => addNullable(sumField(row, f.tokensIn), sumField(row, f.tokensOut));
+	// Each measure of one row; null where the schema has no such field, as everywhere else here.
+	const measuresOf = (row: RawRow): Measures => ({
+		requests: row.count,
+		tokens: addNullable(sumField(row, f.tokensIn), sumField(row, f.tokensOut)),
+		cost: sumField(row, f.cost),
+		errors: sumField(row, f.erroredRequests),
+		cached: sumField(row, f.cachedRequests),
+	});
+	const add = (into: Measures, row: Measures) => {
+		into.requests += row.requests;
+		into.tokens = addNullable(into.tokens, row.tokens);
+		into.cost = addNullable(into.cost, row.cost);
+		into.errors = addNullable(into.errors, row.errors);
+		into.cached = addNullable(into.cached, row.cached);
+	};
+	const empty = (): Measures => ({ requests: 0, tokens: null, cost: null, errors: null, cached: null });
 	const byPath = new Map<string, AiGatewayFlow>();
-	const covered = new Map<string, { requests: number; tokens: number | null; cost: number | null }>();
+	const covered = new Map<string, Measures>();
 	for (const row of tagged) {
 		const user = userLabel(text(row.dimensions?.[f.metadataValue as string]));
 		const gateway = gatewayOf(row);
 		const model = modelOf(row);
+		const measures = measuresOf(row);
 		const path = JSON.stringify([user, gateway, model]);
-		const flow = byPath.get(path) ?? { user, gateway, model, requests: 0, tokens: null, cost: null };
-		flow.requests += row.count;
-		flow.tokens = addNullable(flow.tokens, tokensOf(row));
-		flow.cost = addNullable(flow.cost, sumField(row, f.cost));
+		const flow = byPath.get(path) ?? { user, gateway, model, ...empty() };
+		add(flow, measures);
 		byPath.set(path, flow);
 		const pair = JSON.stringify([gateway, model]);
-		const seen = covered.get(pair) ?? { requests: 0, tokens: null, cost: null };
-		seen.requests += row.count;
-		seen.tokens = addNullable(seen.tokens, tokensOf(row));
-		seen.cost = addNullable(seen.cost, sumField(row, f.cost));
+		const seen = covered.get(pair) ?? empty();
+		add(seen, measures);
 		covered.set(pair, seen);
 	}
 	const left = (whole: number | null, part: number | null) => {
@@ -965,10 +982,20 @@ function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFie
 	for (const row of pairs) {
 		const gateway = gatewayOf(row);
 		const model = modelOf(row);
-		const seen = covered.get(JSON.stringify([gateway, model]));
-		const requests = row.count - (seen?.requests ?? 0);
+		const whole = measuresOf(row);
+		const seen = covered.get(JSON.stringify([gateway, model])) ?? empty();
+		const requests = whole.requests - seen.requests;
 		if (requests <= 0) continue;
-		untagged.push({ user: "(not tagged)", gateway, model, requests, tokens: left(tokensOf(row), seen?.tokens ?? null), cost: left(sumField(row, f.cost), seen?.cost ?? null) });
+		untagged.push({
+			user: "(not tagged)",
+			gateway,
+			model,
+			requests,
+			tokens: left(whole.tokens, seen.tokens),
+			cost: left(whole.cost, seen.cost),
+			errors: left(whole.errors, seen.errors),
+			cached: left(whole.cached, seen.cached),
+		});
 	}
 	return [...byPath.values(), ...untagged].sort((a, b) => b.requests - a.requests);
 }

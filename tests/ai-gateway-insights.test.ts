@@ -80,6 +80,49 @@ describe("buildInsights", () => {
 	it("is empty for an empty window", () => {
 		expect(buildInsights(result({ totals: { ...result().totals, requests: 0 } }))).toEqual([]);
 	});
+
+	describe("the gateway whose traffic carries no user tag", () => {
+		const flow = (user: string, gateway: string, requests: number, cost: number | null) => ({ user, gateway, model: "m", requests, tokens: null, cost, errors: null, cached: null });
+		const untaggedLine = (r: AiGatewayUsageResult) => buildInsights(r).find((l) => l.text.includes("no user tag"));
+
+		it("names it by spend, with its share, and drills into it", () => {
+			const line = untaggedLine(
+				result({ flows: [flow("a@example.com", "default", 10, 0.4), flow("(not tagged)", "default", 20, 0.6), flow("a@example.com", "demo", 5, 0.18), flow("(not tagged)", "demo", 1, 0)] }),
+			);
+			expect(line).toEqual({
+				tone: "warn",
+				text: 'Gateway "default" carries no user tag on 60% of its spend ($0.60), so that spend cannot be put down to anyone. Have its clients send cf-aig-metadata with a "user" key.',
+				drill: { key: "gateway", value: "default" },
+			});
+		});
+
+		it("counts requests where nothing is priced", () => {
+			const line = untaggedLine(result({ totals: { ...result().totals, cost: 0 }, flows: [flow("a@example.com", "default", 10, 0), flow("(not tagged)", "default", 30, 0)] }));
+			expect(line?.text).toContain("on 75% of its requests (30)");
+		});
+
+		it("falls back to requests where the untagged traffic is cheap", () => {
+			// $0.09 of $3.75 untagged is no spend gap, but 297 of 418 requests on one gateway is a tagging gap.
+			const line = untaggedLine(
+				result({ flows: [flow("a@example.com", "default", 121, 3.66), flow("(not tagged)", "default", 297, 0.09), flow("a@example.com", "demo", 209, 0)] }),
+			);
+			expect(line?.text).toBe('Gateway "default" carries no user tag on 71% of its requests (297), so those requests cannot be put down to anyone. Have its clients send cf-aig-metadata with a "user" key.');
+		});
+
+		it("stays quiet where the gap is small, nobody is tagged, one user is drilled into, or flows are unknown", () => {
+			// 1 of 41 requests untagged: under a tenth of the window.
+			expect(untaggedLine(result({ totals: { ...result().totals, cost: 0 }, flows: [flow("a@example.com", "default", 40, 0), flow("(not tagged)", "default", 1, 0)] }))).toBeUndefined();
+			// An account that tags nobody is not using tags, not leaving gaps.
+			expect(untaggedLine(result({ flows: [flow("(not tagged)", "default", 20, 0.6)] }))).toBeUndefined();
+			expect(untaggedLine(result({ filter: { user: "a@example.com" }, flows: [flow("a@example.com", "default", 1, 0.1), flow("(not tagged)", "default", 9, 0.9)] }))).toBeUndefined();
+			expect(untaggedLine(result({ flows: null }))).toBeUndefined();
+		});
+
+		it("does not offer to drill into the gateway already drilled into", () => {
+			const line = untaggedLine(result({ filter: { gateway: "default" }, flows: [flow("a@example.com", "default", 10, 0.4), flow("(not tagged)", "default", 20, 0.6)] }));
+			expect(line?.drill).toBeUndefined();
+		});
+	});
 });
 
 describe("formatting", () => {

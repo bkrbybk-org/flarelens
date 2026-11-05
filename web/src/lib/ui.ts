@@ -64,6 +64,8 @@ export const BTN_ICON = `rounded-lg border border-zinc-200 p-2 text-zinc-500 tra
 export const INPUT = `rounded-lg border border-zinc-200 bg-white px-2.5 py-2 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`;
 export const SEARCH_INPUT = `w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`;
 export const SELECT = `rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cf dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`;
+/** A compact select for chart controls beside a card's title. */
+export const SELECT_SM = `rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`;
 
 /**
  * A status pill: severity, decision, rule action, "Disabled".

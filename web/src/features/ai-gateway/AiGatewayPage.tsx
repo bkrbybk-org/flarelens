@@ -3,7 +3,7 @@ import { useSectionRefresh } from "../../hooks/useSectionRefresh";
 import { StatCard, StatGrid } from "../../components/StatCard";
 import { PageShell } from "../../components/PageShell";
 import { TabPanel, Tabs } from "../../components/Tabs";
-import { ALERT_ERROR, BADGE, BADGE_NEUTRAL, CARD, CARD_FLUSH, FOCUS_RING, MUTED, SECTION_TITLE } from "../../lib/ui";
+import { ALERT_ERROR, BADGE, BADGE_NEUTRAL, CARD, CARD_FLUSH, FOCUS_RING, MUTED, SECTION_TITLE, SELECT_SM } from "../../lib/ui";
 import { ChevronDownIcon } from "../../components/Icons";
 import { getHashParams, setHashParam } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
@@ -107,7 +107,6 @@ const CHART_TYPES: { id: ChartType; label: string }[] = [
 	{ id: "area", label: "Area" },
 ];
 type DonutDimension = "gateway" | "model" | "provider" | "client" | "user" | "source" | "tag";
-const SELECT_SM = `rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900 ${FOCUS_RING}`;
 
 type Metric = StackMetric;
 const SPLIT_LABEL: Record<Split, string> = {
@@ -1004,8 +1003,8 @@ export function AiGatewayPage({
 			{result?.flows && result.flows.length > 0 && (
 				<FlowSankey
 					flows={result.flows}
-					measure={metric === "cost" ? "cost" : metric === "tokens" ? "tokens" : "requests"}
-					format={(metric === "errors" ? METRICS.find((m) => m.id === "requests")! : metricSpec).format}
+					measure={metric}
+					format={metricSpec.format}
 					label={(column, key) => (column === "model" ? shortModel(key) : key)}
 					onPick={(column, key) => drill(column, key)}
 				/>

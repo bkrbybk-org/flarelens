@@ -136,6 +136,8 @@ export interface AiGatewayFlow {
 	requests: number;
 	tokens: number | null;
 	cost: number | null;
+	errors: number | null;
+	cached: number | null;
 }
 
 export interface AiGatewayUsageResult {

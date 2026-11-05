@@ -544,39 +544,41 @@ describe("overview and drill-down", () => {
 		const ACCT = "69696969696969696969696969696969";
 		mockUpstream({
 			schema: {
-				sums: { aiGatewayRequestsAdaptiveGroupsType: ["tokensIn", "tokensOut", "cost"] },
+				sums: { aiGatewayRequestsAdaptiveGroupsType: ["tokensIn", "tokensOut", "cost", "erroredRequests", "cachedRequests"] },
 				dimensions: { aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "gateway", "model", "metadataKey", "metadataValue", "metadataKeys", "metadataValues"] },
 			},
 			primary: {
 				series: [],
 				total: [row({}, 12, { cost: 1 })],
 				flows: [
-					row({ metadataValue: "alice@example.com", gateway: "prod", model: "@cf/meta/llama" }, 5, { tokensIn: 50, tokensOut: 5, cost: 0.7 }),
-					row({ metadataValue: "bob@example.com", gateway: "prod", model: "@cf/meta/llama" }, 2, { tokensIn: 20, tokensOut: 2, cost: 0.1 }),
-					row({ metadataValue: "alice@example.com", gateway: "dev", model: "gpt-x" }, 1, { tokensIn: 10, tokensOut: 1, cost: 0.2 }),
+					row({ metadataValue: "alice@example.com", gateway: "prod", model: "@cf/meta/llama" }, 5, { tokensIn: 50, tokensOut: 5, cost: 0.7, erroredRequests: 1, cachedRequests: 2 }),
+					row({ metadataValue: "bob@example.com", gateway: "prod", model: "@cf/meta/llama" }, 2, { tokensIn: 20, tokensOut: 2, cost: 0.1, erroredRequests: 0, cachedRequests: 0 }),
+					row({ metadataValue: "alice@example.com", gateway: "dev", model: "gpt-x" }, 1, { tokensIn: 10, tokensOut: 1, cost: 0.2, erroredRequests: 0, cachedRequests: 1 }),
 				],
 				flowPairs: [
 					// 0.7 + 0.1 leaves floating-point residue against 0.8: no untagged spend, 3 untagged requests.
-					row({ gateway: "prod", model: "@cf/meta/llama" }, 10, { tokensIn: 100, tokensOut: 10, cost: 0.8 }),
+					row({ gateway: "prod", model: "@cf/meta/llama" }, 10, { tokensIn: 100, tokensOut: 10, cost: 0.8, erroredRequests: 3, cachedRequests: 2 }),
 					// Fully tagged: no untagged flow.
-					row({ gateway: "dev", model: "gpt-x" }, 1, { tokensIn: 10, tokensOut: 1, cost: 0.2 }),
-					row({ gateway: "dev", model: "" }, 1, { tokensIn: 0, tokensOut: 0, cost: 0 }),
+					row({ gateway: "dev", model: "gpt-x" }, 1, { tokensIn: 10, tokensOut: 1, cost: 0.2, erroredRequests: 0, cachedRequests: 1 }),
+					row({ gateway: "dev", model: "" }, 1, { tokensIn: 0, tokensOut: 0, cost: 0, erroredRequests: 1, cachedRequests: 0 }),
 				],
 			},
 		});
 		const res = await usage({ accountId: ACCT, ...win() });
 		expect(res.status).toBe(200);
 		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		// Errors and cache hits ride along per path, so the diagram can colour a path by its health;
+		// the untagged remainder takes what the tagged rows leave of each.
 		expect(result.flows).toEqual([
-			{ user: "alice@example.com", gateway: "prod", model: "@cf/meta/llama", requests: 5, tokens: 55, cost: 0.7 },
-			{ user: "(not tagged)", gateway: "prod", model: "@cf/meta/llama", requests: 3, tokens: 33, cost: 0 },
-			{ user: "bob@example.com", gateway: "prod", model: "@cf/meta/llama", requests: 2, tokens: 22, cost: 0.1 },
-			{ user: "alice@example.com", gateway: "dev", model: "gpt-x", requests: 1, tokens: 11, cost: 0.2 },
-			{ user: "(not tagged)", gateway: "dev", model: "(unknown)", requests: 1, tokens: 0, cost: 0 },
+			{ user: "alice@example.com", gateway: "prod", model: "@cf/meta/llama", requests: 5, tokens: 55, cost: 0.7, errors: 1, cached: 2 },
+			{ user: "(not tagged)", gateway: "prod", model: "@cf/meta/llama", requests: 3, tokens: 33, cost: 0, errors: 2, cached: 0 },
+			{ user: "bob@example.com", gateway: "prod", model: "@cf/meta/llama", requests: 2, tokens: 22, cost: 0.1, errors: 0, cached: 0 },
+			{ user: "alice@example.com", gateway: "dev", model: "gpt-x", requests: 1, tokens: 11, cost: 0.2, errors: 0, cached: 1 },
+			{ user: "(not tagged)", gateway: "dev", model: "(unknown)", requests: 1, tokens: 0, cost: 0, errors: 1, cached: 0 },
 		]);
 		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string };
 		// The user value is a variable-keyed dimension, and the tagged flows only read requests carrying the key.
-		expect(query.query).toMatch(/flows: \w+\(filter: \{[^}]*metadataKeys_has: \$userKey \}, limit: 500, orderBy: \[count_DESC\]\) \{\s*count\s*dimensions \{ metadataValue\(key: \$userKey\) gateway model \}/);
+		expect(query.query).toMatch(/flows: \w+\(filter: \{[^}]*metadataKeys_has: \$userKey \}, limit: 500, orderBy: \[count_DESC\]\) \{\s*count\s*dimensions \{ metadataValue\(key: \$userKey\) gateway model \}\s*sum \{[^}]*erroredRequests[^}]*cachedRequests[^}]*\}/);
 		expect(query.query).toMatch(/flowPairs: \w+\(filter: \{(?![^}]*metadataKeys_has)[^}]*\}, limit: 500/);
 	});
 
