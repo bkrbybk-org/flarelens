@@ -248,34 +248,6 @@ export function FlowSankey({
 	const measure: FlowMeasure = picked ?? (cols.includes("action") ? "requests" : chartMeasure);
 	const format = measure === chartMeasure ? chartFormat : MEASURES.find((m) => m.id === measure)!.format;
 
-	// Geometry in real px. Labels are 0.75rem; each side keeps room for one, up to 17rem or 30% of
-	// the width, and a label longer than its room is cut with an ellipsis (full name on hover).
-	const font = 0.75 * rootPx();
-	const LABEL_ROOM = Math.min(17 * rootPx(), W * 0.3);
-	// Columns spaced evenly between the two label margins.
-	const span = W - 2 * LABEL_ROOM - NODE_W;
-	const X = Object.fromEntries(cols.map((c, i) => [c, LABEL_ROOM + (span * i) / (cols.length - 1)])) as Record<FlowColumn, number>;
-	// Room for a label in px: either margin for the outer columns. A middle column's labels run into
-	// the gap to the next one: its near half when the gap is wide, so the far half can carry a band's
-	// figure; the whole gap when it is narrow, where names matter more and figures stay in the first
-	// gap, which no label reaches.
-	const gapW = span / (cols.length - 1) - NODE_W;
-	const wideGaps = gapW >= 20 * rootPx();
-	const room = Object.fromEntries(
-		cols.map((c, i) => [c, i === 0 || i === cols.length - 1 ? LABEL_ROOM - 10 : wideGaps ? gapW / 2 - 8 : gapW - 14]),
-	) as Record<FlowColumn, number>;
-	// In a narrow card names matter more than figures: the value moves to the tooltip.
-	const showValues = W >= 640;
-	// A column too tight for a readable name beside its value drops the value too (it stays in the tooltip).
-	const fit = (column: FlowColumn, name: string, value: string) => {
-		const fits = Math.floor(room[column] / (font * 0.6));
-		const suffix = showValues && fits - value.length - 3 >= Math.min(name.length, 8) ? ` · ${value}` : "";
-		const chars = Math.max(4, fits - suffix.length);
-		return `${name.length > chars ? `${name.slice(0, chars - 1)}…` : name}${suffix}`;
-	};
-	// A node is never given less height than a line of its label, so neighbours' labels cannot overlap.
-	const SLOT = Math.ceil(font * 1.5);
-
 	// Colour by any shown column; health colours only for what the schema reports per path.
 	const colourOptions: { id: FlowColour; label: string }[] = [
 		...cols.map((c) => ({ id: c as FlowColour, label: COLUMN_LABEL[c] })),
@@ -321,6 +293,49 @@ export function FlowSankey({
 		path: { ...f.path, ...Object.fromEntries(cols.map((c) => [c, kept[c].has(f.path[c]) ? f.path[c] : OTHER])) } as Path,
 	}));
 	const total = paths.reduce((n, p) => n + p.value, 0);
+
+	// Geometry in real px, once the paths are known. Labels are 0.75rem; each side keeps room for one,
+	// up to 17rem or 30% of the width, and a label longer than its room is cut with an ellipsis (full
+	// name on hover).
+	const font = 0.75 * rootPx();
+	const charW = font * 0.6;
+	// Each outer margin is as wide as its longest label with its value needs, up to the cap, so short
+	// labels (actions, say) leave their width to the bands.
+	const MAX_ROOM = Math.min(17 * rootPx(), W * 0.3);
+	// The widest label a column draws, name and value, in px.
+	const longest = (column: FlowColumn) => {
+		const sums = new Map<string, number>();
+		for (const p of paths) sums.set(p.path[column], (sums.get(p.path[column]) ?? 0) + p.value);
+		return Math.max(0, ...[...sums].map(([key, value]) => `${label(column, key)} · ${format(value)}`.length)) * charW;
+	};
+	const marginFor = (column: FlowColumn) => Math.min(MAX_ROOM, Math.ceil(longest(column)) + 16);
+	const ROOM_LEFT = marginFor(cols[0]);
+	const ROOM_RIGHT = marginFor(cols[cols.length - 1]);
+	// Columns spaced evenly between the two label margins.
+	const span = W - ROOM_LEFT - ROOM_RIGHT - NODE_W;
+	const X = Object.fromEntries(cols.map((c, i) => [c, ROOM_LEFT + (span * i) / (cols.length - 1)])) as Record<FlowColumn, number>;
+	// Room for a label in px: either margin for the outer columns. A middle column's labels run into
+	// the gap to the next one: its near half when they all fit there, so the far half can carry a
+	// band's figure; otherwise the whole gap, since names matter more than figures. The first gap
+	// has no labels in it, so it can always carry figures.
+	const gapW = span / (cols.length - 1) - NODE_W;
+	const halfGap = gapW / 2 - 8;
+	const leavesHalf = Object.fromEntries(cols.map((c, i) => [c, i === 0 || (i < cols.length - 1 && longest(c) <= halfGap)])) as Record<FlowColumn, boolean>;
+	const room = Object.fromEntries(
+		cols.map((c, i) => [c, i === 0 ? ROOM_LEFT - 10 : i === cols.length - 1 ? ROOM_RIGHT - 10 : leavesHalf[c] ? halfGap : gapW - 14]),
+	) as Record<FlowColumn, number>;
+	// In a narrow card names matter more than figures: the value moves to the tooltip.
+	const showValues = W >= 640;
+	// A column too tight for a readable name beside its value drops the value too (it stays in the tooltip).
+	const fit = (column: FlowColumn, name: string, value: string) => {
+		const fits = Math.floor(room[column] / charW);
+		const suffix = showValues && fits - value.length - 3 >= Math.min(name.length, 8) ? ` · ${value}` : "";
+		const chars = Math.max(4, fits - suffix.length);
+		return `${name.length > chars ? `${name.slice(0, chars - 1)}…` : name}${suffix}`;
+	};
+	// A node is never given less height than a line of its label, so neighbours' labels cannot overlap.
+	const SLOT = Math.ceil(font * 1.5);
+
 	const measureName = measure === "cost" ? "spend" : measure;
 	// New and quiet are said per path, so their lines leave the action out.
 	const pathCols = cols.filter((c) => c !== "action");
@@ -666,7 +681,7 @@ export function FlowSankey({
 		// The biggest bands carry their figure, at the near side of the node they run into — where no
 		// label reaches. A band thinner than a line of text carries none.
 		const figures = [...drawnBands]
-			.filter((b) => b.value * scale >= SLOT && (wideGaps || b.fromColumn === first))
+			.filter((b) => b.value * scale >= SLOT && leavesHalf[b.fromColumn])
 			.sort((a, b) => b.value - a.value)
 			.slice(0, FIGURES);
 

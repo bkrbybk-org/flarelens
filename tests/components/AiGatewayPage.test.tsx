@@ -521,6 +521,16 @@ describe("AiGatewayPage", () => {
 		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { user: "alice@example.com", gateway: "prod", model: "@cf/meta/llama-3" } });
 	});
 
+	it("keeps figures out of a gap whose labels need the whole of it", async () => {
+		const long = "a-gateway-with-a-name-long-enough-to-need-the-whole-gap-and-then-some";
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, flows: usage.flows!.map((f) => ({ ...f, gateway: f.gateway === "prod" ? long : f.gateway })) });
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		const figures = [...flows.querySelectorAll("text[data-figure]")].map((f) => f.getAttribute("data-figure")!);
+		expect(figures.length).toBeGreaterThan(0);
+		expect(figures.every((f) => f.startsWith("user:"))).toBe(true);
+	});
+
 	it("does not offer the provider column where the schema reports no provider per path", async () => {
 		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, flows: usage.flows!.map((f) => ({ ...f, provider: null })) });
 		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
@@ -537,9 +547,8 @@ describe("AiGatewayPage", () => {
 		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
 		const figures = [...flows.querySelectorAll("text[data-figure]")];
 		expect(figures).toHaveLength(3);
-		// At the default 960px the gaps are narrow, so labels take them and figures stay in the first.
-		expect(figures.map((f) => f.getAttribute("data-figure"))[0]).toBe("user:alice@example.com>gateway:prod");
-		expect(figures.every((f) => f.getAttribute("data-figure")!.startsWith("user:"))).toBe(true);
+		// Gateway names are short enough to leave half their gap free, so both gaps can carry a figure.
+		expect(figures.map((f) => f.getAttribute("data-figure"))).toEqual(expect.arrayContaining(["user:alice@example.com>gateway:prod", "gateway:prod>model:@cf/meta/llama-3"]));
 		expect(figures[0]).toHaveTextContent("$0.35");
 		expect(within(flows).getByRole("button", { name: /^User carol@example\.com/ })).toBeInTheDocument();
 		await user.selectOptions(within(flows).getByRole("combobox", { name: "Small paths" }), "0.01");
