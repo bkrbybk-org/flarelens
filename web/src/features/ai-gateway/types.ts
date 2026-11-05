@@ -129,6 +129,15 @@ export interface AiGatewayPrevious {
 	p50: number | null;
 }
 
+export interface AiGatewayFlow {
+	user: string;
+	gateway: string;
+	model: string;
+	requests: number;
+	tokens: number | null;
+	cost: number | null;
+}
+
 export interface AiGatewayUsageResult {
 	granularity: AiGatewayGranularity;
 	timeDimension: string;
@@ -145,6 +154,8 @@ export interface AiGatewayUsageResult {
 	tags: AiGatewayTags | null;
 	/** Per value of the `user` tag, shown as sent (full email addresses), plus "(not tagged)". null without metadata. */
 	byUser: AiGatewayBreakdownRow[] | null;
+	/** One row per user → gateway → model path, busiest first, "(not tagged)" for the rest. null without metadata. */
+	flows: AiGatewayFlow[] | null;
 	recent: AiGatewayRequestRow[];
 	previous: AiGatewayPrevious | null;
 	previousWindow: { since: string; until: string };

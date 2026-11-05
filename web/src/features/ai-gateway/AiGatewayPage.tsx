@@ -12,6 +12,7 @@ import { accumulate, budgetFor, bucketMinutes, buildStacks, forecastMonth, sourc
 import { useAiGatewayUsage } from "./useAiGatewayUsage";
 import { UsageChart, type ChartMode, type ChartType } from "./UsageChart";
 import { DonutPanel, type DonutSlice } from "./DonutPanel";
+import { FlowSankey } from "./FlowSankey";
 import { storageGet, storageSet } from "../../lib/storage";
 import { buildInsights } from "./insights";
 import {
@@ -999,6 +1000,16 @@ export function AiGatewayPage({
 					);
 				})}
 			</div>
+
+			{result?.flows && result.flows.length > 0 && (
+				<FlowSankey
+					flows={result.flows}
+					measure={metric === "cost" ? "cost" : metric === "tokens" ? "tokens" : "requests"}
+					format={(metric === "errors" ? METRICS.find((m) => m.id === "requests")! : metricSpec).format}
+					label={(column, key) => (column === "model" ? shortModel(key) : key)}
+					onPick={(column, key) => drill(column, key)}
+				/>
+			)}
 
 			<h2 className={`pt-2 text-xs font-semibold uppercase tracking-wide ${MUTED}`}>More detail</h2>
 

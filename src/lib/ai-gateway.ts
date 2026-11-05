@@ -246,6 +246,8 @@ const TIME_DIMENSION: Record<AiGatewayGranularity, string> = { "15m": "datetimeF
 
 const SERIES_LIMIT = 10_000;
 const BREAKDOWN_LIMIT = 100;
+/** User × gateway × model combinations read for the flow diagram; the busiest first. */
+const FLOW_LIMIT = 500;
 
 /** 30 days, matching every other AdaptiveGroups-backed section here. */
 export const MAX_AI_GATEWAY_RANGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -285,6 +287,16 @@ export interface AiGatewaySplitPoint {
 	tokens: number | null;
 	cost: number | null;
 	errors: number | null;
+}
+
+/** One user → gateway → model path, for the flow diagram. */
+export interface AiGatewayFlow {
+	user: string;
+	gateway: string;
+	model: string;
+	requests: number;
+	tokens: number | null;
+	cost: number | null;
 }
 
 /** One slice of traffic — a gateway, provider, model — with every measure the dataset carries. */
@@ -473,6 +485,12 @@ export interface AiGatewayUsageResult {
 	tags: AiGatewayTags | null;
 	/** Requests, tokens and spend per value of the `user` tag, plus "(not tagged)"; null when the schema carries no metadata. */
 	byUser: AiGatewayBreakdownRow[] | null;
+	/**
+	 * Which user sends what through which gateway to which model: one row per combination, busiest
+	 * first, with "(not tagged)" for requests no user tag covers. null when the schema has no
+	 * metadata, gateway or model dimension.
+	 */
+	flows: AiGatewayFlow[] | null;
 	/** The most recent requests in the slice, newest first. Empty when the schema has no request id. */
 	recent: AiGatewayRequestRow[];
 	previous: AiGatewayPrevious | null;
@@ -682,6 +700,23 @@ function requestsQuery(timeDimension: string, f: NonNullable<ResolvedFields["req
         ${sumSelection([f.tokensIn, f.tokensOut, f.erroredRequests, f.cost])}
       }`
 		: "";
+	// Who uses which gateway for which model: tagged requests by user × gateway × model, and all
+	// requests by gateway × model, so what no user tag covers still shows as its own flow.
+	const flowSums = sumSelection([f.tokensIn, f.tokensOut, f.cost]);
+	const flows =
+		users && f.gateway && f.model
+			? `
+      flows: ${f.name}(filter: ${userClause}, limit: ${FLOW_LIMIT}, orderBy: [count_DESC]) {
+        count
+        dimensions { ${f.metadataValue}(key: $userKey) ${f.gateway} ${f.model} }
+        ${flowSums}
+      }
+      flowPairs: ${f.name}(filter: ${clause}, limit: ${FLOW_LIMIT}, orderBy: [count_DESC]) {
+        count
+        dimensions { ${f.gateway} ${f.model} }
+        ${flowSums}
+      }`
+			: "";
 	const declared = [...new Set([...declarations, ...previous.declarations, ...(tagged ? ["$tagKey: string!"] : []), ...(users ? ["$userKey: string!"] : [])])].map((d) => `, ${d}`).join("");
 
 	return `
@@ -698,7 +733,7 @@ query AiGatewayRequests($accountTag: string!, $since: Time!, $until: Time!, $pre
       }
       previous: ${f.name}(filter: ${previous.clause}, limit: 1) {
         ${headline}
-      }${splitSeries("seriesByGateway", f.gateway)}${splitSeries("seriesByModel", f.model)}${splitSeries("seriesByProvider", f.provider)}${splitSeries("seriesByClient", f.userAgent)}${breakdown("byGateway", f.gateway)}${breakdown("byProvider", f.provider)}${breakdown("byModel", f.model)}${breakdown("byClient", f.userAgent)}${status}${recent}${tagKeys}${tagged}${byUser}
+      }${splitSeries("seriesByGateway", f.gateway)}${splitSeries("seriesByModel", f.model)}${splitSeries("seriesByProvider", f.provider)}${splitSeries("seriesByClient", f.userAgent)}${breakdown("byGateway", f.gateway)}${breakdown("byProvider", f.provider)}${breakdown("byModel", f.model)}${breakdown("byClient", f.userAgent)}${status}${recent}${tagKeys}${tagged}${byUser}${flows}
     }
   }
 }`;
@@ -893,6 +928,51 @@ function withUntagged(rows: AiGatewayBreakdownRow[], totals: AiGatewayTotals): A
 	];
 }
 
+/**
+ * The flow rows: tagged requests per user, gateway and model as they come, then, per gateway and
+ * model, whatever the tagged rows leave of all requests as a "(not tagged)" flow. Spend residue
+ * within a billionth of the pair's total is 0, as in withUntagged.
+ */
+function foldFlows(tagged: RawRow[], pairs: RawRow[], f: NonNullable<ResolvedFields["requests"]>): AiGatewayFlow[] {
+	const gatewayOf = (row: RawRow) => text(row.dimensions?.[f.gateway as string]).trim() || "(unknown)";
+	const modelOf = (row: RawRow) => text(row.dimensions?.[f.model as string]).trim() || "(unknown)";
+	const tokensOf = (row: RawRow) => addNullable(sumField(row, f.tokensIn), sumField(row, f.tokensOut));
+	const byPath = new Map<string, AiGatewayFlow>();
+	const covered = new Map<string, { requests: number; tokens: number | null; cost: number | null }>();
+	for (const row of tagged) {
+		const user = userLabel(text(row.dimensions?.[f.metadataValue as string]));
+		const gateway = gatewayOf(row);
+		const model = modelOf(row);
+		const path = JSON.stringify([user, gateway, model]);
+		const flow = byPath.get(path) ?? { user, gateway, model, requests: 0, tokens: null, cost: null };
+		flow.requests += row.count;
+		flow.tokens = addNullable(flow.tokens, tokensOf(row));
+		flow.cost = addNullable(flow.cost, sumField(row, f.cost));
+		byPath.set(path, flow);
+		const pair = JSON.stringify([gateway, model]);
+		const seen = covered.get(pair) ?? { requests: 0, tokens: null, cost: null };
+		seen.requests += row.count;
+		seen.tokens = addNullable(seen.tokens, tokensOf(row));
+		seen.cost = addNullable(seen.cost, sumField(row, f.cost));
+		covered.set(pair, seen);
+	}
+	const left = (whole: number | null, part: number | null) => {
+		if (whole === null) return null;
+		const rest = whole - (part ?? 0);
+		return rest <= Math.abs(whole) * 1e-9 ? 0 : rest;
+	};
+	const untagged: AiGatewayFlow[] = [];
+	for (const row of pairs) {
+		const gateway = gatewayOf(row);
+		const model = modelOf(row);
+		const seen = covered.get(JSON.stringify([gateway, model]));
+		const requests = row.count - (seen?.requests ?? 0);
+		if (requests <= 0) continue;
+		untagged.push({ user: "(not tagged)", gateway, model, requests, tokens: left(tokensOf(row), seen?.tokens ?? null), cost: left(sumField(row, f.cost), seen?.cost ?? null) });
+	}
+	return [...byPath.values(), ...untagged].sort((a, b) => b.requests - a.requests);
+}
+
 const flag = (value: unknown) => value === 1 || value === true || value === "1" || value === "true";
 const text = (value: unknown) => (value === null || value === undefined ? "" : String(value));
 
@@ -976,6 +1056,8 @@ export async function fetchAiGatewayUsage(
 		seriesByTag?: RawRow[];
 		byUser?: RawRow[];
 		seriesByUser?: RawRow[];
+		flows?: RawRow[];
+		flowPairs?: RawRow[];
 		total?: RawRow[];
 		previous?: RawRow[];
 		byGateway?: RawRow[];
@@ -1182,6 +1264,7 @@ export async function fetchAiGatewayUsage(
 		sessionHealth,
 		tags,
 		byUser,
+		flows: hasUsers && md.gateway && md.model ? foldFlows(account?.flows || [], account?.flowPairs || [], md) : null,
 		recent: foldRecent(account?.recent || [], fields.requests),
 		previous,
 		previousWindow: prev,

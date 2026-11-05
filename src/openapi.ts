@@ -335,7 +335,7 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 					tags: ["AI Gateway"],
 					summary: "AI Gateway overview and drill-down",
 					description:
-						"Window of at most 30 days. Requests, tokens, spend, errors, cache and p50/p95 latency for the window and for the same-length window before it; breakdowns by gateway, provider, model, client, user and status code; and the 50 most recent requests. `filter` narrows every figure to one gateway, provider, model and/or user (exact values). Users are the values of the `user` key in the `cf-aig-metadata` header, shown as sent (full email addresses). Field names are read from the account's live GraphQL schema; a filter the schema cannot apply is a 400.",
+						"Window of at most 30 days. Requests, tokens, spend, errors, cache and p50/p95 latency for the window and for the same-length window before it; breakdowns by gateway, provider, model, client, user and status code; `flows`, one row per user → gateway → model path (with \"(not tagged)\" for requests no user tag covers); and the 50 most recent requests. `filter` narrows every figure to one gateway, provider, model and/or user (exact values). Users are the values of the `user` key in the `cf-aig-metadata` header, shown as sent (full email addresses). Field names are read from the account's live GraphQL schema; a filter the schema cannot apply is a 400.",
 					requestBody: jsonBody({
 						type: "object",
 						required: ["accountId", "from", "to"],

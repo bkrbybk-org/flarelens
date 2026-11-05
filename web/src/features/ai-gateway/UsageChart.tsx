@@ -96,17 +96,17 @@ export function UsageChart({
 	return (
 		<div>
 			<div className="relative">
-				<svg viewBox={`0 0 ${W} ${H}`} className="h-[240px] w-full" role="img" aria-label={`${measure}${mode === "accumulated" ? ", accumulated" : mode === "none" ? " by group" : ""}`} {...hoverProps}>
+				<svg viewBox={`0 0 ${W} ${H}`} className="h-60 w-full" role="img" aria-label={`${measure}${mode === "accumulated" ? ", accumulated" : mode === "none" ? " by group" : ""}`} {...hoverProps}>
 					{[0, 0.5, 1].map((fraction) => {
 						const ly = PAD_T + innerH * fraction;
 						return (
 							<g key={fraction}>
 								<line x1={PAD_L} x2={plotRight} y1={ly} y2={ly} className="stroke-zinc-200 dark:stroke-zinc-800" />
-								<text x={PAD_L - 8} y={ly + 4} textAnchor="end" className="fill-zinc-400 text-[10px]">
+								<text x={PAD_L - 8} y={ly + 4} textAnchor="end" className="fill-zinc-400 text-[0.625rem]">
 									{format(max * (1 - fraction))}
 								</text>
 								{showSpend && (
-									<text x={plotRight + 8} y={ly + 4} textAnchor="start" className="fill-amber-500 text-[10px]">
+									<text x={plotRight + 8} y={ly + 4} textAnchor="start" className="fill-amber-500 text-[0.625rem]">
 										{formatCost(spendMax * (1 - fraction))}
 									</text>
 								)}
@@ -170,7 +170,7 @@ export function UsageChart({
 					{budget ? (
 						<g>
 							<line x1={PAD_L} x2={plotRight} y1={y(budget)} y2={y(budget)} stroke={BUDGET_COLOR} strokeWidth={1.5} strokeDasharray="6 4" />
-							<text x={plotRight - 4} y={y(budget) - 4} textAnchor="end" className="fill-red-500 text-[10px]">
+							<text x={plotRight - 4} y={y(budget) - 4} textAnchor="end" className="fill-red-500 text-[0.625rem]">
 								Budget {formatCost(budget)}
 							</text>
 						</g>
@@ -188,7 +188,7 @@ export function UsageChart({
 
 					{columns.map((c, i) =>
 						i % labelEvery === 0 ? (
-							<text key={c.ts} x={xMid(i)} y={H - 8} textAnchor="middle" className="fill-zinc-400 text-[10px]">
+							<text key={c.ts} x={xMid(i)} y={H - 8} textAnchor="middle" className="fill-zinc-400 text-[0.625rem]">
 								{mode === "none" ? label(c.ts).slice(0, 18) : axisLabel(c.ts, granularity)}
 							</text>
 						) : null,

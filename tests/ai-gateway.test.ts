@@ -540,6 +540,46 @@ describe("overview and drill-down", () => {
 		expect(untagged.cost).toBe(0);
 	});
 
+	it("maps who uses which gateway for which model, with what no user tag covers as its own flow", async () => {
+		const ACCT = "69696969696969696969696969696969";
+		mockUpstream({
+			schema: {
+				sums: { aiGatewayRequestsAdaptiveGroupsType: ["tokensIn", "tokensOut", "cost"] },
+				dimensions: { aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "gateway", "model", "metadataKey", "metadataValue", "metadataKeys", "metadataValues"] },
+			},
+			primary: {
+				series: [],
+				total: [row({}, 12, { cost: 1 })],
+				flows: [
+					row({ metadataValue: "alice@example.com", gateway: "prod", model: "@cf/meta/llama" }, 5, { tokensIn: 50, tokensOut: 5, cost: 0.7 }),
+					row({ metadataValue: "bob@example.com", gateway: "prod", model: "@cf/meta/llama" }, 2, { tokensIn: 20, tokensOut: 2, cost: 0.1 }),
+					row({ metadataValue: "alice@example.com", gateway: "dev", model: "gpt-x" }, 1, { tokensIn: 10, tokensOut: 1, cost: 0.2 }),
+				],
+				flowPairs: [
+					// 0.7 + 0.1 leaves floating-point residue against 0.8: no untagged spend, 3 untagged requests.
+					row({ gateway: "prod", model: "@cf/meta/llama" }, 10, { tokensIn: 100, tokensOut: 10, cost: 0.8 }),
+					// Fully tagged: no untagged flow.
+					row({ gateway: "dev", model: "gpt-x" }, 1, { tokensIn: 10, tokensOut: 1, cost: 0.2 }),
+					row({ gateway: "dev", model: "" }, 1, { tokensIn: 0, tokensOut: 0, cost: 0 }),
+				],
+			},
+		});
+		const res = await usage({ accountId: ACCT, ...win() });
+		expect(res.status).toBe(200);
+		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		expect(result.flows).toEqual([
+			{ user: "alice@example.com", gateway: "prod", model: "@cf/meta/llama", requests: 5, tokens: 55, cost: 0.7 },
+			{ user: "(not tagged)", gateway: "prod", model: "@cf/meta/llama", requests: 3, tokens: 33, cost: 0 },
+			{ user: "bob@example.com", gateway: "prod", model: "@cf/meta/llama", requests: 2, tokens: 22, cost: 0.1 },
+			{ user: "alice@example.com", gateway: "dev", model: "gpt-x", requests: 1, tokens: 11, cost: 0.2 },
+			{ user: "(not tagged)", gateway: "dev", model: "(unknown)", requests: 1, tokens: 0, cost: 0 },
+		]);
+		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string };
+		// The user value is a variable-keyed dimension, and the tagged flows only read requests carrying the key.
+		expect(query.query).toMatch(/flows: \w+\(filter: \{[^}]*metadataKeys_has: \$userKey \}, limit: 500, orderBy: \[count_DESC\]\) \{\s*count\s*dimensions \{ metadataValue\(key: \$userKey\) gateway model \}/);
+		expect(query.query).toMatch(/flowPairs: \w+\(filter: \{(?![^}]*metadataKeys_has)[^}]*\}, limit: 500/);
+	});
+
 	it("drills into one user with the value as a variable, and says session analysis cannot follow", async () => {
 		const ACCT = "77777777777777777777777777777777";
 		mockUpstream({

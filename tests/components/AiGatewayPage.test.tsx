@@ -81,6 +81,13 @@ const usage: AiGatewayUsageResult = {
 	byStatus: [{ statusCode: "200", rateLimited: false, requests: 10 }],
 	byClient: [slice("opencode", 10)],
 	byUser: [slice("alice@example.com", 6, { cost: 0.4 }), slice("bob@example.com", 1, { cost: 0.05 }), slice("(not tagged)", 3, { cost: 0.05 })],
+	flows: [
+		{ user: "alice@example.com", gateway: "prod", model: "@cf/meta/llama-3", requests: 5, tokens: 55, cost: 0.35 },
+		{ user: "alice@example.com", gateway: "staging", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05 },
+		{ user: "(not tagged)", gateway: "staging", model: "@cf/a", requests: 2, tokens: 22, cost: 0.05 },
+		{ user: "bob@example.com", gateway: "prod", model: "@cf/a", requests: 1, tokens: 11, cost: 0.05 },
+		{ user: "(not tagged)", gateway: "prod", model: "@cf/a", requests: 1, tokens: 11, cost: 0 },
+	],
 	tags: {
 		keys: [
 			{ key: "team", requests: 8, sensitive: false },
@@ -281,6 +288,36 @@ describe("AiGatewayPage", () => {
 		const first = donuts[0].closest("section")!;
 		await user.click(within(first).getByRole("button", { name: /alice@example\.com/ }));
 		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { user: "alice@example.com" } });
+	});
+
+	it("shows who uses which gateway for which model, traces a node's paths, and drills from one", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		// Sized by spend, as the chart opens on it: alice's two paths add to $0.40.
+		expect(flows).toHaveTextContent("sized by spend");
+		expect(within(flows).getByRole("button", { name: "User alice@example.com: $0.40. Drill in" })).toBeInTheDocument();
+		// Models read without their @cf/vendor/ prefix; the untagged remainder is shown but not drillable.
+		expect(within(flows).getByRole("button", { name: /^Model llama-3: \$0\.35/ })).toBeInTheDocument();
+		expect(within(flows).queryByRole("button", { name: /^User \(not tagged\)/ })).toBeNull();
+		expect(flows).toHaveTextContent("(not tagged) · $0.05");
+		// Pointing at a model lights only the paths that reach it: alice → prod, then (alice, prod) → llama-3.
+		await user.hover(within(flows).getByRole("button", { name: /^Model llama-3/ }));
+		expect(flows.querySelectorAll('path[fill-opacity="0.75"]')).toHaveLength(2);
+		await user.unhover(within(flows).getByRole("button", { name: /^Model llama-3/ }));
+		// Errors are not carried per path: the diagram sizes by requests then.
+		await user.click(screen.getByRole("button", { name: "Errors" }));
+		expect(flows).toHaveTextContent("sized by requests");
+		expect(within(flows).getByRole("button", { name: "User alice@example.com: 6. Drill in" })).toBeInTheDocument();
+		await user.click(within(flows).getByRole("button", { name: /^Gateway prod/ }));
+		expect(vi.mocked(fetchAiGatewayUsage).mock.lastCall?.[1]).toMatchObject({ filter: { gateway: "prod" } });
+	});
+
+	it("leaves the flow diagram out where the schema has no user, gateway or model to map", async () => {
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, flows: null });
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		await screen.findByRole("heading", { name: /^Spend by day/ });
+		expect(screen.queryByRole("heading", { name: "Who uses what" })).toBeNull();
 	});
 
 	it("picks the timeframe on the page, and buckets a week by day", async () => {
