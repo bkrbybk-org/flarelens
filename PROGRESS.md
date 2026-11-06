@@ -4,14 +4,14 @@ Status snapshot, last reviewed **2026-11-04** against a read of the tree, the ga
 probe of the deployed Worker (running version and response headers). See [README.md](README.md) for how to run the app; this file tracks where the
 work stands.
 
-**TL;DR** — Twenty-two sections, 30 API routes (28 under `/api/*`, plus `/health` and `/docs`), 1,336 tests green across 98 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
+**TL;DR** — Twenty-two sections, 31 API routes (29 under `/api/*`, plus `/health` and `/docs`), 1,358 tests green across 98 files, all type-checked, `tsc -b` clean, 0 lint errors and 0 warnings, `npm audit` clean.
 **Deployed and live** at `flarelens.example.com`, behind Cloudflare Access, running in server
 mode: the Worker holds a read-only `CF_API_TOKEN` and Access authenticates operators, so the UI
 no longer asks for a token. Every section has been exercised against real account data through an
 Access service token. Two halves were built from Cloudflare's docs before the token could read
 them and have since been verified live: bot management (2026-09-27) and API Shield (2026-09-27).
 Connector CPU/memory is the one feature still tested only against mocks — see Open issues.
-Running version `3b835b01`, deployed 2026-11-06 (gateway settings, dynamic routes and refusal reasons from the AI Gateway REST API; before it the same day, `a9251d95`: hide names while presenting; Sankey tag column, latency colour, tour, PNG/SVG export, Blocked → AI Security link; before it the same day, `6c7778e5`: Sankey margins fitted to their labels; `a5925e16`: Sankey sizes by requests with the action column; 2026-11-05, `25b865ef`: Sankey action column; `d817d068`: Sankey columns and colours, band figures and a small-path cut-off, table view and CSV export; before it the same day, `26010d25`: Sankey band drill and change since the previous window; `b35e5903`: Sankey health colours, tap-to-pin traces and the untagged-gateway insight; before it the same day, `aacdabff`: AI Gateway user → gateway → model Sankey, chart axis labels scale with presentation text; before it the same day, `be6b68a9`: larger text in presentation mode; before it the same day, `59a89e1b`: AI Gateway fits a 1080p presentation screen, no float residue as untagged spend; before it the same day, `1f977c7a`: AI Gateway chart opens on spend; before it, `326b382b` on 2026-11-04: AI Gateway page laid out for a demo; before it the same day, `46b2b954`: AI Gateway cost and tokens per user; before it the same day, `61d851f8`: AI Gateway cost view: budget, forecast, granularity, chart types, donuts; before it the same day, `72fe6709`: AI Gateway spend by tag; before it the same day, `720c787b`: AI Gateway sessions, clients, provider names, spend line, active days, session health, prompt cache; before it the same day, `a9e33353`: page rotation in presentation mode; before it the same day, `662526be`: full-screen presentation mode on every page; before it the same day, `59db4f87`: AI Gateway timeframe buttons and stacked chart by gateway, model, Workers AI vs third-party; before it the same day, `19bcacaa`: AI Gateway overview and drill-down; before it, 2026-10-28, `1ba2856c`: Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
+Running version `e9c8999e`, deployed 2026-11-06 (budgets, coverage gaps, flags, slice-aware logs, chart by action, cache savings, emails hidden on every page; before it the same day, `3b835b01`: gateway settings, dynamic routes and refusal reasons from the AI Gateway REST API; before it the same day, `a9251d95`: hide names while presenting; Sankey tag column, latency colour, tour, PNG/SVG export, Blocked → AI Security link; before it the same day, `6c7778e5`: Sankey margins fitted to their labels; `a5925e16`: Sankey sizes by requests with the action column; 2026-11-05, `25b865ef`: Sankey action column; `d817d068`: Sankey columns and colours, band figures and a small-path cut-off, table view and CSV export; before it the same day, `26010d25`: Sankey band drill and change since the previous window; `b35e5903`: Sankey health colours, tap-to-pin traces and the untagged-gateway insight; before it the same day, `aacdabff`: AI Gateway user → gateway → model Sankey, chart axis labels scale with presentation text; before it the same day, `be6b68a9`: larger text in presentation mode; before it the same day, `59a89e1b`: AI Gateway fits a 1080p presentation screen, no float residue as untagged spend; before it the same day, `1f977c7a`: AI Gateway chart opens on spend; before it, `326b382b` on 2026-11-04: AI Gateway page laid out for a demo; before it the same day, `46b2b954`: AI Gateway cost and tokens per user; before it the same day, `61d851f8`: AI Gateway cost view: budget, forecast, granularity, chart types, donuts; before it the same day, `72fe6709`: AI Gateway spend by tag; before it the same day, `720c787b`: AI Gateway sessions, clients, provider names, spend line, active days, session health, prompt cache; before it the same day, `a9e33353`: page rotation in presentation mode; before it the same day, `662526be`: full-screen presentation mode on every page; before it the same day, `59db4f87`: AI Gateway timeframe buttons and stacked chart by gateway, model, Workers AI vs third-party; before it the same day, `19bcacaa`: AI Gateway overview and drill-down; before it, 2026-10-28, `1ba2856c`: Request Trace: every rule's action and collapsible condition, match credited to the right deployment; before it, 2026-10-27, `62f72dcb`: 7-day slice search, why each rule matched or not, a draft's reach, the rule across the zone, the client's timeline, OWASP and bot detail, managed-rule exception options, Markdown case report; before it the same day, `fc809574`: Request Trace and Why Blocked? merged into one false-positive / false-negative page; before it the same day, `c044627c`: added accounts, Why Was This Blocked?). Before it, 2026-09-28: full WAF counts from the groups dataset, timeouts, rulesets cache, AI-crawler finding, managed-rule overrides, Audit Log, Access Policy Tester. Each earlier deploy, and what
 it carried, is recorded under Recently resolved; the performance baseline from `fe2564bb` stands:
 `/api/data` 13.8s → 4.4s, `/api/access/tunnels` 12.7s → 4.0s (now ~5.2s with the connector reads),
 `/api/pqc/report` 6.5s → 4.3s, uncached, measured in production.
@@ -261,7 +261,7 @@ DOM; and a `component` project, `environment: "jsdom"` + `@testing-library/react
 rendered components — `tests/components/setup.ts` wires jest-dom matchers and RTL's auto-cleanup
 into that project only, so the node project's Workers-shaped globals stay untouched).
 
-98 test files, 1,336 tests. [README.md](README.md#tests) keeps the per-file table by layer (unit,
+98 test files, 1,358 tests. [README.md](README.md#tests) keeps the per-file table by layer (unit,
 component, integration, system, compatibility, security, regression, opt-in E2E) and is the one
 place that list is maintained — this file used to carry a second copy that had fallen a dozen
 files behind.
@@ -400,6 +400,31 @@ files behind.
 | P3 | **Connector metrics not verified live** | CPU/memory in the tunnel drawer is tested against mocks only | Publish one connector's metrics endpoint behind Access and set the `TUNNEL_METRICS` secret (README has the setup) |
 
 ### Recently resolved
+
+- **Budgets, coverage gaps, flagged-but-allowed, and logs that follow the slice (2026-11-06, `e9c8999e`).** Picked as 3–10 of a list of twelve.
+  - Logs follow the slice: gateway by path, provider and model by `filters`, and a user by
+    `metadata.key`/`metadata.value`, so Cloudflare matches it and no metadata is read here (probed: the
+    log counts equal analytics for each user). `readFilter` is shared with the usage route.
+  - *Flagged but allowed* (`/api/ai-gateway/flags`): Guardrails flags have no log filter, so this scans
+    successful logs, at most 250 a gateway on 8 gateways, and says how much it read. `dlp_action` does
+    filter, but only in capitals (`FLAG`), and `dlp_profiles` names policies in `policy_ids`. Live, 30
+    days: 25 of 363 read, 4 Prompt Injection flags on real requests; all 33 DLP hits sit on calls to the
+    guard model, which AI Gateway logs as requests of their own, so the panel counts them apart.
+  - Chart by action: `seriesByAction` over the status code, cache and rate-limit flags, folded as the
+    flows are; opens on requests unless a measure was picked. Live it sums to the totals and matches the
+    flows per action (1,236 over 29 days).
+  - Coverage gaps from settings × traffic; the busiest gateway nothing blocks on leads At a glance,
+    after anything failing. Cache savings: each model's average for requests that reached it × its
+    cached requests (blocked ones do not lower the average); free models are counted apart.
+  - Budgets per user and tag value, per account in this browser, on the same run-rate forecast as the
+    account budget; while drilled in, the panel says the figures cover only the slice. A column's
+    *Other* names what it holds.
+  - Hide names now reaches every page, with `useMaskEmails`, one observer on what was rendered rather
+    than a change per component: swept live, emails showed only on the audit log, Gateway Policies and
+    DNS. Masked before paint, tooltips included, restored on leaving (Gateway Policies live: 7 on screen,
+    0 presenting, 7 after). The audit log could not be re-proved on real rows: its latest 200 were by
+    then all this token's own views. Email-shaped text only; typed input and placeholders are left alone.
+  - Seen in passing, not fixed: the Tunnel Map logs duplicate React keys for apps sharing a host and target.
 
 - **Gateway settings, dynamic routes and why requests were refused (2026-11-06, `3b835b01`).**
   With AI Gateway: Read on the token (both the `.dev.vars` one and the Worker's answer now), probed

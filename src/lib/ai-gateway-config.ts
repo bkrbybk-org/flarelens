@@ -7,7 +7,12 @@
  *   send to, and what it falls back to. The logs record a routed request under the route's name
  *   (`dynamic/<route>`), not the model that answered, so this says where a route *can* go;
  * - the window's failed and refused requests from the Logs API, with why: the Guardrails
- *   categories that blocked them, a DLP block, a rate limit, a payment refusal.
+ *   categories that blocked them, a DLP block, a rate limit, a payment refusal;
+ * - what Guardrails and DLP flagged on requests they let through, from a bounded scan of the
+ *   window's successful logs, which says how much of them it read.
+ *
+ * Both log reads follow the page's slice, with the API's own filters: a user is matched on the
+ * `user` metadata key by Cloudflare, so no metadata has to be read here to do it.
  *
  * Log entries carry the prompt and the answer (`request`, `response`) and the caller's metadata.
  * None of those is read past parsing: every log is reduced to named fields here, before anything
@@ -40,6 +45,35 @@ const LOG_PAGE = 50;
 const LOG_PAGES = 4;
 /** How many of the latest refusals are listed one by one. */
 const RECENT_REFUSALS = 50;
+/**
+ * The flag scan's bounds. Guardrails flags have no log filter, so finding them means reading
+ * successful logs: 250 a gateway, on at most 8 gateways, keeps one call well inside a Worker's
+ * subrequest allowance. What falls outside is reported, never silently left out.
+ */
+const FLAG_PAGES = 5;
+const FLAG_GATEWAYS = 8;
+
+/** The page's slice, as the logs can apply it. */
+export interface AiGatewayLogSlice {
+	gateway?: string;
+	provider?: string;
+	model?: string;
+	user?: string;
+}
+
+/** The Logs API's `filters` for a slice; the gateway is a path, not a filter. */
+function sliceFilters(slice: AiGatewayLogSlice): { key: string; operator: string; value: string[] }[] {
+	return [
+		...(slice.provider ? [{ key: "provider", operator: "eq", value: [slice.provider] }] : []),
+		...(slice.model ? [{ key: "model", operator: "eq", value: [slice.model] }] : []),
+		...(slice.user
+			? [
+					{ key: "metadata.key", operator: "eq", value: ["user"] },
+					{ key: "metadata.value", operator: "eq", value: [slice.user] },
+				]
+			: []),
+	];
+}
 
 export interface GuardrailSide {
 	block: string[];
@@ -155,7 +189,34 @@ interface RawStep {
 	outputs?: Record<string, { elementId?: string }> | null;
 }
 
-/** What a refused log entry is reduced to before anything else looks at it. */
+export type FlagSide = "prompt" | "response";
+
+export interface AiGatewayFlagGroup {
+	kind: "guardrails" | "dlp";
+	/** A category code, or a DLP policy's name. */
+	detail: string;
+	side: FlagSide | null;
+	count: number;
+	/** How many of those are logged calls to the guard model itself, not an application's request. */
+	onGuardModel: number;
+	gateways: string[];
+}
+
+export interface AiGatewayFlagsResult {
+	groups: AiGatewayFlagGroup[];
+	/** Requests carrying at least one flag, of those read. */
+	flagged: number;
+	/** Successful logs read, and how many the window holds on the gateways scanned. */
+	scanned: number;
+	total: number;
+	/** Gateways with Guardrails or DLP left out by the scan's bound. */
+	skipped: string[];
+	failed: { gateway: string; error: string }[];
+	categoryNames: Record<string, string>;
+	error: string | null;
+}
+
+/** What a log entry is reduced to before anything else looks at it. */
 interface RawLog {
 	created_at?: string;
 	model?: string;
@@ -164,6 +225,7 @@ interface RawLog {
 	success?: boolean;
 	guardrails?: { prompt?: Record<string, string>; response?: Record<string, string> } | null;
 	dlp_action?: string | null;
+	dlp_profiles?: { policy_ids?: string[]; check?: string }[] | null;
 	rejection_reason?: string | null;
 }
 
@@ -367,14 +429,87 @@ export function groupRefusals(rows: AiGatewayRefusal[]): AiGatewayRefusalGroup[]
 	return [...groups.values()].sort((a, b) => b.count - a.count);
 }
 
-export async function fetchAiGatewayRefusals(accountId: string, token: string, since: string, until: string): Promise<AiGatewayRefusalsResult> {
+/** What one allowed request was flagged for, from its named fields only. */
+export function flagsOf(log: RawLog): { kind: "guardrails" | "dlp"; detail: string; side: FlagSide | null }[] {
+	const out: { kind: "guardrails" | "dlp"; detail: string; side: FlagSide | null }[] = [];
+	for (const side of ["prompt", "response"] as const) {
+		for (const [code, action] of Object.entries(log.guardrails?.[side] ?? {})) if (action === "FLAG") out.push({ kind: "guardrails", detail: code, side });
+	}
+	if (log.dlp_action === "FLAG") {
+		const seen = new Set<string>();
+		for (const hit of log.dlp_profiles ?? []) {
+			const side: FlagSide | null = hit.check === "REQUEST" ? "prompt" : hit.check === "RESPONSE" ? "response" : null;
+			for (const policy of hit.policy_ids ?? []) {
+				const id = JSON.stringify([policy, side]);
+				if (seen.has(id)) continue;
+				seen.add(id);
+				out.push({ kind: "dlp", detail: policy, side });
+			}
+		}
+		if (!seen.size) out.push({ kind: "dlp", detail: "(policy not named)", side: null });
+	}
+	return out;
+}
+
+export async function fetchAiGatewayFlags(accountId: string, token: string, since: string, until: string, slice: AiGatewayLogSlice = {}): Promise<AiGatewayFlagsResult> {
+	const listed = await listGateways(accountId, token);
+	const empty = { groups: [], flagged: 0, scanned: 0, total: 0, skipped: [], failed: [], categoryNames: GUARDRAIL_CATEGORIES };
+	if ("error" in listed) return { ...empty, error: listed.error };
+	const watching = listed.gateways.filter((g) => g.collect_logs !== false && (g.guardrails || g.dlp?.enabled) && (!slice.gateway || g.id === slice.gateway));
+	const scanning = watching.slice(0, FLAG_GATEWAYS);
+	const groups = new Map<string, AiGatewayFlagGroup>();
+	const failed: AiGatewayFlagsResult["failed"] = [];
+	let flagged = 0;
+	let scanned = 0;
+	let total = 0;
+	const filters = sliceFilters(slice);
+	await mapWithConcurrency(scanning, 4, async (g) => {
+		for (let page = 1; page <= FLAG_PAGES; page++) {
+			const query = new URLSearchParams({ per_page: String(LOG_PAGE), page: String(page), success: "true", start_date: since, end_date: until, order_by: "created_at", order_by_direction: "desc" });
+			if (filters.length) query.set("filters", JSON.stringify(filters));
+			const read = await getJson<RawLog[]>(`/accounts/${accountId}/ai-gateway/gateways/${encodeURIComponent(g.id)}/logs?${query}`, token);
+			if (!read.ok) {
+				failed.push({ gateway: g.id, error: read.error });
+				return;
+			}
+			if (page === 1) total += read.body.result_info?.total_count ?? 0;
+			const logs = read.body.result ?? [];
+			scanned += logs.length;
+			for (const log of logs) {
+				const flags = flagsOf(log);
+				if (flags.length) flagged += 1;
+				for (const flag of flags) {
+					const id = JSON.stringify([flag.kind, flag.detail, flag.side]);
+					const group = groups.get(id) ?? { ...flag, count: 0, onGuardModel: 0, gateways: [] };
+					group.count += 1;
+					if (GUARD_MODELS.test(log.model ?? "")) group.onGuardModel += 1;
+					if (!group.gateways.includes(g.id)) group.gateways.push(g.id);
+					groups.set(id, group);
+				}
+			}
+			if (logs.length < LOG_PAGE) return;
+		}
+	});
+	return {
+		...empty,
+		groups: [...groups.values()].sort((a, b) => b.count - a.count),
+		flagged,
+		scanned,
+		total,
+		skipped: watching.slice(FLAG_GATEWAYS).map((g) => g.id),
+		failed: failed.sort((a, b) => a.gateway.localeCompare(b.gateway)),
+		error: null,
+	};
+}
+
+export async function fetchAiGatewayRefusals(accountId: string, token: string, since: string, until: string, slice: AiGatewayLogSlice = {}): Promise<AiGatewayRefusalsResult> {
 	const listed = await listGateways(accountId, token);
 	if ("error" in listed) return { groups: [], recent: [], total: 0, read: 0, failed: [], categoryNames: GUARDRAIL_CATEGORIES, error: listed.error };
 	const rows: AiGatewayRefusal[] = [];
 	const failed: AiGatewayRefusalsResult["failed"] = [];
 	let total = 0;
 	await mapWithConcurrency(
-		listed.gateways.filter((g) => g.collect_logs !== false),
+		listed.gateways.filter((g) => g.collect_logs !== false && (!slice.gateway || g.id === slice.gateway)),
 		4,
 		async (g) => {
 			for (let page = 1; page <= LOG_PAGES; page++) {
@@ -387,6 +522,7 @@ export async function fetchAiGatewayRefusals(accountId: string, token: string, s
 					order_by: "created_at",
 					order_by_direction: "desc",
 				});
+				if (sliceFilters(slice).length) query.set("filters", JSON.stringify(sliceFilters(slice)));
 				const read = await getJson<RawLog[]>(`/accounts/${accountId}/ai-gateway/gateways/${encodeURIComponent(g.id)}/logs?${query}`, token);
 				if (!read.ok) {
 					failed.push({ gateway: g.id, error: read.error });

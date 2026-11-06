@@ -30,7 +30,7 @@ import { Sidebar, type AppVersion } from "./components/shell/Sidebar";
 import { Topbar } from "./components/shell/Topbar";
 import { PresentationBar } from "./components/shell/PresentationBar";
 import { useAutoRefresh, usePresentation, usePresentationTextScale } from "./hooks/usePresentation";
-import { HideNamesContext, useHideNamesPreference } from "./hooks/useHideNames";
+import { HideNamesContext, useHideNamesPreference, useMaskEmails } from "./hooks/useHideNames";
 import { loadRotation, saveRotation, usePageRotation, type RotationConfig } from "./hooks/usePageRotation";
 import { CommandPalette } from "./components/shell/CommandPalette";
 import { NameDialog } from "./components/shell/NameDialog";
@@ -326,6 +326,7 @@ export default function App() {
 	useAutoRefresh(presentation.active ? autoRefreshMs : 0, currentRefresh, refreshing);
 	const [textScale, setTextScale] = usePresentationTextScale(presentation.active);
 	const [hideNames, setHideNames] = useHideNamesPreference();
+	useMaskEmails(presentation.active && hideNames);
 	// Page rotation: an unattended screen loops through chosen pages. Only while presenting —
 	// leaving full screen, by any means, stops it.
 	const [rotationConfig, setRotationConfig] = useState<RotationConfig>(loadRotation);

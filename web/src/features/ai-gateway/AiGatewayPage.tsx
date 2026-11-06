@@ -13,10 +13,11 @@ import { useAiGatewayUsage } from "./useAiGatewayUsage";
 import { UsageChart, type ChartMode, type ChartType } from "./UsageChart";
 import { DonutPanel, type DonutSlice } from "./DonutPanel";
 import { FlowSankey, type FlowColumn, type FlowDrill } from "./FlowSankey";
-import { GatewaySettingsPanel, RefusalsPanel, blockedSummary, routeNote, useAiGatewayExtras } from "./GatewayConfig";
+import { FlagsPanel, GatewaySettingsPanel, RefusalsPanel, blockedSummary, routeNote, useAiGatewayExtras } from "./GatewayConfig";
+import { BudgetsPanel, budgetStatus as rowBudgetStatus, useBudgets, type BudgetRow } from "./Budgets";
 import { aliasLetters, useHideNames } from "../../hooks/useHideNames";
 import { storageGet, storageSet } from "../../lib/storage";
-import { buildInsights } from "./insights";
+import { buildInsights, cacheInsight, cacheSavings, coverageGaps, coverageInsight } from "./insights";
 import {
 	EMPTY_TOTALS,
 	FILTER_ORDER,
@@ -120,6 +121,7 @@ const SPLIT_LABEL: Record<Split, string> = {
 	user: "User",
 	tag: "Tag",
 	source: "Workers AI vs third-party",
+	action: "Action",
 };
 /** In running text: "split by gateway", but "Workers AI" keeps its capitals. */
 const splitPhrase = (split: Split) => (split === "source" ? SPLIT_LABEL.source : SPLIT_LABEL[split].toLowerCase());
@@ -494,8 +496,10 @@ export function AiGatewayPage({
 	// The chart opens on spend, the figure a demo leads with, unless the window carries no cost
 	// at all (no priced models), where requests is the more useful opening. A pick sticks.
 	const [pickedMetric, setMetric] = useState<Metric | null>(null);
-	const metric: Metric = pickedMetric ?? (result && !result.series.some((p) => p.cost !== null) ? "requests" : "cost");
 	const [split, setSplit] = useState<Split>("source");
+	// Grouped by action it opens on requests too: blocked and cached requests cost nothing, so by
+	// spend the actions worth seeing would not be drawn.
+	const metric: Metric = pickedMetric ?? (split === "action" || (result && !result.series.some((p) => p.cost !== null)) ? "requests" : "cost");
 	const [showSpend, setShowSpend] = useState(true);
 	// The tag key spend is broken down by, carried in the URL (#/ai-gateway?tag=team) like the slice.
 	const [tag, setTag] = useState(() => getHashParams().get("tag") ?? "");
@@ -527,7 +531,9 @@ export function AiGatewayPage({
 	const { from, to } = timeRange.bounds();
 	const filterKey = FILTER_ORDER.map((k) => filter[k] ?? "").join("\u0000");
 	// Gateway settings, routes and the window's refusals: from the REST API, beside the analytics.
-	const extras = useAiGatewayExtras(session.token, session.accountId, from, to, `${timeRange.minutes}:${reloadKey}`, onAuthError);
+	const extras = useAiGatewayExtras(session.token, session.accountId, from, to, `${timeRange.minutes}:${reloadKey}`, filter, filterKey, onAuthError);
+	const sliced = FILTER_ORDER.some((k) => filter[k]);
+	const [budgets, setBudget] = useBudgets(session.accountId);
 
 	useEffect(() => {
 		load(session.token, session.accountId, from, to, granularity, filter, tag);
@@ -579,7 +585,18 @@ export function AiGatewayPage({
 	const previous = result?.previous ?? null;
 	const datasets = result?.datasets;
 	const tokens = totals.tokensIn === null && totals.tokensOut === null ? null : (totals.tokensIn ?? 0) + (totals.tokensOut ?? 0);
-	const insights = useMemo(() => (result ? buildInsights(result) : []), [result]);
+	// Where protection is missing goes straight after anything failing: it should not wait behind "show more".
+	const gaps = useMemo(() => coverageGaps(extras.config, result?.byGateway ?? []), [extras.config, result]);
+	const savings = useMemo(() => cacheSavings(result?.flows ?? null), [result]);
+	const insights = useMemo(() => {
+		if (!result) return [];
+		const base = buildInsights(result);
+		const coverage = coverageInsight(gaps, result);
+		const cache = cacheInsight(savings);
+		const firstCalm = base.findIndex((line) => line.tone !== "bad");
+		const at = firstCalm < 0 ? base.length : firstCalm;
+		return [...base.slice(0, at), ...(coverage ? [coverage] : []), ...base.slice(at), ...(cache ? [cache] : [])];
+	}, [result, gaps, savings]);
 	const shownGranularity = result?.granularity ?? granularity;
 	const stacks = useMemo(() => {
 		const by = result?.seriesBy;
@@ -594,9 +611,11 @@ export function AiGatewayPage({
 							? by?.client
 							: split === "user"
 								? by?.user
-								: split === "tag"
-								? result?.tags?.series
-								: [];
+								: split === "action"
+									? by?.action
+									: split === "tag"
+										? result?.tags?.series
+										: [];
 		return buildStacks(result?.series ?? [], points ?? [], split, metric, windowBuckets(from, to, shownGranularity));
 		// from/to move with the clock; the window they describe is keyed by the range and the result.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -646,6 +665,14 @@ export function AiGatewayPage({
 		return [...folded].map(([key, value]) => ({ key, value }));
 	};
 	const metricSpec = METRICS.find((m) => m.id === metric)!;
+	// Budgets by user, and by the values of the tag key picked: a team or cost center. Stored under the
+	// real name; shown as the screen shows it. Whoever no tag names cannot be held to a budget.
+	const budgetRows: BudgetRow[] = [
+		...(result?.byUser ?? []).filter((r) => !UNDRILLABLE.has(r.key)).map((r) => ({ id: `user:${r.key}`, kind: "User", label: userName(r.key), cost: r.cost ?? 0 })),
+		...(tag && result?.tags?.selected === tag ? result.tags.rows.filter((r) => !UNDRILLABLE.has(r.key)).map((r) => ({ id: `tag:${tag}:${r.key}`, kind: tag, label: r.key, cost: r.cost ?? 0 })) : []),
+	].sort((a, b) => b.cost - a.cost);
+	const budgetCount = budgetRows.filter((r) => budgets[r.id]).length;
+	const budgetsOver = budgetRows.filter((r) => rowBudgetStatus(r.cost, budgets[r.id], timeRange.minutes).status === "over").length;
 
 	const days = useMemo(
 		// "of 7" for a 7-day window, though its edges touch 8 calendar dates.
@@ -832,6 +859,7 @@ export function AiGatewayPage({
 					hint={
 						<>
 							hit rate · <RateDelta current={totals.cacheHitRate} previous={previous?.cacheHitRate} upIs="good" />
+							{savings?.saved ? ` · ≈ ${formatCost(savings.saved)} saved` : ""}
 						</>
 					}
 					note={datasets && <UnavailableNote status={datasets.cache} label="Cache" />}
@@ -919,7 +947,8 @@ export function AiGatewayPage({
 										!(k === "model" && filter.model) &&
 										!(k === "provider" && filter.provider) &&
 										!(k === "user" && (filter.user || !result?.byUser)) &&
-										!(k === "tag" && !tag),
+										!(k === "tag" && !tag) &&
+										!(k === "action" && !result?.seriesBy.action?.length),
 								)
 								.map((k) => (
 									<option key={k} value={k}>
@@ -1010,6 +1039,7 @@ export function AiGatewayPage({
 							: "Set a monthly budget under Chart options to draw it on the chart, with overage in red."
 						: "Switch to Spend to see the budget line."}
 					{split === "source" ? " Workers AI is Cloudflare's own inference; every other provider counts as third-party." : ""}
+					{split === "action" ? ` Told from each request's status, as in the diagram below.${metric === "cost" ? " Blocked and cached requests cost nothing, so chart requests to see them." : ""}` : ""}
 				</p>
 			</section>
 			</div>
@@ -1104,18 +1134,48 @@ export function AiGatewayPage({
 					extras.refusals
 						? extras.refusals.error
 							? extras.refusals.error
-							: `${compact(extras.refusals.total)} failed or refused in this window${extras.refusals.groups[0] ? ` · most: ${extras.refusals.groups[0].reason.replace(/-/g, " ")}` : ""}`
+							: `${compact(extras.refusals.total)} failed or refused ${sliced ? "in this slice" : "in this window"}${extras.refusals.groups[0] ? ` · most: ${extras.refusals.groups[0].reason.replace(/-/g, " ")}` : ""}`
 						: (extras.error ?? "loading…")
 				}
 			>
 				{extras.refusals && !extras.refusals.error ? (
-					<RefusalsPanel refusals={extras.refusals} />
+					<RefusalsPanel refusals={extras.refusals} sliced={sliced} />
 				) : (
 					<p className={`text-xs ${MUTED}`}>
 						{extras.refusals?.error ?? extras.error ?? "Reading the AI Gateway logs…"}
 						{extras.refusals?.error?.includes("AI Gateway: Read") ? " Add it to the token the deployment uses to see why requests were blocked." : ""}
 					</p>
 				)}
+			</Collapsible>
+
+			<Collapsible
+				id="aig-flags"
+				title="Flagged but allowed"
+				summary={
+					extras.flags
+						? extras.flags.error
+							? extras.flags.error
+							: `${compact(extras.flags.flagged)} of ${compact(extras.flags.scanned)} requests read carried a flag`
+						: (extras.error ?? "loading…")
+				}
+			>
+				{extras.flags && !extras.flags.error ? (
+					<FlagsPanel flags={extras.flags} sliced={sliced} />
+				) : (
+					<p className={`text-xs ${MUTED}`}>{extras.flags?.error ?? extras.error ?? "Reading the AI Gateway logs…"}</p>
+				)}
+			</Collapsible>
+
+			<Collapsible
+				id="aig-budgets"
+				title="Budgets"
+				summary={
+					budgetCount
+						? `${budgetCount} set · ${budgetsOver ? `${budgetsOver} over at this pace` : "all on track"}`
+						: "Set a monthly budget per user or tag value"
+				}
+			>
+				<BudgetsPanel rows={budgetRows} budgets={budgets} onBudget={setBudget} minutes={timeRange.minutes} sliced={sliced} />
 			</Collapsible>
 
 			<Collapsible
@@ -1130,7 +1190,7 @@ export function AiGatewayPage({
 				}
 			>
 				{extras.config && !extras.config.error ? (
-					<GatewaySettingsPanel config={extras.config} focus={filter.gateway} hideNames={hideNames} />
+					<GatewaySettingsPanel config={extras.config} focus={filter.gateway} hideNames={hideNames} gaps={gaps} />
 				) : (
 					<p className={`text-xs ${MUTED}`}>{extras.config?.error ?? extras.error ?? "Reading the gateways…"}</p>
 				)}

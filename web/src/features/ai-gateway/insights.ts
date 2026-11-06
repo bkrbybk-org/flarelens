@@ -1,4 +1,4 @@
-import { compactCount, formatCost, formatDuration, type AiGatewayBreakdownRow, type AiGatewayUsageResult } from "./types";
+import { compactCount, formatCost, formatDuration, type AiGatewayBreakdownRow, type AiGatewayConfigResult, type AiGatewayFlow, type AiGatewayUsageResult } from "./types";
 
 /**
  * "At a glance": the few things in the numbers worth reading first — where traffic and spend
@@ -133,5 +133,96 @@ function untaggedGateway(result: AiGatewayUsageResult): Insight | null {
 		tone: "warn",
 		text: `Gateway "${gateway}" carries no user tag on ${pct(worst.untagged, worst.all)} of its ${amount} cannot be put down to anyone. Have its clients send cf-aig-metadata with a "user" key.`,
 		drill: filter.gateway ? undefined : { key: "gateway", value: gateway },
+	};
+}
+
+export interface CoverageGap {
+	gateway: string;
+	requests: number;
+	gaps: string[];
+	/** Nothing stands between this gateway's traffic and the model: Guardrails are off or only flag. */
+	unblocked: boolean;
+}
+
+/** Gateways that carry traffic with a protection missing, the busiest first. An idle gateway is no exposure. */
+export function coverageGaps(config: AiGatewayConfigResult | null, byGateway: AiGatewayBreakdownRow[]): CoverageGap[] {
+	if (!config || config.error) return [];
+	const settings = new Map(config.gateways.map((g) => [g.id, g]));
+	const out: CoverageGap[] = [];
+	for (const row of byGateway) {
+		const g = settings.get(row.key);
+		if (!g || row.requests <= 0) continue;
+		const blocks = g.guardrails ? g.guardrails.prompt.block.length + g.guardrails.response.block.length : 0;
+		const gaps = [
+			...(!g.guardrails ? ["Guardrails off"] : !blocks ? ["Guardrails only flag, block nothing"] : []),
+			...(!g.dlp ? ["DLP off"] : !g.dlp.policies.length ? ["DLP on, no policies"] : []),
+			...(!g.authentication ? ["no authentication"] : []),
+			...(!g.collectLogs ? ["logs off"] : []),
+		];
+		if (gaps.length) out.push({ gateway: g.id, requests: row.requests, gaps, unblocked: !blocks });
+	}
+	return out.sort((a, b) => b.requests - a.requests);
+}
+
+/** The one coverage line worth reading first: the busiest gateway nothing blocks on. */
+export function coverageInsight(gaps: CoverageGap[], result: AiGatewayUsageResult): Insight | null {
+	const worst = gaps.find((g) => g.unblocked);
+	if (!worst || !result.totals.requests) return null;
+	const others = gaps.filter((g) => g.unblocked).length - 1;
+	return {
+		tone: "warn",
+		text: `Gateway "${worst.gateway}" carries ${pct(worst.requests, result.totals.requests)} of requests (${compactCount(worst.requests)}) with ${worst.gaps[0]}.${others > 0 ? ` ${others} more ${others === 1 ? "gateway" : "gateways"} with traffic block nothing either; see Gateway settings.` : ""}`,
+		drill: result.filter.gateway ? undefined : { key: "gateway", value: worst.gateway },
+	};
+}
+
+export interface CacheSavings {
+	/** What the cached requests would have cost, at each model's average for a request it answered. */
+	saved: number;
+	cachedRequests: number;
+	/** Cached requests on models with no paid request in the window, which no figure can be put on. */
+	unpriced: number;
+}
+
+/**
+ * What the gateway cache saved, as an estimate: each model's average cost for a request that reached
+ * it, times its requests answered from cache. A cached answer may well have been a cheaper or dearer
+ * call than average, so this is a size, not a bill.
+ */
+export function cacheSavings(flows: AiGatewayFlow[] | null): CacheSavings | null {
+	if (!flows?.length) return null;
+	const perModel = new Map<string, { cost: number; paid: number; cached: number }>();
+	for (const f of flows) {
+		const entry = perModel.get(f.model) ?? { cost: 0, paid: 0, cached: 0 };
+		if (f.action !== null) {
+			if (f.action === "From cache") entry.cached += f.requests;
+			else if (f.action === "Passed") {
+				entry.cost += f.cost ?? 0;
+				entry.paid += f.requests;
+			}
+		} else {
+			const cached = f.cached ?? 0;
+			entry.cached += cached;
+			entry.cost += f.cost ?? 0;
+			entry.paid += Math.max(0, f.requests - cached - (f.errors ?? 0));
+		}
+		perModel.set(f.model, entry);
+	}
+	let saved = 0;
+	let cachedRequests = 0;
+	let unpriced = 0;
+	for (const { cost, paid, cached } of perModel.values()) {
+		cachedRequests += cached;
+		if (cost > 0 && paid > 0) saved += (cost / paid) * cached;
+		else unpriced += cached;
+	}
+	return cachedRequests ? { saved, cachedRequests, unpriced } : null;
+}
+
+export function cacheInsight(savings: CacheSavings | null): Insight | null {
+	if (!savings?.saved) return null;
+	return {
+		tone: "info",
+		text: `The gateway cache answered ${compactCount(savings.cachedRequests)} requests, about ${formatCost(savings.saved)} the models would have charged at their average this window${savings.unpriced ? `; ${compactCount(savings.unpriced)} more were on models with no priced request` : ""}.`,
 	};
 }

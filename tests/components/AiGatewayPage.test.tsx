@@ -10,7 +10,7 @@ import type * as CsvModule from "../../web/src/lib/csv";
 
 vi.mock("../../web/src/api/client", async (importOriginal) => {
 	const actual = await importOriginal<typeof ApiClientModule>();
-	return { ...actual, fetchAiGatewayUsage: vi.fn(), fetchAiGatewayConfig: vi.fn(), fetchAiGatewayRefusals: vi.fn() };
+	return { ...actual, fetchAiGatewayUsage: vi.fn(), fetchAiGatewayConfig: vi.fn(), fetchAiGatewayRefusals: vi.fn(), fetchAiGatewayFlags: vi.fn() };
 });
 
 vi.mock("../../web/src/lib/csv", async (importOriginal) => {
@@ -18,8 +18,8 @@ vi.mock("../../web/src/lib/csv", async (importOriginal) => {
 	return { ...actual, downloadCsv: vi.fn() };
 });
 
-import { fetchAiGatewayConfig, fetchAiGatewayRefusals, fetchAiGatewayUsage } from "../../web/src/api/client";
-import type { AiGatewayConfigResult, AiGatewayRefusalsResult } from "../../web/src/features/ai-gateway/types";
+import { fetchAiGatewayConfig, fetchAiGatewayFlags, fetchAiGatewayRefusals, fetchAiGatewayUsage } from "../../web/src/api/client";
+import type { AiGatewayConfigResult, AiGatewayFlagsResult, AiGatewayRefusalsResult } from "../../web/src/features/ai-gateway/types";
 import { downloadCsv } from "../../web/src/lib/csv";
 import { HideNamesContext } from "../../web/src/hooks/useHideNames";
 
@@ -52,6 +52,10 @@ const usage: AiGatewayUsageResult = {
 	timeDimension: "date",
 	series: [{ ts: "2026-11-03", requests: 10, tokens: 110, cost: 0.5, errors: 0 }],
 	seriesBy: {
+		action: [
+			{ ts: "2026-11-03", key: "Passed", requests: 8, tokens: 90, cost: 0.5, errors: 0 },
+			{ ts: "2026-11-03", key: "Blocked", requests: 2, tokens: 0, cost: 0, errors: 2 },
+		],
 		gateway: [
 			{ ts: "2026-11-03", key: "prod", requests: 7, tokens: 77, cost: 0.35, errors: 0 },
 			{ ts: "2026-11-03", key: "staging", requests: 3, tokens: 33, cost: 0.15, errors: 0 },
@@ -185,7 +189,24 @@ const refusals: AiGatewayRefusalsResult = {
 	recent: [{ at: "2026-11-05T10:00:00Z", gateway: "prod", model: "@cf/meta/big", provider: "workers-ai", status: 424, reason: "guardrails", categories: [{ side: "prompt", code: "P1" }], dlpAction: null, rejection: null }],
 };
 
+const flags: AiGatewayFlagsResult = {
+	categoryNames: NAMES,
+	error: null,
+	flagged: 5,
+	scanned: 100,
+	total: 300,
+	skipped: ["far"],
+	failed: [],
+	groups: [
+		{ kind: "dlp", detail: "Check PII", side: "prompt", count: 3, onGuardModel: 3, gateways: ["prod"] },
+		{ kind: "guardrails", detail: "P1", side: "prompt", count: 2, onGuardModel: 0, gateways: ["prod"] },
+	],
+};
+
 beforeEach(() => {
+	localStorage.removeItem(`flarelens_aig_budgets:${session.accountId}`);
+	vi.mocked(fetchAiGatewayFlags).mockReset();
+	vi.mocked(fetchAiGatewayFlags).mockResolvedValue(flags);
 	history.replaceState(null, "", "#/ai-gateway");
 	vi.mocked(fetchAiGatewayUsage).mockReset();
 	vi.mocked(fetchAiGatewayUsage).mockResolvedValue(usage);
@@ -598,6 +619,97 @@ describe("AiGatewayPage", () => {
 		expect(within(table).getByText("staging").closest("tr")).toHaveTextContent("staging(default)OffOffOffOffOffOff");
 		await user.click(within(prod).getByText("Route tiers"));
 		expect(prod).toHaveTextContent('If metadata.tier = "pro": → big (workers-ai)Otherwise: → small (workers-ai)');
+	});
+
+	it("narrows the refusals and flags to the slice drilled into, and says so", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const section = await openSection(user, "Why requests were refused");
+		expect(section).toHaveTextContent("across all gateways");
+		expect(vi.mocked(fetchAiGatewayRefusals).mock.lastCall?.[1]).toMatchObject({ filter: {} });
+		const flows = (await screen.findByRole("heading", { name: "Who uses what" })).closest("section")!;
+		await user.click(within(flows).getByRole("button", { name: /^Gateway prod/ }));
+		await user.click(within(flows).getByRole("button", { name: "Drill into prod" }));
+		expect(vi.mocked(fetchAiGatewayRefusals).mock.lastCall?.[1]).toMatchObject({ filter: { gateway: "prod" } });
+		expect(vi.mocked(fetchAiGatewayFlags).mock.lastCall?.[1]).toMatchObject({ filter: { gateway: "prod" } });
+		expect(await screen.findByText(/failed or refused in this slice/)).toBeInTheDocument();
+		expect(section).toHaveTextContent("for the slice drilled into");
+	});
+
+	it("shows what was flagged but allowed, and how much of the logs that rests on", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		expect(await screen.findByText("5 of 100 requests read carried a flag")).toBeInTheDocument();
+		const section = await openSection(user, "Flagged but allowed");
+		const rows = within(within(section).getByRole("table", { name: "Flags by verdict" })).getAllByRole("row").slice(1).map((r) => r.textContent);
+		expect(rows).toEqual(["DLPCheck PIIprompt3 (3 on the guard model)prod", "GuardrailsP1 Prompt Injectionprompt2prod"]);
+		expect(section).toHaveTextContent("Read 100 of 300 successful requests");
+		expect(section).toHaveTextContent("these are a floor, not a total");
+		expect(section).toHaveTextContent("Not scanned: far.");
+	});
+
+	it("says where protection is missing, first in At a glance and in full under settings", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		expect(await screen.findByText(/Gateway "staging" carries 30% of requests \(3\) with Guardrails off\./)).toBeInTheDocument();
+		const section = await openSection(user, "Gateway settings");
+		const gaps = within(section).getByRole("region", { name: "Coverage gaps" });
+		expect(gaps).toHaveTextContent("staging (3 requests): Guardrails off, DLP off, no authentication, logs off");
+		expect(gaps).not.toHaveTextContent("prod");
+	});
+
+	it("estimates what the gateway cache saved, on the health card", async () => {
+		const flowsWithCache = [
+			{ ...usage.flows![0], action: "Passed", requests: 4, cost: 2 },
+			{ ...usage.flows![0], action: "From cache", requests: 2, cost: 0 },
+		];
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, flows: flowsWithCache });
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		expect(await screen.findByRole("region", { name: "Health" })).toHaveTextContent("≈ $1.00 saved");
+	});
+
+	it("charts what AI Gateway did per bucket, in the action colours", async () => {
+		const user = userEvent.setup();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		await screen.findByRole("heading", { name: "Who uses what" });
+		await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "action");
+		// Opens on requests: by spend, the blocked requests would not be drawn.
+		expect(screen.getByRole("button", { name: "Requests" })).toHaveAttribute("aria-pressed", "true");
+		const legend = screen.getByRole("list", { name: "Legend" });
+		expect(legend).toHaveTextContent("Passed");
+		expect(legend).toHaveTextContent("Blocked");
+		const swatch = (name: string) => within(legend).getByText(new RegExp(name)).closest("li")!.querySelector("[aria-hidden]") as HTMLElement;
+		expect(swatch("Blocked").style.background).toBe("rgb(220, 38, 38)");
+		expect(swatch("Passed").style.background).toBe("rgb(22, 163, 74)");
+	});
+
+	it("does not offer the action grouping where the data has none", async () => {
+		vi.mocked(fetchAiGatewayUsage).mockResolvedValue({ ...usage, seriesBy: { ...usage.seriesBy, action: [] } });
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		await screen.findByRole("heading", { name: "Who uses what" });
+		expect(within(screen.getByRole("combobox", { name: "Group by" })).queryByRole("option", { name: "Action" })).toBeNull();
+	});
+
+	it("keeps a monthly budget per user or tag value, and says who is over at this pace", async () => {
+		const user = userEvent.setup();
+		const { unmount } = render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const section = await openSection(user, "Budgets");
+		expect(section).toHaveTextContent("Set a monthly budget per user or tag value");
+		const table = within(section).getByRole("table", { name: "Budgets" });
+		// Nobody untagged can be held to a budget.
+		expect(table).not.toHaveTextContent("(not tagged)");
+		const alice = within(table).getByText("alice@example.com").closest("tr")!;
+		await user.type(within(alice).getByRole("spinbutton", { name: "Monthly budget for alice@example.com" }), "0.01");
+		expect(alice).toHaveTextContent("Over: forecast");
+		expect(section).toHaveTextContent("1 set · 1 over at this pace");
+		const bob = within(table).getByText("bob@example.com").closest("tr")!;
+		await user.type(within(bob).getByRole("spinbutton", { name: "Monthly budget for bob@example.com" }), "100000");
+		expect(bob).toHaveTextContent("On track: forecast");
+		// Kept in this browser, under the real name.
+		unmount();
+		render(<AiGatewayPage session={session} timeRange={timeRange} onAuthError={vi.fn()} />);
+		const again = await openSection(user, "Budgets");
+		expect(within(again).getByRole("spinbutton", { name: "Monthly budget for alice@example.com" })).toHaveValue(0.01);
 	});
 
 	it("says what the token lacks when it cannot read the gateways or their logs", async () => {

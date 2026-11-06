@@ -506,7 +506,7 @@ export interface AiGatewayUsageResult {
 	timeDimension: string;
 	series: AiGatewaySeriesPoint[];
 	/** The series split by one dimension per bucket; empty for a dimension the schema lacks. */
-	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[]; client: AiGatewaySplitPoint[]; user: AiGatewaySplitPoint[] };
+	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[]; client: AiGatewaySplitPoint[]; user: AiGatewaySplitPoint[]; action: AiGatewaySplitPoint[] };
 	totals: AiGatewayTotals;
 	byGateway: AiGatewayBreakdownRow[];
 	byProvider: AiGatewayBreakdownRow[];
@@ -779,7 +779,7 @@ query AiGatewayRequests($accountTag: string!, $since: Time!, $until: Time!, $pre
       }
       previous: ${f.name}(filter: ${previous.clause}, limit: 1) {
         ${headline}
-      }${splitSeries("seriesByGateway", f.gateway)}${splitSeries("seriesByModel", f.model)}${splitSeries("seriesByProvider", f.provider)}${splitSeries("seriesByClient", f.userAgent)}${breakdown("byGateway", f.gateway)}${breakdown("byProvider", f.provider)}${breakdown("byModel", f.model)}${breakdown("byClient", f.userAgent)}${status}${recent}${tagKeys}${tagged}${byUser}${flows}
+      }${splitSeries("seriesByGateway", f.gateway)}${splitSeries("seriesByModel", f.model)}${splitSeries("seriesByProvider", f.provider)}${splitSeries("seriesByClient", f.userAgent)}${f.statusCode ? splitSeries("seriesByAction", [f.statusCode, f.cached, f.rateLimited].filter(Boolean).join(" ")) : ""}${breakdown("byGateway", f.gateway)}${breakdown("byProvider", f.provider)}${breakdown("byModel", f.model)}${breakdown("byClient", f.userAgent)}${status}${recent}${tagKeys}${tagged}${byUser}${flows}
     }
   }
 }`;
@@ -892,6 +892,26 @@ function foldSplit(
 			cost: sumField(row, f.cost),
 			errors: sumField(row, f.erroredRequests),
 		}));
+}
+
+/** Each bucket by what AI Gateway did: several status codes come to one action, so they are summed. */
+function foldActionSeries(rows: RawRow[], timeDimension: string, f: NonNullable<ResolvedFields["requests"]>): AiGatewaySplitPoint[] {
+	if (!f.statusCode) return [];
+	const points = new Map<string, AiGatewaySplitPoint>();
+	for (const row of rows) {
+		const ts = row.dimensions?.[timeDimension];
+		if (!ts) continue;
+		const dim = (name: string | null) => (name ? row.dimensions?.[name] : undefined);
+		const key = flowAction(Number(dim(f.statusCode)) || 0, flag(dim(f.cached)), flag(dim(f.rateLimited)));
+		const id = `${String(ts)}\u0000${key}`;
+		const point = points.get(id) ?? { ts: String(ts), key, requests: 0, tokens: null, cost: null, errors: null };
+		point.requests += row.count;
+		point.tokens = addNullable(point.tokens, addNullable(sumField(row, f.tokensIn), sumField(row, f.tokensOut)));
+		point.cost = addNullable(point.cost, sumField(row, f.cost));
+		point.errors = addNullable(point.errors, sumField(row, f.erroredRequests));
+		points.set(id, point);
+	}
+	return [...points.values()];
 }
 
 function foldSeries(rows: RawRow[], timeDimension: string, f: NonNullable<ResolvedFields["requests"]>): AiGatewaySeriesPoint[] {
@@ -1156,6 +1176,7 @@ export async function fetchAiGatewayUsage(
 		seriesByModel?: RawRow[];
 		seriesByProvider?: RawRow[];
 		seriesByClient?: RawRow[];
+		seriesByAction?: RawRow[];
 		byClient?: RawRow[];
 		tagKeys?: RawRow[];
 		byTag?: RawRow[];
@@ -1364,6 +1385,7 @@ export async function fetchAiGatewayUsage(
 			provider: foldSplit(account?.seriesByProvider || [], timeDimension, fields.requests.provider, fields.requests),
 			client: foldSplit(account?.seriesByClient || [], timeDimension, fields.requests.userAgent, fields.requests, clientName),
 			user: hasUsers ? foldSplit(account?.seriesByUser || [], timeDimension, md.metadataValue, md, userLabel) : [],
+			action: foldActionSeries(account?.seriesByAction || [], timeDimension, fields.requests),
 		},
 		totals,
 		byGateway: fields.requests.gateway ? foldBreakdown(account?.byGateway || [], fields.requests.gateway, fields.requests) : [],

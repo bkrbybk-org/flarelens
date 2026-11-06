@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { FOCUS_RING, MUTED, CARD, SECTION_TITLE, SELECT_SM } from "../../lib/ui";
 import { downloadBlob, downloadCsv, toCsv } from "../../lib/csv";
-import { OTHER, OTHER_COLOR, STACK_COLORS } from "./stack";
+import { ACTION_COLORS, OTHER, OTHER_COLOR, STACK_COLORS } from "./stack";
 import { UNDRILLABLE, compactCount, formatCost, type AiGatewayFlow } from "./types";
 
 /**
@@ -46,15 +46,6 @@ export const FLOW_LAYOUTS: { id: string; columns: FlowColumn[] }[] = [
 	{ id: "tag-gateway-model-action", columns: ["tag", "gateway", "model", "action"] },
 ];
 
-/** One colour per action, the same in every view, so a red band reads as blocked at a glance. */
-export const ACTION_COLORS: Record<string, string> = {
-	Passed: "#16a34a",
-	"From cache": "#2563eb",
-	Blocked: "#dc2626",
-	"Rate limited": "#ca8a04",
-	Cancelled: "#a1a1aa",
-	Failed: "#ea580c",
-};
 
 /** Paths smaller than this share of the measure can be left out, to cut clutter on a big screen. */
 const CUTOFFS = [
@@ -64,6 +55,8 @@ const CUTOFFS = [
 ];
 /** How many of the biggest bands carry their figure. */
 const FIGURES = 3;
+/** How many of the names folded into "Other" are spelled out before "and N more". */
+const OTHER_NAMED = 8;
 /** The tour: how many of the first column's busiest nodes it traces, and how long it holds each. */
 const TOUR_STOPS = 6;
 const TOUR_MS = 5000;
@@ -425,6 +418,14 @@ export function FlowSankey({
 		path: { ...f.path, ...Object.fromEntries(cols.map((c) => [c, kept[c].has(f.path[c]) ? f.path[c] : OTHER])) } as Path,
 	}));
 	const total = paths.reduce((n, p) => n + p.value, 0);
+	// What a column's "Other" holds, busiest first, in the same names and figures as everywhere else.
+	const otherHolds = (column: FlowColumn) => {
+		const sums = new Map<string, number>();
+		for (const f of drawn) if (!kept[column].has(f.path[column])) sums.set(f.path[column], (sums.get(f.path[column]) ?? 0) + f.value);
+		const list = [...sums].sort((a, b) => b[1] - a[1]);
+		const named = list.slice(0, OTHER_NAMED).map(([key, value]) => `${label(column, key)} (${format(value)})`);
+		return named.join(", ") + (list.length > OTHER_NAMED ? ` and ${list.length - OTHER_NAMED} more` : "");
+	};
 
 	// Geometry in real px, once the paths are known. Labels are 0.75rem; each side keeps room for one,
 	// up to 17rem or 30% of the width, and a label longer than its room is cut with an ellipsis (full
@@ -988,6 +989,7 @@ export function FlowSankey({
 							</p>
 						)}
 						{pinnedRoute && <p className={`basis-full ${MUTED}`}>{pinnedRoute}.</p>}
+						{pin.kind === "node" && pin.key === OTHER && <p className={`basis-full ${MUTED}`}>Holds {otherHolds(pin.column)}.</p>}
 					</div>
 				)}
 				<div>
@@ -1102,7 +1104,7 @@ export function FlowSankey({
 										onClick={() => toggle(sel)}
 										onKeyDown={pressKeys(sel)}
 									>
-										<title>{`${label(column, node.key)}: ${format(node.value)} (${Math.round((node.value / total) * 100)}%)${healthNote(health)}`}</title>
+										<title>{`${label(column, node.key)}: ${format(node.value)} (${Math.round((node.value / total) * 100)}%)${healthNote(health)}${node.key === OTHER ? ` — ${otherHolds(column)}` : ""}`}</title>
 										<rect
 											x={X[column]}
 											y={node.y}

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { fetchAiGatewayConfig, fetchAiGatewayRefusals, isSessionError } from "../../api/client";
+import { fetchAiGatewayConfig, fetchAiGatewayFlags, fetchAiGatewayRefusals, isSessionError } from "../../api/client";
 import { MUTED } from "../../lib/ui";
-import { compactCount, shortModel, type AiGatewayConfigResult, type AiGatewayRefusal, type AiGatewayRefusalGroup, type AiGatewayRefusalsResult, type AiGatewayRoute, type AiGatewayRouteStep, type AiGatewaySettings, type GuardrailSide } from "./types";
+import type { CoverageGap } from "./insights";
+import { compactCount, shortModel, type AiGatewayConfigResult, type AiGatewayFilter, type AiGatewayFlagsResult, type AiGatewayRefusal, type AiGatewayRefusalGroup, type AiGatewayRefusalsResult, type AiGatewayRoute, type AiGatewayRouteStep, type AiGatewaySettings, type GuardrailSide } from "./types";
 
 /**
  * What the AI Gateway REST API adds to the analytics (needs AI Gateway: Read): each gateway's
@@ -12,12 +13,13 @@ import { compactCount, shortModel, type AiGatewayConfigResult, type AiGatewayRef
 interface Extras {
 	config: AiGatewayConfigResult | null;
 	refusals: AiGatewayRefusalsResult | null;
+	flags: AiGatewayFlagsResult | null;
 	/** A read that failed outright (network, server), as opposed to one that said what it lacks. */
 	error: string | null;
 }
 
-export function useAiGatewayExtras(token: string, accountId: string, from: string, to: string, windowKey: string, onAuthError: () => void): Extras {
-	const [state, setState] = useState<Extras>({ config: null, refusals: null, error: null });
+export function useAiGatewayExtras(token: string, accountId: string, from: string, to: string, windowKey: string, filter: AiGatewayFilter, filterKey: string, onAuthError: () => void): Extras {
+	const [state, setState] = useState<Extras>({ config: null, refusals: null, flags: null, error: null });
 	const onAuthErrorRef = useRef(onAuthError);
 	useEffect(() => {
 		onAuthErrorRef.current = onAuthError;
@@ -39,24 +41,30 @@ export function useAiGatewayExtras(token: string, accountId: string, from: strin
 			live = false;
 		};
 	}, [token, accountId, windowKey]);
+	// The logs follow the page: its window and the slice drilled into.
 	useEffect(() => {
 		let live = true;
-		fetchAiGatewayRefusals<AiGatewayRefusalsResult>(token, { accountId, from, to })
+		const body = { accountId, from, to, filter };
+		const failed = (what: string) => (err: unknown) => {
+			if (!live) return;
+			if (isSessionError(err)) {
+				onAuthErrorRef.current();
+				return;
+			}
+			setState((s) => ({ ...s, error: err instanceof Error ? err.message : what }));
+		};
+		fetchAiGatewayRefusals<AiGatewayRefusalsResult>(token, body)
 			.then((refusals) => live && setState((s) => ({ ...s, refusals })))
-			.catch((err) => {
-				if (!live) return;
-				if (isSessionError(err)) {
-					onAuthErrorRef.current();
-					return;
-				}
-				setState((s) => ({ ...s, error: err instanceof Error ? err.message : "Failed to read AI Gateway logs" }));
-			});
+			.catch(failed("Failed to read AI Gateway logs"));
+		fetchAiGatewayFlags<AiGatewayFlagsResult>(token, body)
+			.then((flags) => live && setState((s) => ({ ...s, flags })))
+			.catch(failed("Failed to read AI Gateway logs"));
 		return () => {
 			live = false;
 		};
-		// from/to move with the clock; the window is keyed by windowKey.
+		// from/to move with the clock and the filter with its key; windowKey and filterKey stand for them.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [token, accountId, windowKey]);
+	}, [token, accountId, windowKey, filterKey]);
 	return state;
 }
 
@@ -152,7 +160,7 @@ function ModelStep({ step, walk }: { step: AiGatewayRouteStep; walk: (to: string
 /** Email-shaped text in a route condition, for while names are hidden. */
 const EMAIL = /[\w.+-]+@[\w-]+(\.[\w-]+)+/g;
 
-export function GatewaySettingsPanel({ config, focus, hideNames }: { config: AiGatewayConfigResult; focus?: string; hideNames: boolean }) {
+export function GatewaySettingsPanel({ config, focus, hideNames, gaps = [] }: { config: AiGatewayConfigResult; focus?: string; hideNames: boolean; gaps?: CoverageGap[] }) {
 	const names = config.categoryNames;
 	const mask = (text: string) => (hideNames ? text.replace(EMAIL, "…") : text);
 	// The gateway drilled into, if any, first.
@@ -160,6 +168,18 @@ export function GatewaySettingsPanel({ config, focus, hideNames }: { config: AiG
 	const routesOf = (g: AiGatewaySettings) => config.routes.filter((r) => r.gateway === g.id);
 	return (
 		<div className="overflow-x-auto">
+			{gaps.length > 0 && (
+				<section aria-label="Coverage gaps" className="mb-3 text-xs">
+					<h4 className="mb-1 font-semibold">Coverage gaps <span className={`font-normal ${MUTED}`}>· gateways carrying traffic in this window</span></h4>
+					<ul className="space-y-0.5">
+						{gaps.map((g) => (
+							<li key={g.gateway}>
+								<span className="font-medium">{g.gateway}</span> <span className={`tabular-nums ${MUTED}`}>({compactCount(g.requests)} requests)</span>: {g.gaps.join(", ")}
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
 			<table className="w-full text-left text-xs" aria-label="Gateway settings">
 				<thead className={MUTED}>
 					<tr>
@@ -253,9 +273,9 @@ export function blockedSummary(refusals: AiGatewayRefusalsResult | null): string
 		.join(", ");
 }
 
-export function RefusalsPanel({ refusals }: { refusals: AiGatewayRefusalsResult }) {
+export function RefusalsPanel({ refusals, sliced = false }: { refusals: AiGatewayRefusalsResult; sliced?: boolean }) {
 	const names = refusals.categoryNames;
-	if (!refusals.total && !refusals.failed.length) return <p className={`text-xs ${MUTED}`}>No failed or refused requests in the AI Gateway logs for this window.</p>;
+	if (!refusals.total && !refusals.failed.length) return <p className={`text-xs ${MUTED}`}>No failed or refused requests in the AI Gateway logs for this {sliced ? "slice and window" : "window"}.</p>;
 	return (
 		<div className="space-y-3 text-xs">
 			<table className="w-full text-left" aria-label="Refusals by reason">
@@ -300,9 +320,58 @@ export function RefusalsPanel({ refusals }: { refusals: AiGatewayRefusalsResult 
 				</div>
 			</details>
 			<p className={MUTED}>
-				From the AI Gateway logs: {compactCount(refusals.read)} of {compactCount(refusals.total)} failed requests in this window read (up to 200 a gateway), across all
-				gateways. Only each log's time, gateway, model, status and verdicts are read — never its prompt, answer or metadata.
+				From the AI Gateway logs: {compactCount(refusals.read)} of {compactCount(refusals.total)} failed requests in this window read (up to 200 a gateway), {sliced ? "for the slice drilled into" : "across all gateways"}. Only
+				each log's time, gateway, model, status and verdicts are read — never its prompt, answer or metadata.
 				{refusals.failed.length > 0 && ` Not readable: ${refusals.failed.map((f) => `${f.gateway} (${f.error})`).join(", ")}.`}
+			</p>
+		</div>
+	);
+}
+
+const DLP_POLICY_NOTE = "the policy's name, as set on the gateway";
+
+export function FlagsPanel({ flags, sliced = false }: { flags: AiGatewayFlagsResult; sliced?: boolean }) {
+	const names = flags.categoryNames;
+	const onGuard = flags.groups.reduce((n, g) => n + g.onGuardModel, 0);
+	return (
+		<div className="space-y-2 text-xs">
+			{flags.groups.length ? (
+				<table className="w-full text-left" aria-label="Flags by verdict">
+					<thead className={MUTED}>
+						<tr>
+							<th scope="col" className="py-1.5 pr-3 font-medium">Flagged by</th>
+							<th scope="col" className="py-1.5 pr-3 font-medium">For</th>
+							<th scope="col" className="py-1.5 pr-3 font-medium">In the</th>
+							<th scope="col" className="py-1.5 pr-3 text-right font-medium">Times</th>
+							<th scope="col" className="py-1.5 pr-3 font-medium">Gateways</th>
+						</tr>
+					</thead>
+					<tbody>
+						{flags.groups.map((g) => (
+							<tr key={`${g.kind}-${g.detail}-${g.side}`} className="border-t border-zinc-100 dark:border-zinc-800">
+								<td className="py-1.5 pr-3 font-medium">{g.kind === "dlp" ? "DLP" : "Guardrails"}</td>
+								<td className="py-1.5 pr-3" title={g.kind === "dlp" ? DLP_POLICY_NOTE : undefined}>
+									{g.kind === "dlp" ? g.detail : `${g.detail} ${names[g.detail] ?? ""}`.trim()}
+								</td>
+								<td className="py-1.5 pr-3">{g.side ?? "—"}</td>
+								<td className="py-1.5 pr-3 text-right tabular-nums">
+									{compactCount(g.count)}
+									{g.onGuardModel > 0 && <span className={MUTED}> ({compactCount(g.onGuardModel)} on the guard model)</span>}
+								</td>
+								<td className="py-1.5 pr-3">{g.gateways.join(", ")}</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			) : (
+				<p className={MUTED}>Nothing flagged in the logs read.</p>
+			)}
+			<p className={MUTED}>
+				These passed: setting a flag to block would have refused them. Read {compactCount(flags.scanned)} of {compactCount(flags.total)} successful requests in this window (the latest, up to 250 a gateway, on gateways with Guardrails or
+				DLP{sliced ? ", for the slice drilled into" : ""}), so {flags.scanned < flags.total ? "these are a floor, not a total" : "this is all of them"}.
+				{onGuard > 0 && " AI Gateway logs its calls to the guard model as requests of their own, which can carry the same prompt, so those counts can overlap a request's."}
+				{flags.skipped.length > 0 && ` Not scanned: ${flags.skipped.join(", ")}.`}
+				{flags.failed.length > 0 && ` Not readable: ${flags.failed.map((f) => `${f.gateway} (${f.error})`).join(", ")}.`} Never a prompt, answer or metadata.
 			</p>
 		</div>
 	);

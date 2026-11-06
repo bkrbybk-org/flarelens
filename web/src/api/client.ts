@@ -238,14 +238,26 @@ export function fetchAiGatewayUsage<T>(
 	return postJson<T>("/api/ai-gateway/usage", token, body);
 }
 
+interface AiGatewayLogRequest {
+	accountId: string;
+	from: string;
+	to: string;
+	filter?: { gateway?: string; provider?: string; model?: string; user?: string };
+}
+
 /** Gateway settings and dynamic routes (needs AI Gateway: Read on the token). */
 export function fetchAiGatewayConfig<T>(token: string, body: { accountId: string }): Promise<T> {
 	return postJson<T>("/api/ai-gateway/config", token, body);
 }
 
 /** The window's failed and refused requests, with why, from the AI Gateway logs. */
-export function fetchAiGatewayRefusals<T>(token: string, body: { accountId: string; from: string; to: string }): Promise<T> {
+export function fetchAiGatewayRefusals<T>(token: string, body: AiGatewayLogRequest): Promise<T> {
 	return postJson<T>("/api/ai-gateway/refusals", token, body);
+}
+
+/** What Guardrails and DLP flagged on requests they let through, from a bounded scan of the logs. */
+export function fetchAiGatewayFlags<T>(token: string, body: AiGatewayLogRequest): Promise<T> {
+	return postJson<T>("/api/ai-gateway/flags", token, body);
 }
 
 export function fetchTunnelMap<T>(token: string, accountId: string, opts?: { fresh?: boolean }): Promise<CachedResult<T>> {

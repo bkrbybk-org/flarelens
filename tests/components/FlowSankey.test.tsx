@@ -138,6 +138,17 @@ describe("FlowSankey", () => {
 		expect(blockedSummary({ ...refusals, error: "The API token lacks AI Gateway: Read" })).toBeUndefined();
 	});
 
+	it("says what a column's Other holds, on its tooltip and when pinned", async () => {
+		const user = userEvent.setup();
+		const flows = Array.from({ length: 11 }, (_, i) => flow({ model: `model-${String(i).padStart(2, "0")}`, requests: 20 - i, action: null, tag: null }));
+		renderSankey({ flows, tagKey: null });
+		const other = within(section()).getByRole("button", { name: /^Model Other: 33/ });
+		// The eight busiest keep their names; 8, 9 and 10 fold, busiest first, in the diagram's own figures.
+		expect(other.querySelector("title")).toHaveTextContent("Other: 33 (20%) — model-08 (12), model-09 (11), model-10 (10)");
+		await user.click(other);
+		expect(within(section()).getByRole("status")).toHaveTextContent("Holds model-08 (12), model-09 (11), model-10 (10).");
+	});
+
 	it("saves the diagram as a standalone SVG, with column names and no page-only attributes", async () => {
 		const user = userEvent.setup();
 		vi.mocked(downloadBlob).mockClear();

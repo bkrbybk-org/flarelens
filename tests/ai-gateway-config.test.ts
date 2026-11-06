@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	conditionText,
 	fetchAiGatewayConfig,
+	fetchAiGatewayFlags,
 	fetchAiGatewayRefusals,
+	flagsOf,
 	groupRefusals,
 	refusalOf,
 	routeModels,
@@ -155,5 +157,96 @@ describe("refusals", () => {
 		expect(logCalls).toHaveLength(1);
 		const q = new URL(logCalls[0]).searchParams;
 		expect(Object.fromEntries(q)).toMatchObject({ success: "false", start_date: "2026-11-01T00:00:00Z", end_date: "2026-11-06T00:00:00Z", per_page: "50", order_by: "created_at" });
+	});
+});
+
+describe("logs follow the page's slice", () => {
+	const WINDOW = ["2026-11-01T00:00:00Z", "2026-11-06T00:00:00Z"] as const;
+	const GATEWAYS = { success: true, result: [GATEWAY, { ...GATEWAY, id: "other" }] };
+
+	it("asks only the drilled gateway, and lets Cloudflare match the model, provider and user", async () => {
+		const calls = mockRest({ "/ai-gateway/gateways": GATEWAYS, "/ai-gateway/gateways/guarded/logs": { success: true, result: [], result_info: { total_count: 0 } } });
+		await fetchAiGatewayRefusals(ACC, "t", ...WINDOW, { gateway: "guarded", provider: "workers-ai", model: "m", user: "alice@example.com" });
+		const logCalls = calls.filter((u) => u.includes("/logs"));
+		expect(logCalls).toHaveLength(1);
+		expect(logCalls[0]).toContain("/gateways/guarded/logs");
+		expect(JSON.parse(new URL(logCalls[0]).searchParams.get("filters")!)).toEqual([
+			{ key: "provider", operator: "eq", value: ["workers-ai"] },
+			{ key: "model", operator: "eq", value: ["m"] },
+			{ key: "metadata.key", operator: "eq", value: ["user"] },
+			{ key: "metadata.value", operator: "eq", value: ["alice@example.com"] },
+		]);
+	});
+
+	it("sends no filters for the whole account", async () => {
+		const calls = mockRest({ "/ai-gateway/gateways": GATEWAYS });
+		await fetchAiGatewayRefusals(ACC, "t", ...WINDOW);
+		const logCalls = calls.filter((u) => u.includes("/logs"));
+		expect(logCalls).toHaveLength(2);
+		expect(new URL(logCalls[0]).searchParams.has("filters")).toBe(false);
+	});
+});
+
+describe("flagged but allowed", () => {
+	const WINDOW = ["2026-11-01T00:00:00Z", "2026-11-06T00:00:00Z"] as const;
+
+	it("reads Guardrails flags by category and side, and DLP flags by policy, once per policy and side", () => {
+		expect(
+			flagsOf({
+				guardrails: { prompt: { P1: "FLAG", S1: "BLOCK" }, response: { S2: "FLAG" } },
+				dlp_action: "FLAG",
+				dlp_profiles: [
+					{ policy_ids: ["Check PII"], check: "REQUEST" },
+					{ policy_ids: ["Check PII", "Check PCI"], check: "REQUEST" },
+					{ policy_ids: ["Check PII"], check: "RESPONSE" },
+				],
+			}),
+		).toEqual([
+			{ kind: "guardrails", detail: "P1", side: "prompt" },
+			{ kind: "guardrails", detail: "S2", side: "response" },
+			{ kind: "dlp", detail: "Check PII", side: "prompt" },
+			{ kind: "dlp", detail: "Check PCI", side: "prompt" },
+			{ kind: "dlp", detail: "Check PII", side: "response" },
+		]);
+		expect(flagsOf({ dlp_action: "FLAG", dlp_profiles: null })).toEqual([{ kind: "dlp", detail: "(policy not named)", side: null }]);
+		expect(flagsOf({ dlp_action: "BLOCK", guardrails: null })).toEqual([]);
+	});
+
+	it("scans only gateways that can flag and keep logs, counts guard-model calls apart, and passes nothing on", async () => {
+		const secret = { request: "PROMPT-SECRET", response: "ANSWER-SECRET", metadata: '{"user":"META-SECRET@example.com"}' };
+		const calls = mockRest({
+			"/ai-gateway/gateways": { success: true, result: [GATEWAY, { id: "plain", collect_logs: true, guardrails: null }, { ...GATEWAY, id: "nologs", collect_logs: false }] },
+			"/ai-gateway/gateways/guarded/logs": {
+				success: true,
+				result_info: { total_count: 3 },
+				result: [
+					{ ...secret, model: "m", guardrails: { prompt: { P1: "FLAG" }, response: {} } },
+					{ ...secret, model: "@cf/meta/llama-guard-3-8b", dlp_action: "FLAG", dlp_profiles: [{ policy_ids: ["Check PII"], check: "REQUEST" }] },
+					{ ...secret, model: "m", guardrails: { prompt: {}, response: {} } },
+				],
+			},
+		});
+		const result = await fetchAiGatewayFlags(ACC, "t", ...WINDOW);
+		expect(result).toMatchObject({ flagged: 2, scanned: 3, total: 3, skipped: [], failed: [], error: null });
+		expect(result.groups).toEqual([
+			{ kind: "guardrails", detail: "P1", side: "prompt", count: 1, onGuardModel: 0, gateways: ["guarded"] },
+			{ kind: "dlp", detail: "Check PII", side: "prompt", count: 1, onGuardModel: 1, gateways: ["guarded"] },
+		]);
+		expect(JSON.stringify(result)).not.toMatch(/SECRET/);
+		const logCalls = calls.filter((u) => u.includes("/logs"));
+		expect(logCalls).toHaveLength(1);
+		expect(new URL(logCalls[0]).searchParams.get("success")).toBe("true");
+	});
+
+	it("stops at its bounds and says what it left out", async () => {
+		const many = Array.from({ length: 10 }, (_, i) => ({ ...GATEWAY, id: `g${i}` }));
+		const fullPage = { success: true, result_info: { total_count: 900 }, result: Array.from({ length: 50 }, () => ({ model: "m" })) };
+		const routes: Record<string, unknown> = { "/ai-gateway/gateways": { success: true, result: many } };
+		for (const g of many) routes[`/ai-gateway/gateways/${g.id}/logs`] = fullPage;
+		const calls = mockRest(routes);
+		const result = await fetchAiGatewayFlags(ACC, "t", ...WINDOW);
+		expect(result.skipped).toEqual(["g8", "g9"]);
+		expect(calls.filter((u) => u.includes("/logs"))).toHaveLength(8 * 5);
+		expect(result).toMatchObject({ scanned: 8 * 250, total: 8 * 900 });
 	});
 });

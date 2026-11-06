@@ -714,6 +714,58 @@ describe("overview and drill-down", () => {
 		expect(query.variables.tagKey).toBe("team");
 	});
 
+	it("splits each bucket by what AI Gateway did, summing the status codes that come to one action", async () => {
+		const ACCT = "6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d6d";
+		mockUpstream({
+			schema: {
+				sums: { aiGatewayRequestsAdaptiveGroupsType: ["cost", "erroredRequests"] },
+				dimensions: { aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "gateway", "model", "statusCode", "cached", "rateLimited"] },
+			},
+			primary: {
+				series: [],
+				total: [row({}, 9, { cost: 1 })],
+				seriesByAction: [
+					row({ datetimeHour: "2026-09-05T10:00:00Z", statusCode: 200, cached: 0, rateLimited: 0 }, 5, { cost: 1, erroredRequests: 0 }),
+					row({ datetimeHour: "2026-09-05T10:00:00Z", statusCode: 422, cached: 0, rateLimited: 0 }, 2, { cost: 0, erroredRequests: 2 }),
+					row({ datetimeHour: "2026-09-05T10:00:00Z", statusCode: 424, cached: 0, rateLimited: 0 }, 1, { cost: 0, erroredRequests: 1 }),
+					row({ datetimeHour: "2026-09-05T11:00:00Z", statusCode: 200, cached: 1, rateLimited: 0 }, 1, { cost: 0, erroredRequests: 0 }),
+				],
+			},
+		});
+		const res = await usage({ accountId: ACCT, ...win() });
+		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		expect(result.seriesBy.action.map((p) => [p.ts, p.key, p.requests, p.errors])).toEqual([
+			["2026-09-05T10:00:00Z", "Passed", 5, 0],
+			["2026-09-05T10:00:00Z", "Blocked", 3, 3],
+			["2026-09-05T11:00:00Z", "From cache", 1, 0],
+		]);
+		const query = graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string };
+		expect(query.query).toMatch(/seriesByAction: [\s\S]*?dimensions \{ datetimeHour statusCode cached rateLimited \}/);
+	});
+
+	it("refuses a slice or window the log routes cannot honour, rather than reporting on more than was asked", async () => {
+		const post = (path: string, body: Record<string, unknown>) => app.request(path, { method: "POST", headers: auth, body: JSON.stringify(body) }, ENV);
+		const ACCT = "6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f";
+		for (const path of ["/api/ai-gateway/refusals", "/api/ai-gateway/flags"]) {
+			expect((await post(path, { accountId: ACCT, ...win(), filter: { gateway: 5 } })).status).toBe(400);
+			expect((await post(path, { accountId: ACCT, ...win(), filter: { user: "a\u0000b" } })).status).toBe(400);
+			expect((await post(path, { accountId: "nope", ...win() })).status).toBe(400);
+			expect((await post(path, { accountId: ACCT, from: "2026-01-01T00:00:00Z", to: "2026-06-01T00:00:00Z" })).status).toBe(400);
+		}
+	});
+
+	it("reads no action series where the schema has no status code", async () => {
+		const ACCT = "6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e";
+		mockUpstream({
+			schema: { sums: { aiGatewayRequestsAdaptiveGroupsType: ["cost"] }, dimensions: { aiGatewayRequestsAdaptiveGroupsType: ["datetimeHour", "date", "gateway", "model"] } },
+			primary: { series: [], total: [row({}, 1, { cost: 1 })] },
+		});
+		const res = await usage({ accountId: ACCT, ...win() });
+		const { result } = (await res.json()) as { result: AiGatewayUsageResult };
+		expect(result.seriesBy.action).toEqual([]);
+		expect((graphqlBodies.find((b) => b.query.includes("AiGatewayRequests")) as { query: string }).query).not.toContain("seriesByAction");
+	});
+
 	it("drills into one user with the value as a variable, and says session analysis cannot follow", async () => {
 		const ACCT = "77777777777777777777777777777777";
 		mockUpstream({

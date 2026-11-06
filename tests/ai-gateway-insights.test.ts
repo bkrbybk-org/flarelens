@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildInsights } from "../web/src/features/ai-gateway/insights";
+import { buildInsights, cacheInsight, cacheSavings, coverageGaps, coverageInsight } from "../web/src/features/ai-gateway/insights";
 import { change, formatCost, formatDuration } from "../web/src/features/ai-gateway/types";
-import type { AiGatewayBreakdownRow, AiGatewayUsageResult } from "../web/src/features/ai-gateway/types";
+import type { AiGatewayBreakdownRow, AiGatewayConfigResult, AiGatewayFlow, AiGatewayUsageResult } from "../web/src/features/ai-gateway/types";
 
 /** The AI Gateway page's "At a glance" lines: only what the numbers support, each pointing at a slice. */
 
@@ -23,7 +23,7 @@ function result(overrides: Partial<AiGatewayUsageResult> = {}): AiGatewayUsageRe
 		granularity: "hourly",
 		timeDimension: "datetimeHour",
 		series: [],
-		seriesBy: { gateway: [], model: [], provider: [], client: [], user: [] },
+		seriesBy: { gateway: [], model: [], provider: [], client: [], user: [], action: [] },
 		totals: { requests: 78, tokensIn: 3_000_000, tokensOut: 160_000, cost: 1.18, errors: 1, errorRate: 1 / 78, cacheHits: 0, cacheMisses: 78, cacheHitRate: 0, p50: 12_275, p95: 368_576, rateLimited: 0, users: 0, sessions: 16, promptCache: null },
 		byGateway: [slice("default", 29), slice("internal-ai", 24), slice("demo", 25)],
 		byProvider: [slice("workers-ai", 77), slice("ceramic", 1, { errors: 1 })],
@@ -144,5 +144,76 @@ describe("formatting", () => {
 		expect(change(10, 0)).toBeNull();
 		expect(change(10, null)).toBeNull();
 		expect(change(15, 10)).toBe(0.5);
+	});
+});
+
+describe("coverage and cache savings", () => {
+	const row = (key: string, requests: number) => ({ key, requests, tokensIn: null, tokensOut: null, cost: null, errors: null, cached: null, p50: null, p95: null }) as AiGatewayUsageResult["byGateway"][number];
+	const gateway = (id: string, over: Partial<AiGatewayConfigResult["gateways"][number]> = {}): AiGatewayConfigResult["gateways"][number] => ({
+		id,
+		isDefault: false,
+		cacheTtl: 0,
+		rateLimit: null,
+		authentication: true,
+		collectLogs: true,
+		logLimit: null,
+		guardrails: { prompt: { block: ["P1"], flag: [] }, response: { block: [], flag: [] } },
+		dlp: { policies: [{ name: "p", action: "BLOCK", check: [], profiles: 1, enabled: true }] },
+		spendLimits: false,
+		...over,
+	});
+	const config = (gateways: AiGatewayConfigResult["gateways"]): AiGatewayConfigResult => ({ gateways, routes: [], categoryNames: {}, error: null });
+
+	it("names what is missing on gateways carrying traffic, the busiest first, and ignores idle or covered ones", () => {
+		const gaps = coverageGaps(
+			config([
+				gateway("covered"),
+				gateway("open", { guardrails: null, dlp: null, authentication: false, collectLogs: false }),
+				gateway("flags", { guardrails: { prompt: { block: [], flag: ["S1"] }, response: { block: [], flag: [] } }, dlp: { policies: [] } }),
+				gateway("idle", { guardrails: null }),
+			]),
+			[row("flags", 50), row("open", 20), row("covered", 100), row("idle", 0), row("not-in-config", 9)],
+		);
+		expect(gaps).toEqual([
+			{ gateway: "flags", requests: 50, gaps: ["Guardrails only flag, block nothing", "DLP on, no policies"], unblocked: true },
+			{ gateway: "open", requests: 20, gaps: ["Guardrails off", "DLP off", "no authentication", "logs off"], unblocked: true },
+		]);
+		expect(coverageGaps(null, [row("open", 20)])).toEqual([]);
+		expect(coverageGaps({ ...config([gateway("open", { guardrails: null })]), error: "no" }, [row("open", 20)])).toEqual([]);
+	});
+
+	it("leads with the busiest gateway nothing blocks on, and drills unless already there", () => {
+		const gaps = [
+			{ gateway: "flags", requests: 50, gaps: ["Guardrails only flag, block nothing"], unblocked: true },
+			{ gateway: "open", requests: 20, gaps: ["Guardrails off"], unblocked: true },
+			{ gateway: "dlp", requests: 10, gaps: ["DLP off"], unblocked: false },
+		];
+		const line = coverageInsight(gaps, result({ totals: { requests: 100 } as AiGatewayUsageResult["totals"], filter: {} }));
+		expect(line).toEqual({
+			tone: "warn",
+			text: 'Gateway "flags" carries 50% of requests (50) with Guardrails only flag, block nothing. 1 more gateway with traffic block nothing either; see Gateway settings.',
+			drill: { key: "gateway", value: "flags" },
+		});
+		expect(coverageInsight([gaps[2]], result({ totals: { requests: 100 } as AiGatewayUsageResult["totals"], filter: {} }))).toBeNull();
+		expect(coverageInsight(gaps, result({ totals: { requests: 100 } as AiGatewayUsageResult["totals"], filter: { gateway: "flags" } }))?.drill).toBeUndefined();
+	});
+
+	it("sizes what the cache saved from each model's average for requests that reached it", () => {
+		const f = (over: Partial<AiGatewayFlow>): AiGatewayFlow => ({ user: "u", gateway: "g", provider: null, model: "m", action: "Passed", tag: null, p95: null, requests: 1, tokens: null, cost: 0, errors: 0, cached: 0, ...over });
+		const savings = cacheSavings([
+			f({ requests: 4, cost: 2 }),
+			f({ action: "From cache", requests: 3, cached: 3 }),
+			f({ action: "Blocked", requests: 5, errors: 5 }),
+			f({ model: "free", requests: 9, cost: 0 }),
+			f({ model: "free", action: "From cache", requests: 2, cached: 2 }),
+		]);
+		// m costs $0.50 a request that reached it, and blocked requests do not lower that.
+		expect(savings).toEqual({ saved: 1.5, cachedRequests: 5, unpriced: 2 });
+		expect(cacheInsight(savings)).toEqual({ tone: "info", text: "The gateway cache answered 5 requests, about $1.50 the models would have charged at their average this window; 2 more were on models with no priced request." });
+		expect(cacheSavings([f({ requests: 4, cost: 2 })])).toBeNull();
+		expect(cacheSavings(null)).toBeNull();
+		expect(cacheInsight({ saved: 0, cachedRequests: 2, unpriced: 2 })).toBeNull();
+		// Without an action column, the cached count on the row itself.
+		expect(cacheSavings([f({ action: null, requests: 5, cost: 2, cached: 1 })])).toEqual({ saved: 0.5, cachedRequests: 1, unpriced: 0 });
 	});
 });

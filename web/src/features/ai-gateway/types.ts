@@ -151,7 +151,7 @@ export interface AiGatewayUsageResult {
 	granularity: AiGatewayGranularity;
 	timeDimension: string;
 	series: AiGatewaySeriesPoint[];
-	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[]; client: AiGatewaySplitPoint[]; user: AiGatewaySplitPoint[] };
+	seriesBy: { gateway: AiGatewaySplitPoint[]; model: AiGatewaySplitPoint[]; provider: AiGatewaySplitPoint[]; client: AiGatewaySplitPoint[]; user: AiGatewaySplitPoint[]; action: AiGatewaySplitPoint[] };
 	totals: AiGatewayTotals;
 	byGateway: AiGatewayBreakdownRow[];
 	byProvider: AiGatewayBreakdownRow[];
@@ -350,6 +350,26 @@ export interface AiGatewayRefusalGroup {
 	side: "prompt" | "response" | null;
 	count: number;
 	gateways: string[];
+}
+
+export interface AiGatewayFlagGroup {
+	kind: "guardrails" | "dlp";
+	detail: string;
+	side: "prompt" | "response" | null;
+	count: number;
+	onGuardModel: number;
+	gateways: string[];
+}
+
+export interface AiGatewayFlagsResult {
+	groups: AiGatewayFlagGroup[];
+	flagged: number;
+	scanned: number;
+	total: number;
+	skipped: string[];
+	failed: { gateway: string; error: string }[];
+	categoryNames: Record<string, string>;
+	error: string | null;
 }
 
 export interface AiGatewayRefusalsResult {

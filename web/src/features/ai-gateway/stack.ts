@@ -9,7 +9,7 @@ import type { AiGatewayGranularity, AiGatewaySeriesPoint, AiGatewaySplitPoint } 
  * active days would read as four consecutive busy ones.
  */
 
-export type Split = "none" | "gateway" | "model" | "provider" | "client" | "user" | "tag" | "source";
+export type Split = "none" | "gateway" | "model" | "provider" | "client" | "user" | "tag" | "source" | "action";
 export type StackMetric = "requests" | "tokens" | "cost" | "errors";
 
 export const WORKERS_AI = "Workers AI";
@@ -130,9 +130,19 @@ export function forecastMonth(spend: number, windowMinutes: number, now = new Da
 export const STACK_COLORS = ["#f6821f", "#2563eb", "#0d9488", "#7c3aed", "#ca8a04", "#db2777"];
 export const OTHER_COLOR = "#a1a1aa";
 export const SOURCE_COLORS: Record<string, string> = { [WORKERS_AI]: "#f6821f", [THIRD_PARTY]: "#2563eb" };
+/** One colour per action, the same in every view, so red reads as blocked at a glance. */
+export const ACTION_COLORS: Record<string, string> = {
+	Passed: "#16a34a",
+	"From cache": "#2563eb",
+	Blocked: "#dc2626",
+	"Rate limited": "#ca8a04",
+	Cancelled: "#a1a1aa",
+	Failed: "#ea580c",
+};
 
 export function colorFor(key: string, index: number, split: Split): string {
 	if (key === OTHER) return OTHER_COLOR;
 	if (split === "source") return SOURCE_COLORS[key] ?? OTHER_COLOR;
+	if (split === "action") return ACTION_COLORS[key] ?? OTHER_COLOR;
 	return STACK_COLORS[index % STACK_COLORS.length];
 }

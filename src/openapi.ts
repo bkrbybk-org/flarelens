@@ -395,7 +395,55 @@ export function buildOpenApiDocument({ version, serverUrl }: OpenApiOptions): Re
 					requestBody: jsonBody({
 						type: "object",
 						required: ["accountId", "from", "to"],
-						properties: { accountId: HEX_ID_SCHEMA, from: { type: "string", format: "date-time" }, to: { type: "string", format: "date-time" } },
+						properties: {
+							accountId: HEX_ID_SCHEMA,
+							from: { type: "string", format: "date-time" },
+							to: { type: "string", format: "date-time" },
+							filter: {
+								type: "object",
+								description: "The page's slice: exact gateway, provider, model and/or user. A user is matched on the `user` metadata key by Cloudflare.",
+								properties: {
+									gateway: { type: "string", maxLength: 256 },
+									provider: { type: "string", maxLength: 256 },
+									model: { type: "string", maxLength: 256 },
+									user: { type: "string", maxLength: 320 },
+								},
+							},
+						},
+					}),
+					responses: {
+						200: okJson(successEnvelope(genericObject)),
+						400: response400,
+						401: response401,
+						403: response403,
+						502: response502,
+					},
+				},
+			},
+			"/api/ai-gateway/flags": {
+				post: {
+					tags: ["AI Gateway"],
+					summary: "What Guardrails and DLP flagged on requests they allowed",
+					description:
+						"Window of at most 30 days. A bounded scan of the successful logs (up to 250 a gateway, on up to 8 gateways with Guardrails or DLP), counting flags by Guardrails category and side and by DLP policy; `scanned`, `total` and `skipped` say how much was read. Each log is reduced to its verdicts in the Worker — prompts, answers and caller metadata are never returned. Needs AI Gateway: Read.",
+					requestBody: jsonBody({
+						type: "object",
+						required: ["accountId", "from", "to"],
+						properties: {
+							accountId: HEX_ID_SCHEMA,
+							from: { type: "string", format: "date-time" },
+							to: { type: "string", format: "date-time" },
+							filter: {
+								type: "object",
+								description: "The page's slice: exact gateway, provider, model and/or user. A user is matched on the `user` metadata key by Cloudflare.",
+								properties: {
+									gateway: { type: "string", maxLength: 256 },
+									provider: { type: "string", maxLength: 256 },
+									model: { type: "string", maxLength: 256 },
+									user: { type: "string", maxLength: 320 },
+								},
+							},
+						},
 					}),
 					responses: {
 						200: okJson(successEnvelope(genericObject)),

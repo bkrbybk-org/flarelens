@@ -3,7 +3,7 @@ import { act, render, renderHook, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useAutoRefresh, usePresentation, usePresentationTextScale } from "../../web/src/hooks/usePresentation";
 import { PresentationBar } from "../../web/src/components/shell/PresentationBar";
-import { aliasLetters, useHideNamesPreference } from "../../web/src/hooks/useHideNames";
+import { aliasLetters, useHideNamesPreference, useMaskEmails } from "../../web/src/hooks/useHideNames";
 import { Topbar } from "../../web/src/components/shell/Topbar";
 
 /** Presentation mode: full screen when the browser allows, the mode either way, and auto-refresh. */
@@ -197,6 +197,58 @@ describe("controls", () => {
 		expect(onHideNames).toHaveBeenCalledWith(false);
 		localStorage.removeItem("flarelens_present_hide_names");
 		expect(aliasLetters(0) + aliasLetters(25) + aliasLetters(26) + aliasLetters(27)).toBe("AZAAAB");
+	});
+
+	describe("masking emails on screen", () => {
+		function Page({ active, text = "identity.email == \"a.person@example.com\"", title = "actor b@example.org" }: { active: boolean; text?: string; title?: string }) {
+			useMaskEmails(active);
+			return (
+				<div>
+					<code>{text}</code>
+					<span title={title} aria-label="x">hover</span>
+					<p>a.person@example.com again</p>
+					<input aria-label="search" defaultValue="typed@example.com" placeholder="someone@example.com" />
+				</div>
+			);
+		}
+		const flush = () => act(async () => {});
+
+		it("shows every address as a stable alias, in text and tooltips, and leaves what was typed", () => {
+			const { container } = render(<Page active={true} />);
+			// One person, one alias, wherever they appear; another person, another.
+			const alias = /"(Person [A-Z])"/.exec(container.querySelector("code")!.textContent!)![1];
+			expect(container.querySelector("p")).toHaveTextContent(`${alias} again`);
+			expect(container.querySelector("span")!.getAttribute("title")).toMatch(/^actor Person [A-Z]$/);
+			expect(container.querySelector("span")!.getAttribute("title")).not.toContain(alias);
+			expect(container.querySelector("input")).toHaveValue("typed@example.com");
+			expect(container.querySelector("input")).toHaveAttribute("placeholder", "someone@example.com");
+		});
+
+		it("catches text React writes later, and what mounts later", async () => {
+			const { container, rerender } = render(<Page active={true} />);
+			rerender(<Page active={true} text="new.one@example.net" title="c@example.org" />);
+			await flush();
+			expect(container.querySelector("code")).toHaveTextContent(/^Person [A-Z]$/);
+			expect(container.querySelector("code")?.textContent).not.toContain("@");
+			expect(container.querySelector("span")?.getAttribute("title")).not.toContain("@");
+			const late = document.createElement("div");
+			late.textContent = "late@example.com";
+			container.appendChild(late);
+			await flush();
+			expect(late.textContent).toMatch(/^Person [A-Z]$/);
+		});
+
+		it("puts the originals back on leaving, and leaves the page alone while off", async () => {
+			const { container, rerender } = render(<Page active={false} />);
+			expect(container.querySelector("p")).toHaveTextContent("a.person@example.com again");
+			rerender(<Page active={true} />);
+			expect(container.querySelector("p")).toHaveTextContent(/^Person [A-Z] again$/);
+			rerender(<Page active={false} />);
+			await flush();
+			expect(container.querySelector("p")).toHaveTextContent("a.person@example.com again");
+			expect(container.querySelector("code")).toHaveTextContent('identity.email == "a.person@example.com"');
+			expect(container.querySelector("span")).toHaveAttribute("title", "actor b@example.org");
+		});
 	});
 
 	it("the top bar offers full screen", async () => {
