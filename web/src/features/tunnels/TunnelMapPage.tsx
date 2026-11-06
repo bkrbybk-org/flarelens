@@ -11,7 +11,7 @@ import type { Session } from "../../hooks/useSession";
 import { useTunnelMap } from "./useTunnelMap";
 import { TunnelSankey } from "./TunnelSankey";
 import { TunnelDrawer } from "./TunnelDrawer";
-import { appTypeLabel, chainText, originKindLabel, statusTone, type MappingRow, type OriginKind } from "./types";
+import { appTypeLabel, chainText, mappingRowKey, originKindLabel, statusTone, type MappingRow, type OriginKind } from "./types";
 import { compareCloudflaredVersions } from "./cloudflared-version";
 
 
@@ -213,7 +213,7 @@ export function TunnelMapPage({ session, onAuthError }: { session: Session; onAu
 					<ul className="space-y-2">
 						{rows.map((row) => (
 							<li
-								key={`${row.hostname}|${row.path ?? ""}|${row.service}|${row.tunnel?.id ?? ""}`}
+								key={mappingRowKey(row)}
 								className="rounded-lg border border-zinc-200 px-3 py-2.5 dark:border-zinc-800"
 							>
 								<div className="grid gap-3 md:grid-cols-[1.4fr_1.4fr_1fr_1.2fr]">

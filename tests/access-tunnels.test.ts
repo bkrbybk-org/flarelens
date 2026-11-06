@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/index";
 import { tunnelHealth, type TunnelConnector } from "../src/lib/access-tunnels";
+import { mappingRowKey, type MappingRow } from "../web/src/features/tunnels/types";
 
 /** Cover for the Access app → tunnel → origin join, including the gaps it is meant to surface. */
 
@@ -160,6 +161,69 @@ describe("origin kinds — not every app needs a tunnel", () => {
 	it("marks a tunnel-served row as tunnel-routed", async () => {
 		const { result } = (await (await call()).json()) as { result: { rows: { hostname: string; originKind: string }[] } };
 		expect(result.rows.find((r) => r.hostname === "gitlab-ce.example.com")?.originKind).toBe("tunnel");
+	});
+});
+
+describe("row identity", () => {
+	const rowsOf = async () => ((await (await call()).json()) as { result: { rows: MappingRow[] } }).result.rows;
+	const expectUniqueKeys = (rows: MappingRow[]) => {
+		const keys = rows.map(mappingRowKey);
+		expect(keys.filter((key, i) => keys.indexOf(key) !== i)).toEqual([]);
+	};
+
+	it("keeps one row per application when Cloudflare-hosted apps share a hostname", async () => {
+		mockUpstream({
+			apps: [
+				{ id: "app-launcher", name: "Launcher", type: "app_launcher", domain: "team.example.com" },
+				{ id: "app-warp", name: "WARP login", type: "warp", domain: "team.example.com" },
+				{ id: "app-biso", name: "Isolation", type: "biso", domain: "team.example.com" },
+			],
+		});
+		const rows = await rowsOf();
+		expect(rows.map((r) => r.app?.name).sort()).toEqual(["Isolation", "Launcher", "WARP login"]);
+		expect(rows.every((r) => r.service === "Cloudflare-hosted")).toBe(true);
+		expectUniqueKeys(rows);
+	});
+
+	it("keeps one row per application when path-scoped apps share a Worker hostname", async () => {
+		mockUpstream({
+			apps: [
+				{ id: "app-admin", name: "Admin", type: "self_hosted", domain: "tool.workers.dev/admin" },
+				{ id: "app-api", name: "API", type: "self_hosted", domain: "tool.workers.dev/api" },
+			],
+		});
+		const rows = await rowsOf();
+		expect(rows.map((r) => r.app?.name).sort()).toEqual(["API", "Admin"]);
+		expectUniqueKeys(rows);
+	});
+
+	it("collapses an ingress rule repeated in one tunnel to one row", async () => {
+		const rule = { hostname: "gitlab-ce.example.com", service: "https://172.16.12.101:443" };
+		mockUpstream({ apps: [gitlabApp], tunnels: [cwLab], configs: { "t-1": { config: { ingress: [rule, rule] } } } });
+		const rows = await rowsOf();
+		expect(rows.filter((r) => r.hostname === rule.hostname)).toHaveLength(1);
+		expectUniqueKeys(rows);
+	});
+
+	it("keeps the same ingress rule on two tunnels as two rows", async () => {
+		const rule = { hostname: "gitlab-ce.example.com", service: "https://172.16.12.101:443" };
+		mockUpstream({
+			apps: [gitlabApp],
+			tunnels: [cwLab, { ...cwLab, id: "t-2", name: "Tunnel B" }],
+			configs: { "t-1": { config: { ingress: [rule] } }, "t-2": { config: { ingress: [rule] } } },
+		});
+		const rows = await rowsOf();
+		expect(rows.map((r) => r.tunnel?.name).sort()).toEqual(["Tunnel A", "Tunnel B"]);
+		expectUniqueKeys(rows);
+	});
+
+	it("collapses a destination repeated in one application to one row", async () => {
+		mockUpstream({
+			apps: [{ id: "app-net", name: "Net", type: "private_ip", destinations: [{ type: "private", uri: "10.0.0.0/24" }, { type: "private", uri: "10.0.0.0/24" }] }],
+		});
+		const rows = await rowsOf();
+		expect(rows).toHaveLength(1);
+		expectUniqueKeys(rows);
 	});
 });
 

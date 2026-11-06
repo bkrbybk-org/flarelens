@@ -490,7 +490,18 @@ export async function fetchTunnelMap(
 		}
 	}
 
-	rows.sort((a, b) => a.hostname.localeCompare(b.hostname) || a.service.localeCompare(b.service));
+	// An ingress rule repeated in one tunnel, or a destination repeated in one application, is the
+	// same row twice. Different applications on one hostname are not, so the application id counts.
+	// Mirrors `mappingRowKey` in web/src/features/tunnels/types.ts, which keys the list on it.
+	const seen = new Set<string>();
+	const uniqueRows = rows.filter((row) => {
+		const key = [row.hostname, row.path ?? "", row.service, row.tunnel?.id ?? "", row.app?.id ?? ""].join("|");
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+
+	uniqueRows.sort((a, b) => a.hostname.localeCompare(b.hostname) || a.service.localeCompare(b.service));
 
 	const tunnelNames = new Map(summaries.map((t) => [t.id, t.name]));
 	const privateRoutes: PrivateRoute[] = routesRes.result
@@ -502,5 +513,5 @@ export async function fetchTunnelMap(
 			comment: r.comment || undefined,
 		}));
 
-	return { tunnels: summaries, rows, privateRoutes, errors };
+	return { tunnels: summaries, rows: uniqueRows, privateRoutes, errors };
 }

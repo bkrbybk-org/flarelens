@@ -78,6 +78,16 @@ export interface TunnelMapResult {
 	latestCloudflared?: LatestCloudflared;
 }
 
+/**
+ * What makes a mapping row itself. The application is part of it: several Access applications can
+ * claim one hostname, such as the App Launcher, WARP and Browser Isolation apps on the team domain
+ * or two path-scoped apps on one Worker. Those rows differ only in the application they show.
+ * `fetchTunnelMap` in src/lib/access-tunnels.ts drops repeats on this same identity.
+ */
+export function mappingRowKey(row: MappingRow): string {
+	return [row.hostname, row.path ?? "", row.service, row.tunnel?.id ?? "", row.app?.id ?? ""].join("|");
+}
+
 /** Text for the CSV export and the search haystack — the chain as it reads on screen. */
 export function chainText(row: MappingRow): string {
 	const policies = row.app ? row.app.policies.map((p) => `${p.name} (${p.decision})`).join("; ") : "";

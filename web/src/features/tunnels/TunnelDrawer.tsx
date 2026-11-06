@@ -15,6 +15,7 @@ import {
 	type TunnelSummary,
 } from "./types";
 import { compareCloudflaredVersions } from "./cloudflared-version";
+import { mappingRowKey } from "./types";
 
 /** `cloudflared` opens four edge connections per process. Mirrors the worker's constant. */
 const EXPECTED_CONNECTIONS = 4;
@@ -311,7 +312,7 @@ export function TunnelDrawer({ tunnel, rows, privateRoutes, latestCloudflared, t
 						) : (
 							<ul className="space-y-1 text-xs">
 								{served.map((r) => (
-									<li key={`${r.hostname}|${r.path ?? ""}|${r.service}`} className="flex justify-between gap-3">
+									<li key={mappingRowKey(r)} className="flex justify-between gap-3">
 										<span className="min-w-0 truncate font-medium" title={r.hostname}>
 											{r.hostname}{r.path ? ` ${r.path}` : ""}
 										</span>
