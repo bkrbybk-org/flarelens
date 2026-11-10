@@ -267,15 +267,42 @@ interface AccessApp {
 	policies_error?: boolean;
 }
 
-/** Every public hostname an Access app claims, from whichever field the app model uses. */
-function appHostnames(app: AccessApp): string[] {
-	const hosts = new Set<string>();
-	for (const destination of app.destinations || []) {
-		if (destination.type === "public" && destination.uri) hosts.add(normaliseHost(destination.uri));
+/** One public domain an Access app claims: the hostname, plus the path it is scoped to, if any. */
+interface AppDomain {
+	host: string;
+	path?: string;
+}
+
+function splitDomain(value: string): AppDomain {
+	const bare = value.trim().replace(/^https?:\/\//i, "");
+	const slash = bare.indexOf("/");
+	const path = slash === -1 ? "" : bare.slice(slash);
+	return { host: normaliseHost(bare), path: path && path !== "/" ? path : undefined };
+}
+
+/**
+ * Every public domain an Access app claims, from whichever field the app model uses. The path is
+ * kept because several apps can share one hostname, each scoped to its own path, and on screen
+ * the path is what tells their rows apart.
+ */
+function appDomains(app: AccessApp): AppDomain[] {
+	const values = [
+		...(app.destinations || []).filter((d) => d.type === "public" && d.uri).map((d) => d.uri as string),
+		...(app.self_hosted_domains || []),
+		...(app.domain ? [app.domain] : []),
+	];
+	const domains = new Map<string, AppDomain>();
+	for (const value of values) {
+		const domain = splitDomain(value);
+		const key = `${domain.host}${domain.path ?? ""}`;
+		if (domain.host && !domains.has(key)) domains.set(key, domain);
 	}
-	for (const domain of app.self_hosted_domains || []) hosts.add(normaliseHost(domain));
-	if (app.domain) hosts.add(normaliseHost(app.domain));
-	return [...hosts].filter(Boolean);
+	return [...domains.values()];
+}
+
+/** Every public hostname an Access app claims, paths set aside. */
+function appHostnames(app: AccessApp): string[] {
+	return [...new Set(appDomains(app).map((d) => d.host))];
 }
 
 /** A `.workers.dev` hostname is served by a Worker; no tunnel is involved. */
@@ -408,10 +435,11 @@ export async function fetchTunnelMap(
 
 	const apps = await appsPromise;
 
-	// Index apps by hostname so each ingress rule can find its gate in one pass.
-	const appsByHost = new Map<string, AccessApp>();
+	// Index apps by hostname so each ingress rule can find its gates in one pass. A hostname can
+	// have several: path-scoped apps, or a root app beside an app for one path under it.
+	const appsByHost = new Map<string, AccessApp[]>();
 	for (const app of apps) {
-		for (const host of appHostnames(app)) if (!appsByHost.has(host)) appsByHost.set(host, app);
+		for (const host of appHostnames(app)) appsByHost.set(host, [...(appsByHost.get(host) ?? []), app]);
 	}
 
 	const toAppRef = (app: AccessApp) => ({
@@ -431,30 +459,33 @@ export async function fetchTunnelMap(
 			// A rule with no service is not routing anything; skip rather than render a blank row.
 			if (!rule.service) continue;
 
-			let app: AccessApp | undefined;
+			// Every app this rule carries traffic for gets a row. Taking only the first left the
+			// others to the unmatched pass below, which reported them as having no route.
+			let gates: AccessApp[] = [];
 			if (host) {
-				app = appsByHost.get(host);
-				if (!app) {
-					for (const [candidate, value] of appsByHost) {
-						if (hostMatches(host, candidate)) {
-							app = value;
-							break;
-						}
+				gates = appsByHost.get(host) ?? [];
+				if (!gates.length) {
+					const viaWildcard = new Map<string, AccessApp>();
+					for (const [candidate, list] of appsByHost) {
+						if (hostMatches(host, candidate)) for (const app of list) viaWildcard.set(app.id, app);
 					}
+					gates = [...viaWildcard.values()];
 				}
 			}
-			if (app) matchedAppIds.add(app.id);
 
-			rows.push({
+			const base = {
 				hostname: host || CATCH_ALL,
 				path: rule.path || undefined,
 				service: rule.service,
 				tunnel: { id: tunnel.id, name: tunnel.name || tunnel.id, status: tunnel.status || "unknown" },
-				originKind: "tunnel",
-				app: app ? toAppRef(app) : undefined,
-				// The catch-all rule is plumbing, not an exposed hostname, so it is not a gap.
-				gap: !app && host ? "no-access-app" : undefined,
-			});
+				originKind: "tunnel" as const,
+			};
+			for (const app of gates) {
+				matchedAppIds.add(app.id);
+				rows.push({ ...base, app: toAppRef(app) });
+			}
+			// The catch-all rule is plumbing, not an exposed hostname, so it is not a gap.
+			if (!gates.length) rows.push({ ...base, gap: host ? "no-access-app" : undefined });
 		}
 	}
 
@@ -476,11 +507,12 @@ export async function fetchTunnelMap(
 			});
 		}
 
-		for (const host of appHostnames(app)) {
+		for (const { host, path } of appDomains(app)) {
 			const kind = originKindFor(app, host, workerDomains);
 			const worker = workerDomains.get(host);
 			rows.push({
 				hostname: host,
+				path,
 				service: worker ? `Worker: ${worker}` : originLabel(kind),
 				originKind: kind,
 				app: appRef,

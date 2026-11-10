@@ -194,6 +194,8 @@ describe("row identity", () => {
 		});
 		const rows = await rowsOf();
 		expect(rows.map((r) => r.app?.name).sort()).toEqual(["API", "Admin"]);
+		// The path is what tells these two rows apart on screen.
+		expect(rows.map((r) => `${r.app?.name} ${r.path}`).sort()).toEqual(["API /api", "Admin /admin"]);
 		expectUniqueKeys(rows);
 	});
 
@@ -224,6 +226,54 @@ describe("row identity", () => {
 		const rows = await rowsOf();
 		expect(rows).toHaveLength(1);
 		expectUniqueKeys(rows);
+	});
+});
+
+describe("several applications on one tunnel hostname", () => {
+	const rowsOf = async () => ((await (await call()).json()) as { result: { rows: MappingRow[] } }).result.rows;
+	const rule = { hostname: "tool.example.com", service: "https://10.0.0.9:443" };
+
+	it("shows each application on the tunnel row and reports neither as unrouted", async () => {
+		mockUpstream({
+			apps: [
+				{ id: "app-root", name: "Tool", type: "self_hosted", domain: "tool.example.com" },
+				{ id: "app-admin", name: "Tool admin", type: "self_hosted", domain: "tool.example.com/admin" },
+			],
+			tunnels: [cwLab],
+			configs: { "t-1": { config: { ingress: [rule] } } },
+		});
+		const rows = await rowsOf();
+		const forHost = rows.filter((r) => r.hostname === rule.hostname);
+		expect(forHost.map((r) => r.app?.name).sort()).toEqual(["Tool", "Tool admin"]);
+		expect(forHost.every((r) => r.tunnel?.name === "Tunnel A" && r.service === rule.service && !r.gap)).toBe(true);
+		expect(rows.filter((r) => r.gap === "no-tunnel")).toEqual([]);
+	});
+
+	it("does the same for applications reached through one wildcard rule", async () => {
+		mockUpstream({
+			apps: [
+				{ id: "app-a", name: "A", type: "self_hosted", domain: "a.example.com" },
+				{ id: "app-b", name: "B", type: "self_hosted", domain: "b.example.com" },
+			],
+			tunnels: [cwLab],
+			configs: { "t-1": { config: { ingress: [{ hostname: "*.example.com", service: "https://10.0.0.9:443" }] } } },
+		});
+		const rows = await rowsOf();
+		expect(rows.filter((r) => r.hostname === "*.example.com").map((r) => r.app?.name).sort()).toEqual(["A", "B"]);
+		expect(rows.filter((r) => r.gap === "no-tunnel")).toEqual([]);
+	});
+
+	it("still reports an application on a hostname no tunnel serves", async () => {
+		mockUpstream({
+			apps: [
+				{ id: "app-root", name: "Tool", type: "self_hosted", domain: "tool.example.com" },
+				{ id: "app-other", name: "Other", type: "self_hosted", domain: "other.example.com" },
+			],
+			tunnels: [cwLab],
+			configs: { "t-1": { config: { ingress: [rule] } } },
+		});
+		const rows = await rowsOf();
+		expect(rows.filter((r) => r.gap === "no-tunnel").map((r) => r.app?.name)).toEqual(["Other"]);
 	});
 });
 
