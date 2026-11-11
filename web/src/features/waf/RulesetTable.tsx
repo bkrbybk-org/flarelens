@@ -26,7 +26,7 @@ import {
 } from "../../components/table/ColumnFilterPopover";
 import { ChevronDownIcon, ChevronUpIcon, FilterIcon } from "../../components/Icons";
 import { actionDrift, actionSummary, topChildHost, topHosts, topEntries } from "../../lib/waf/aggregate";
-import { relativeTime, titleCase } from "../../lib/waf/format";
+import { lastSeenText, titleCase } from "../../lib/waf/format";
 import type { RulesetRow } from "../../lib/waf/types";
 import { ActionBadges, ActionMixBar, RuleLevelBadge, RuleTypeBadge, ShareBar, Sparkline } from "./bars";
 
@@ -136,7 +136,7 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 			id: "lastSeen",
 			accessorFn: (row) => row.lastSeen,
 			header: COLUMN_LABELS.lastSeen,
-			cell: ({ row }) => <span className="whitespace-nowrap text-xs">{relativeTime(row.original.lastSeen)}</span>,
+			cell: ({ row }) => <span className="whitespace-nowrap text-xs">{lastSeenText(row.original.lastSeen, row.original.total)}</span>,
 		},
 	], [win]);
 
@@ -323,7 +323,7 @@ export function RulesetTable({ rows, globalSearch, window: win, onSelectRule }: 
 																			<div className="text-xs text-zinc-500 dark:text-zinc-400">
 																				{rule.total.toLocaleString()} events
 																				{host && <> · top host {host[0]}</>}
-																				{" · "}{relativeTime(rule.lastSeen)}
+																				{" · "}{lastSeenText(rule.lastSeen, rule.total)}
 																			</div>
 																			{drift && (
 																				<div className="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400">

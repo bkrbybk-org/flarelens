@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { EmptyState } from "../../components/EmptyState";
 import { BADGE, BADGE_NEUTRAL, BTN_SECONDARY, FOCUS_RING, INPUT, SEARCH_INPUT } from "../../lib/ui";
 import { actionDrift, aggregateRules, groupRulesByRuleset, topEntries, type RuleGroup } from "../../lib/waf/aggregate";
-import { relativeTime, titleCase } from "../../lib/waf/format";
-import type { FirewallEvent, RuleMetaMap, RuleReviewRow } from "../../lib/waf/types";
+import { lastSeenText, titleCase } from "../../lib/waf/format";
+import type { FirewallEvent, RuleCountMap, RuleMetaMap, RuleReviewRow } from "../../lib/waf/types";
 import { ChevronDownIcon, SearchIcon } from "../../components/Icons";
 import { ActionBadges, RuleLevelBadge, RuleTypeBadge, Sparkline } from "./bars";
 import { EvaluationOrder } from "./EvaluationOrder";
@@ -11,6 +11,8 @@ import { EvaluationOrder } from "./EvaluationOrder";
 interface RulesReviewProps {
 	events: FirewallEvent[];
 	ruleMeta: RuleMetaMap;
+	/** Full per-rule counts; without them, counts are of sampled rows. */
+	ruleCounts?: RuleCountMap | null;
 	window: { since: number; until: number } | null;
 	onSelectRule: (rule: { id: string; name: string; configuredAction?: string; lastSeen?: string }) => void;
 }
@@ -20,7 +22,7 @@ const GROUP_PREVIEW = 10;
 
 type StatusFilter = "" | "enabled" | "disabled" | "active" | "idle";
 
-export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: RulesReviewProps) {
+export function RulesReview({ events, ruleMeta, ruleCounts, window: win, onSelectRule }: RulesReviewProps) {
 	const [search, setSearch] = useState("");
 	const [type, setType] = useState("");
 	const [level, setLevel] = useState("");
@@ -29,7 +31,7 @@ export function RulesReview({ events, ruleMeta, window: win, onSelectRule }: Rul
 	// Collapsed groups by key. Everything starts open: the grouping is for reading, not hiding.
 	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
-	const rows = useMemo(() => aggregateRules(events, ruleMeta), [events, ruleMeta]);
+	const rows = useMemo(() => aggregateRules(events, ruleMeta, ruleCounts), [events, ruleMeta, ruleCounts]);
 
 	const summary = useMemo(() => ({
 		known: rows.length,
@@ -273,7 +275,7 @@ function RuleCard({ row, win, onSelect }: {
 				</div>
 				<div className="flex flex-col items-end gap-2">
 					<span className="text-lg font-semibold tabular-nums">{row.total.toLocaleString()}</span>
-					<span className="text-xs text-zinc-500 dark:text-zinc-400">{row.total ? relativeTime(row.lastSeen) : "no activity"}</span>
+					<span className="text-xs text-zinc-500 dark:text-zinc-400">{lastSeenText(row.lastSeen, row.total)}</span>
 					{win && row.times.length > 0 && <Sparkline times={row.times} since={win.since} until={win.until} />}
 				</div>
 			</div>

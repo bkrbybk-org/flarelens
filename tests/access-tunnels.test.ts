@@ -277,6 +277,57 @@ describe("several applications on one tunnel hostname", () => {
 	});
 });
 
+describe("an application with hostnames on and off a tunnel", () => {
+	const rowsOf = async () => ((await (await call()).json()) as { result: { rows: MappingRow[] } }).result.rows;
+
+	it("keeps the hostnames no tunnel serves, as gaps, beside the one a tunnel does", async () => {
+		mockUpstream({
+			apps: [{ id: "app-two", name: "Two", type: "self_hosted", self_hosted_domains: ["tool.example.com", "legacy.example.com/old"] }],
+			tunnels: [cwLab],
+			configs: { "t-1": { config: { ingress: [{ hostname: "tool.example.com", service: "https://10.0.0.9:443" }] } } },
+		});
+		const rows = (await rowsOf()).filter((r) => r.app?.id === "app-two");
+		expect(rows.find((r) => r.hostname === "tool.example.com")).toMatchObject({ originKind: "tunnel", tunnel: { name: "Tunnel A" } });
+		expect(rows.find((r) => r.hostname === "tool.example.com")?.gap).toBeUndefined();
+		expect(rows.find((r) => r.hostname === "legacy.example.com")).toMatchObject({ gap: "no-tunnel", path: "/old" });
+		expect(rows).toHaveLength(2);
+	});
+
+	it("counts a hostname reached through a wildcard rule as served", async () => {
+		mockUpstream({
+			apps: [{ id: "app-w", name: "W", type: "self_hosted", self_hosted_domains: ["a.example.com", "a.example.org"] }],
+			tunnels: [cwLab],
+			configs: { "t-1": { config: { ingress: [{ hostname: "*.example.com", service: "https://10.0.0.9:443" }] } } },
+		});
+		const rows = (await rowsOf()).filter((r) => r.app?.id === "app-w");
+		expect(rows.filter((r) => r.gap === "no-tunnel").map((r) => r.hostname)).toEqual(["a.example.org"]);
+		expect(rows.filter((r) => r.hostname === "a.example.com")).toEqual([]);
+	});
+
+	it("still lists a private destination of an application a tunnel serves", async () => {
+		mockUpstream({
+			apps: [
+				{
+					id: "app-mix",
+					name: "Mix",
+					type: "self_hosted",
+					destinations: [
+						{ type: "public", uri: "tool.example.com" },
+						{ type: "private", uri: "10.1.2.3" },
+					],
+				},
+			],
+			tunnels: [cwLab],
+			configs: { "t-1": { config: { ingress: [{ hostname: "tool.example.com", service: "https://10.0.0.9:443" }] } } },
+		});
+		const rows = (await rowsOf()).filter((r) => r.app?.id === "app-mix");
+		expect(rows.map((r) => [r.hostname, r.originKind]).sort()).toEqual([
+			["10.1.2.3", "private"],
+			["tool.example.com", "tunnel"],
+		]);
+	});
+});
+
 describe("gaps", () => {
 	it("flags a tunnel hostname with no Access application", async () => {
 		mockUpstream({

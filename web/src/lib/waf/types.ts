@@ -104,7 +104,19 @@ export interface WafAggregates {
 	bucket: "15m" | "1h";
 	countries: { country: string; count: number }[];
 	sampleInterval: number | null;
+	/** Full count per rule, action and product. Absent from a Worker older than this field. */
+	byRule?: { ruleId: string; action: string; source?: string; count: number }[];
 }
+
+/** A rule's full counts, folded from {@link WafAggregates.byRule}. */
+export interface RuleCounts {
+	total: number;
+	actions: Record<string, number>;
+	source?: string;
+}
+
+/** Rule id → its full counts. Rules not in the map keep what their sampled rows count. */
+export type RuleCountMap = Map<string, RuleCounts>;
 
 export interface WafDiagnostics {
 	scope: string;

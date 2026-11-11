@@ -6,6 +6,8 @@ import {
 	aggregateRulesets,
 	countEventsByActions,
 	groupRulesByRuleset,
+	ruleCountMap,
+	ruleEventDetail,
 	topHosts,
 } from "../web/src/lib/waf/aggregate";
 import type { FirewallEvent, RuleMetaMap } from "../web/src/lib/waf/types";
@@ -149,5 +151,58 @@ describe("groupRulesByRuleset", () => {
 	it("counts action drift per group", () => {
 		const groups = groupRulesByRuleset(aggregateRules([ev("rule-a", "log", "a.com", 1)], meta));
 		expect(groups.find((g) => g.name === "Custom Rules")?.drift).toBe(1);
+	});
+});
+
+describe("full per-rule counts", () => {
+	// Three sampled rows for rule-a; Cloudflare counts 900 blocks and 30 logs. rule-idle fired 40
+	// times without one sampled row.
+	const events = [ev("rule-a", "block", "a.com", 5), ev("rule-a", "block", "a.com", 3), ev("rule-a", "log", "b.com", 1)];
+	const counts = ruleCountMap({
+		byRule: [
+			{ ruleId: "rule-a", action: "block", source: "firewallCustom", count: 900 },
+			{ ruleId: "rule-a", action: "log", source: "firewallCustom", count: 30 },
+			{ ruleId: "rule-idle", action: "managed_challenge", source: "firewallCustom", count: 40 },
+		],
+	});
+
+	it("is null without full counts, so callers count rows", () => {
+		expect(ruleCountMap(null)).toBeNull();
+		expect(ruleCountMap({})).toBeNull();
+	});
+
+	it("puts full counts on ruleset rows, keeps hosts from the sample, and adds a rule the sample missed", () => {
+		const rows = aggregateRulesets(events, meta, counts);
+		const custom = rows.find((r) => r.ruleId === "rs-1")!;
+		expect(custom.total).toBe(930);
+		expect(custom.actions).toEqual({ block: 900, log: 30 });
+		expect(custom.childRules.get("rule-a")?.total).toBe(930);
+		expect(topHosts(custom)).toEqual([["a.com", 2], ["b.com", 1]]);
+		const idle = rows.find((r) => r.ruleId === "rs-2")!;
+		expect(idle.total).toBe(40);
+		expect(idle.childRules.get("rule-idle")).toMatchObject({ total: 40, actions: { managed_challenge: 40 }, lastSeen: "" });
+		expect(rows.map((r) => r.total)).toEqual([930, 40]);
+	});
+
+	it("counts rows exactly as before without them", () => {
+		expect(aggregateRulesets(events, meta, null).find((r) => r.ruleId === "rs-1")?.total).toBe(3);
+		expect(aggregateRules(events, meta, null).find((r) => r.id === "rule-a")?.total).toBe(3);
+	});
+
+	it("puts full counts on the rules review, so a rule the sample missed is not idle", () => {
+		const rows = aggregateRules(events, meta, counts);
+		expect(rows.find((r) => r.id === "rule-a")).toMatchObject({ total: 930, actions: { block: 900, log: 30 } });
+		expect(rows.find((r) => r.id === "rule-a")?.paths.size).toBe(1);
+		expect(rows.find((r) => r.id === "rule-idle")).toMatchObject({ total: 40, lastSeen: "" });
+		// The ruleset-level entry gets no rule row of its own.
+		expect(aggregateRules(events, meta, ruleCountMap({ byRule: [{ ruleId: "rs-1", action: "block", count: 5 }] })).some((r) => r.id === "rs-1")).toBe(false);
+	});
+
+	it("gives the drawer the full total and actions, and how many sampled rows its lists hold", () => {
+		const detail = ruleEventDetail(events, "rule-a", counts);
+		expect(detail).toMatchObject({ total: 930, sampled: 3, actions: { block: 900, log: 30 } });
+		expect(detail.hosts.get("a.com")).toBe(2);
+		expect(ruleEventDetail(events, "rule-idle", counts)).toMatchObject({ total: 40, sampled: 0 });
+		expect(ruleEventDetail(events, "rule-a")).toMatchObject({ total: 3, sampled: 3 });
 	});
 });

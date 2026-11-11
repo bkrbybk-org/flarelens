@@ -87,7 +87,7 @@ export function FindingsPage({ session, apps, groups, reusableMap, loading, erro
 			...groupsFindings(groups, apps, reusableMap),
 		];
 		if (wafSnapshot) {
-			const rows = aggregateRules(wafSnapshot.events, wafSnapshot.ruleMeta);
+			const rows = aggregateRules(wafSnapshot.events, wafSnapshot.ruleMeta, wafSnapshot.ruleCounts);
 			all.push(...wafFindings(rows));
 			all.push(...wafEvaluationFindings(wafSnapshot.ruleMeta, rows));
 		}

@@ -51,6 +51,20 @@ describe("buildAggregates", () => {
 		expect(agg.countries).toEqual([{ country: "BE", count: 573 }, { country: "US", count: 250 }]);
 	});
 
+	it("keeps each rule's full count per action and product, dropping rows with no rule", () => {
+		const agg = buildAggregates([], [], [], 1440, [
+			{ count: 7743, dimensions: { ruleId: "r1", action: "block", source: "firewallCustom" } },
+			{ count: 12, dimensions: { ruleId: "r1", action: "log", source: "firewallCustom" } },
+			{ count: 3, dimensions: { ruleId: "", action: "block" } },
+			{ count: 0, dimensions: { ruleId: "r2", action: "block" } },
+		]);
+		expect(agg.byRule).toEqual([
+			{ ruleId: "r1", action: "block", source: "firewallCustom", count: 7743 },
+			{ ruleId: "r1", action: "log", source: "firewallCustom", count: 12 },
+		]);
+		expect(buildAggregates([], [], [], 1440).byRule).toEqual([]);
+	});
+
 	it("uses 15-minute buckets up to 6 hours, hourly beyond", () => {
 		expect(bucketDimension(360)).toBe("datetimeFifteenMinutes");
 		expect(bucketDimension(361)).toBe("datetimeHour");
@@ -88,6 +102,8 @@ describe("POST /api/waf/events", () => {
 			if (String(body.query).includes("firewallEventsAdaptiveGroups")) {
 				const rows = body.query.includes("clientCountryName")
 					? [{ count: 9, dimensions: { clientCountryName: "TH" } }]
+					: body.query.includes("ruleId")
+						? [{ count: 9, dimensions: { ruleId: "r1", action: "block", source: "firewallCustom" } }]
 					: body.query.includes("datetimeHour")
 						? [{ count: 9, dimensions: { action: "block", datetimeHour: "2026-09-27T01:00:00Z" } }]
 						: [{ count: 9, avg: { sampleInterval: 3 }, dimensions: { action: "block" } }];
@@ -95,9 +111,10 @@ describe("POST /api/waf/events", () => {
 			}
 			return json({ data: { viewer: { accounts: [{ firewallEventsAdaptive: [{ action: "block", ruleId: "r1", rayName: "x", datetime: "2026-09-27T01:10:00Z" }] }] } } });
 		}) as typeof fetch;
-		const body = (await (await call()).json()) as { result: unknown[]; aggregates: { total: number; countries: unknown[] } };
+		const body = (await (await call()).json()) as { result: unknown[]; aggregates: { total: number; countries: unknown[]; byRule: unknown[] } };
 		expect(body.result).toHaveLength(1);
 		expect(body.aggregates.total).toBe(9);
+		expect(body.aggregates.byRule).toEqual([{ ruleId: "r1", action: "block", source: "firewallCustom", count: 9 }]);
 		expect(body.aggregates.countries).toEqual([{ country: "TH", count: 9 }]);
 	});
 

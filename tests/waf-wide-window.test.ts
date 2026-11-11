@@ -25,6 +25,13 @@ describe("wideWindowWarning", () => {
 		expect(warning).toMatch(/7 days/);
 	});
 
+	it("narrows the warning to hosts, paths and timing once each rule's full count is read", () => {
+		const warning = wideWindowWarning(43200, true);
+		expect(warning).toMatch(/hosts, paths and timing/);
+		expect(warning).toMatch(/Each rule's count/);
+		expect(wideWindowWarning(1440, true)).toBeNull();
+	});
+
 	it("warns for a full 30-day window", () => {
 		expect(wideWindowWarning(43200)).not.toBeNull();
 	});
@@ -35,6 +42,6 @@ describe("WafPage source", () => {
 		const source = readFileSync(new URL("../web/src/features/waf/WafPage.tsx", import.meta.url), "utf8");
 		expect(source).toMatch(/import\s*\{[^}]*\bALERT_WARN\b[^}]*\}\s*from\s*"\.\.\/\.\.\/lib\/ui"/);
 		expect(source).toMatch(/role="status"\s*className=\{ALERT_WARN\}/);
-		expect(source).toMatch(/wideWindowWarning\(minutes\)/);
+		expect(source).toMatch(/wideWindowWarning\(minutes, !!ruleCounts\)/);
 	});
 });

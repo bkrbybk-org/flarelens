@@ -7,8 +7,8 @@
  * against 5,741 reported by the groups dataset for the same 24 hours (2026-09-28) — and undercounts
  * by different amounts in different windows, which is why a 30-day window used to show fewer events
  * than a 7-day one. The groups dataset returns Cloudflare's own sample-adjusted counts, so the
- * headline numbers, the timeline and the country breakdown come from here; the rows stay what they
- * are good for: which rule, which host, which path.
+ * headline numbers, the timeline, the country breakdown and each rule's count come from here; the
+ * rows stay what they are good for: which host, which path, which client, and when.
  *
  * Idea ported from cf-attack-analyzer, which read this dataset for its totals.
  */
@@ -34,12 +34,26 @@ export interface WafAggregates {
 	countries: { country: string; count: number }[];
 	/** Average events each sampled row stands for, across the window — 1 means unsampled. */
 	sampleInterval: number | null;
+	/**
+	 * Full count per rule and action, headline actions only, as the sampled rows are. Rows ran
+	 * about 4× under the full count over 24 hours and 39× over 30 days, so a rule table that
+	 * counted rows disagreed with the headline beside it.
+	 */
+	byRule: RuleCount[];
+}
+
+export interface RuleCount {
+	ruleId: string;
+	action: string;
+	/** The firewall product, as on the rows (`firewallManaged`, `firewallCustom`…). */
+	source?: string;
+	count: number;
 }
 
 interface GroupRow {
 	count?: number;
 	avg?: { sampleInterval?: number };
-	dimensions?: { action?: string; clientCountryName?: string; datetimeHour?: string; datetimeFifteenMinutes?: string };
+	dimensions?: { action?: string; clientCountryName?: string; datetimeHour?: string; datetimeFifteenMinutes?: string; ruleId?: string; source?: string };
 }
 
 type Scope = { kind: "account"; id: string } | { kind: "zone"; id: string };
@@ -78,7 +92,7 @@ async function runGroups(token: string, scope: Scope, query: string, variables: 
 }
 
 /** Pure: fold the three groups reads into what the page shows. */
-export function buildAggregates(actionRows: GroupRow[], seriesRows: GroupRow[], countryRows: GroupRow[], minutes: number): WafAggregates {
+export function buildAggregates(actionRows: GroupRow[], seriesRows: GroupRow[], countryRows: GroupRow[], minutes: number, ruleRows: GroupRow[] = []): WafAggregates {
 	const byAction: Record<string, number> = {};
 	let weighted = 0;
 	let counted = 0;
@@ -110,6 +124,14 @@ export function buildAggregates(actionRows: GroupRow[], seriesRows: GroupRow[], 
 			.filter((row) => row.dimensions?.clientCountryName)
 			.map((row) => ({ country: row.dimensions!.clientCountryName as string, count: row.count ?? 0 })),
 		sampleInterval: counted ? weighted / counted : null,
+		byRule: ruleRows
+			.filter((row) => row.dimensions?.ruleId && row.dimensions.action && (row.count ?? 0) > 0)
+			.map((row) => ({
+				ruleId: row.dimensions!.ruleId as string,
+				action: row.dimensions!.action as string,
+				...(row.dimensions!.source ? { source: row.dimensions!.source } : {}),
+				count: row.count ?? 0,
+			})),
 	};
 }
 
@@ -117,11 +139,13 @@ export async function fetchWafAggregates(token: string, scope: Scope, since: str
 	const variables = { tag: scope.id, since, until };
 	const headline = { ...variables, actions: HEADLINE_ACTIONS };
 	const actionFilter = ", action_in: $actions";
-	const [actionRows, seriesRows, countryRows] = await Promise.all([
+	const [actionRows, seriesRows, countryRows, ruleRows] = await Promise.all([
 		// Every action — skip and AI Labyrinth included — so the page can say what it leaves out.
 		runGroups(token, scope, groupsQuery(scope, "action", "", 100, "count_DESC"), variables),
 		runGroups(token, scope, groupsQuery(scope, `action ${bucketDimension(minutes)}`, actionFilter, 10000, `${bucketDimension(minutes)}_ASC`), headline),
 		runGroups(token, scope, groupsQuery(scope, "clientCountryName", actionFilter, 10, "count_DESC"), headline),
+		// One row per rule, action and product: tens live (59 over 30 days), far under the limit.
+		runGroups(token, scope, groupsQuery(scope, "ruleId action source", actionFilter, 10000, "count_DESC"), headline),
 	]);
-	return buildAggregates(actionRows, seriesRows, countryRows, minutes);
+	return buildAggregates(actionRows, seriesRows, countryRows, minutes, ruleRows);
 }

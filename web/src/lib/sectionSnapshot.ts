@@ -13,11 +13,13 @@
 // "checked" a section it had not.
 import { useSyncExternalStore } from "react";
 import type { CacheAnalysis } from "../features/cache/types";
-import type { FirewallEvent, RuleMetaMap } from "./waf/types";
+import type { FirewallEvent, RuleCountMap, RuleMetaMap } from "./waf/types";
 
 export interface WafSnapshot {
 	events: FirewallEvent[];
 	ruleMeta: RuleMetaMap;
+	/** Full per-rule counts, when the WAF page had them. */
+	ruleCounts?: RuleCountMap | null;
 }
 
 interface Scoped<T> {

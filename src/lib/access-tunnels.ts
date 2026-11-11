@@ -451,7 +451,10 @@ export async function fetchTunnelMap(
 	});
 
 	const rows: MappingRow[] = [];
-	const matchedAppIds = new Set<string>();
+	// Matches are kept per application *and* hostname: an app with one hostname a tunnel serves
+	// and others it does not still needs rows, and gaps, for the others.
+	const served = new Set<string>();
+	const servedKey = (appId: string, host: string) => `${appId}|${host}`;
 
 	for (const { tunnel, ingress } of configs) {
 		for (const rule of ingress) {
@@ -464,10 +467,16 @@ export async function fetchTunnelMap(
 			let gates: AccessApp[] = [];
 			if (host) {
 				gates = appsByHost.get(host) ?? [];
-				if (!gates.length) {
+				if (gates.length) {
+					for (const app of gates) served.add(servedKey(app.id, host));
+				} else {
 					const viaWildcard = new Map<string, AccessApp>();
 					for (const [candidate, list] of appsByHost) {
-						if (hostMatches(host, candidate)) for (const app of list) viaWildcard.set(app.id, app);
+						if (!hostMatches(host, candidate)) continue;
+						for (const app of list) {
+							viaWildcard.set(app.id, app);
+							served.add(servedKey(app.id, candidate));
+						}
 					}
 					gates = [...viaWildcard.values()];
 				}
@@ -480,23 +489,20 @@ export async function fetchTunnelMap(
 				tunnel: { id: tunnel.id, name: tunnel.name || tunnel.id, status: tunnel.status || "unknown" },
 				originKind: "tunnel" as const,
 			};
-			for (const app of gates) {
-				matchedAppIds.add(app.id);
-				rows.push({ ...base, app: toAppRef(app) });
-			}
+			for (const app of gates) rows.push({ ...base, app: toAppRef(app) });
 			// The catch-all rule is plumbing, not an exposed hostname, so it is not a gap.
 			if (!gates.length) rows.push({ ...base, gap: host ? "no-access-app" : undefined });
 		}
 	}
 
-	// Access apps no tunnel ingress serves. Whether that is a finding depends entirely on the
-	// application type: most of these are working exactly as intended.
+	// Access app hostnames no tunnel ingress serves. Whether that is a finding depends entirely on
+	// the application type: most of these are working exactly as intended.
 	for (const app of apps) {
-		if (matchedAppIds.has(app.id)) continue;
 		const appRef = toAppRef(app);
 
 		// Private destinations are reached over the private network, not a public hostname, so
-		// they are listed by destination rather than dropped for having no hostname.
+		// they are listed by destination rather than dropped for having no hostname. No ingress
+		// rule serves them, so they are listed whether or not one of the app's hostnames is.
 		for (const destination of app.destinations || []) {
 			if (destination.type === "public" || !destination.uri) continue;
 			rows.push({
@@ -508,6 +514,7 @@ export async function fetchTunnelMap(
 		}
 
 		for (const { host, path } of appDomains(app)) {
+			if (served.has(servedKey(app.id, host))) continue;
 			const kind = originKindFor(app, host, workerDomains);
 			const worker = workerDomains.get(host);
 			rows.push({

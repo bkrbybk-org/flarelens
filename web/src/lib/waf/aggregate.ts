@@ -4,7 +4,25 @@
 
 import { TOP_HOST_LIMIT } from "./constants";
 import { normalizeAction, ruleLevel, ruleType, titleCase } from "./format";
-import type { ChildRuleRow, FirewallEvent, RuleMetaMap, RuleReviewRow, RulesetRow } from "./types";
+import type { ChildRuleRow, FirewallEvent, RuleCountMap, RuleMetaMap, RuleReviewRow, RulesetRow, WafAggregates } from "./types";
+
+/**
+ * Fold the Worker's per-rule full counts into a map by rule id, or null when there are none —
+ * no full counts at all, or a Worker older than the field — so callers fall back to the rows.
+ */
+export function ruleCountMap(aggregates: Pick<WafAggregates, "byRule"> | null | undefined): RuleCountMap | null {
+	if (!aggregates?.byRule) return null;
+	const map: RuleCountMap = new Map();
+	for (const { ruleId, action, source, count } of aggregates.byRule) {
+		const entry = map.get(ruleId) ?? { total: 0, actions: {}, source };
+		const normalized = normalizeAction(action);
+		entry.actions[normalized] = (entry.actions[normalized] || 0) + count;
+		entry.total += count;
+		entry.source ??= source;
+		map.set(ruleId, entry);
+	}
+	return map;
+}
 
 function eventRuleId(event: FirewallEvent): string {
 	return event.ruleId || "unknown";
@@ -36,11 +54,14 @@ function deriveRuleset(event: FirewallEvent, ruleMeta: RuleMetaMap) {
 	};
 }
 
-export function aggregateRulesets(events: FirewallEvent[], ruleMeta: RuleMetaMap): RulesetRow[] {
+/**
+ * Rulesets with the rules that fired under them. With `counts`, every count is Cloudflare's full
+ * count, and a rule the sample missed altogether still gets its row; hosts and timing stay what
+ * the sampled rows show, since only the rows carry them.
+ */
+export function aggregateRulesets(events: FirewallEvent[], ruleMeta: RuleMetaMap, counts?: RuleCountMap | null): RulesetRow[] {
 	const rows = new Map<string, RulesetRow>();
-	for (const event of events) {
-		const derived = deriveRuleset(event, ruleMeta);
-		const action = normalizeAction(event.action);
+	const rowFor = (event: FirewallEvent, derived: ReturnType<typeof deriveRuleset>): RulesetRow => {
 		const key = derived.rulesetId + "::" + derived.rulesetName + "::" + derived.level;
 		if (!rows.has(key)) {
 			rows.set(key, {
@@ -57,7 +78,12 @@ export function aggregateRulesets(events: FirewallEvent[], ruleMeta: RuleMetaMap
 				lastSeen: event.datetime || "",
 			});
 		}
-		const row = rows.get(key)!;
+		return rows.get(key)!;
+	};
+	for (const event of events) {
+		const derived = deriveRuleset(event, ruleMeta);
+		const action = normalizeAction(event.action);
+		const row = rowFor(event, derived);
 		row.total += 1;
 		row.actions[action] = (row.actions[action] || 0) + 1;
 		const host = event.clientRequestHTTPHost || "";
@@ -67,6 +93,29 @@ export function aggregateRulesets(events: FirewallEvent[], ruleMeta: RuleMetaMap
 			const time = new Date(event.datetime).getTime();
 			if (Number.isFinite(time)) row.times.push(time);
 			if (!row.lastSeen || event.datetime > row.lastSeen) row.lastSeen = event.datetime;
+		}
+	}
+	if (counts) {
+		// Rules no sampled row reached: a row of their own, from what the counts know.
+		const sampled = new Set(events.map(eventRuleId));
+		for (const [ruleId, rule] of counts) {
+			if (sampled.has(ruleId)) continue;
+			const event: FirewallEvent = { ruleId, source: rule.source };
+			const derived = deriveRuleset(event, ruleMeta);
+			incrementChildRule(rowFor(event, derived), derived, "", undefined, "");
+		}
+		for (const row of rows.values()) {
+			row.total = 0;
+			row.actions = {};
+			for (const child of row.childRules.values()) {
+				const full = counts.get(child.id);
+				if (full) {
+					child.total = full.total;
+					child.actions = { ...full.actions };
+				}
+				row.total += child.total;
+				for (const [action, n] of Object.entries(child.actions)) row.actions[action] = (row.actions[action] || 0) + n;
+			}
 		}
 	}
 	return Array.from(rows.values()).sort((a, b) => b.total - a.total);
@@ -91,6 +140,7 @@ function incrementChildRule(
 		});
 	}
 	const child = row.childRules.get(derived.ruleId)!;
+	if (!action) return; // a placeholder for a rule only the full counts know
 	child.total += 1;
 	child.actions[action] = (child.actions[action] || 0) + 1;
 	if (host) child.hosts.set(host, (child.hosts.get(host) || 0) + 1);
@@ -131,8 +181,10 @@ export function countEventsByActions(events: FirewallEvent[], actions: string[])
 /**
  * Flat per-rule view for the Rules Review page: every rule known from ruleset
  * metadata (even ones with no traffic), enriched with event stats when present.
+ * With `counts`, a rule's total and actions are Cloudflare's full counts; hosts,
+ * paths and timing still come from the sampled rows.
  */
-export function aggregateRules(events: FirewallEvent[], ruleMeta: RuleMetaMap): RuleReviewRow[] {
+export function aggregateRules(events: FirewallEvent[], ruleMeta: RuleMetaMap, counts?: RuleCountMap | null): RuleReviewRow[] {
 	const rows = new Map<string, RuleReviewRow>();
 
 	const rowFor = (id: string, meta: RuleMetaMap[string] | undefined): RuleReviewRow => {
@@ -191,6 +243,26 @@ export function aggregateRules(events: FirewallEvent[], ruleMeta: RuleMetaMap): 
 			const time = new Date(event.datetime).getTime();
 			if (Number.isFinite(time)) row.times.push(time);
 			if (!row.lastSeen || event.datetime > row.lastSeen) row.lastSeen = event.datetime;
+		}
+	}
+
+	if (counts) {
+		const full = new Map<string, { total: number; actions: Record<string, number> }>();
+		for (const [id, rule] of counts) {
+			const meta = ruleMeta[id];
+			if (meta?.isRuleset) continue;
+			const rowId = meta?.ruleId || id;
+			rowFor(rowId, meta);
+			// Two ids can name one rule (id and ref): their counts add up.
+			const entry = full.get(rowId) ?? { total: 0, actions: {} };
+			entry.total += rule.total;
+			for (const [action, n] of Object.entries(rule.actions)) entry.actions[action] = (entry.actions[action] || 0) + n;
+			full.set(rowId, entry);
+		}
+		for (const [rowId, entry] of full) {
+			const row = rows.get(rowId)!;
+			row.total = entry.total;
+			row.actions = entry.actions;
 		}
 	}
 
@@ -260,6 +332,8 @@ export function topEntries(map: Map<string, number>, limit: number): [string, nu
 export interface RuleEventDetail {
 	total: number;
 	actions: Record<string, number>;
+	/** Sampled rows behind the top lists; equal to `total` when there were no full counts. */
+	sampled: number;
 	paths: Map<string, number>;
 	hosts: Map<string, number>;
 	countries: Map<string, number>;
@@ -267,11 +341,16 @@ export interface RuleEventDetail {
 	times: number[];
 }
 
-/** Per-rule event breakdown for the drill-down drawer. */
-export function ruleEventDetail(events: FirewallEvent[], ruleId: string): RuleEventDetail {
+/**
+ * Per-rule event breakdown for the drill-down drawer. With the rule's full counts, the total and
+ * actions are those; the top lists and timing stay the sample's, and `sampled` says how many
+ * rows they were drawn from.
+ */
+export function ruleEventDetail(events: FirewallEvent[], ruleId: string, counts?: RuleCountMap | null): RuleEventDetail {
 	const detail: RuleEventDetail = {
 		total: 0,
 		actions: {},
+		sampled: 0,
 		paths: new Map(),
 		hosts: new Map(),
 		countries: new Map(),
@@ -294,6 +373,12 @@ export function ruleEventDetail(events: FirewallEvent[], ruleId: string): RuleEv
 			const time = new Date(event.datetime).getTime();
 			if (Number.isFinite(time)) detail.times.push(time);
 		}
+	}
+	detail.sampled = detail.total;
+	const full = counts?.get(ruleId);
+	if (full) {
+		detail.total = full.total;
+		detail.actions = { ...full.actions };
 	}
 	return detail;
 }

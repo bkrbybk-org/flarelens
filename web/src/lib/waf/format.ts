@@ -13,6 +13,15 @@ export const ruleLevel = (meta: Partial<RuleMetaEntry> | undefined): string =>
 export const ruleType = (meta: Partial<RuleMetaEntry> | undefined): string =>
 	meta?.type || (meta?.kind === "managed" || meta?.source === "managed" ? "managed" : "custom");
 
+/**
+ * When a rule last fired, as far as the sample shows. A rule with full counts but no sampled row
+ * did fire; saying "no activity" beside its count would contradict it.
+ */
+export function lastSeenText(iso: string, total: number): string {
+	if (!iso && total > 0) return "not in the sample";
+	return relativeTime(iso);
+}
+
 export function relativeTime(iso: string): string {
 	if (!iso) return "no activity";
 	const then = new Date(iso).getTime();

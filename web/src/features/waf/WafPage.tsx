@@ -7,7 +7,7 @@ import { ALERT_ERROR, ALERT_WARN, CARD, INPUT, SEARCH_INPUT, SECTION_TITLE } fro
 import { useHashSyncedState } from "../../hooks/useHashParams";
 import type { Session } from "../../hooks/useSession";
 import type { TimeRange } from "../../hooks/useTimeRange";
-import { aggregateRulesets, countEventsByActions } from "../../lib/waf/aggregate";
+import { aggregateRulesets, countEventsByActions, ruleCountMap } from "../../lib/waf/aggregate";
 import { AUTO_REFRESH_OPTIONS, EVENT_LIMIT, LOOKBACK_OPTIONS } from "../../lib/waf/constants";
 import { relativeTime } from "../../lib/waf/format";
 import { publishWafSnapshot } from "../../lib/sectionSnapshot";
@@ -34,10 +34,14 @@ const SEVEN_DAYS_MINUTES = 7 * 24 * 60;
  * 30-day window once returned fewer rows (5,388) than a 7-day one (18,440). The headline counts and
  * the chart now come from the groups dataset's full counts and are unaffected; what stays sampled
  * is the per-rule breakdown, which is built from the rows. So the warning is only needed — and only
- * about the rule tables — past 7 days. Null at or under 7 days.
+ * about the rule tables — past 7 days. Null at or under 7 days. With each rule's full count read
+ * too, only the hosts, paths and timing in those tables are still the sample's.
  */
-export function wideWindowWarning(minutes: number): string | null {
+export function wideWindowWarning(minutes: number, fullRuleCounts = false): string | null {
 	if (minutes <= SEVEN_DAYS_MINUTES) return null;
+	if (fullRuleCounts) {
+		return "Past 7 days the hosts, paths and timing in the per-rule tables come from a sparse sample of events. Each rule's count, the totals and the chart are Cloudflare's full counts and are not affected.";
+	}
 	return "Past 7 days the per-rule tables are built from a sparse sample of events (a 30-day window once returned fewer rows than a 7-day one). The totals and the chart above use Cloudflare's full counts and are not affected — compare rules within this window, not across window sizes.";
 }
 
@@ -110,11 +114,14 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 
 	// Publish the latest load for the Findings page, which reads a snapshot
 	// rather than duplicating this fetch (see lib/sectionSnapshot.ts).
+	// Each rule's full count, so a rule table agrees with the headline beside it. Null without
+	// full counts, and the tables count sampled rows as they always did.
+	const ruleCounts = useMemo(() => ruleCountMap(waf.aggregates), [waf.aggregates]);
 	useEffect(() => {
-		if (waf.loaded) publishWafSnapshot(session.accountId, { events: waf.events, ruleMeta: waf.ruleMeta });
-	}, [waf.loaded, waf.events, waf.ruleMeta, session.accountId]);
+		if (waf.loaded) publishWafSnapshot(session.accountId, { events: waf.events, ruleMeta: waf.ruleMeta, ruleCounts });
+	}, [waf.loaded, waf.events, waf.ruleMeta, ruleCounts, session.accountId]);
 
-	const rulesetRows = useMemo(() => aggregateRulesets(waf.events, waf.ruleMeta), [waf.events, waf.ruleMeta]);
+	const rulesetRows = useMemo(() => aggregateRulesets(waf.events, waf.ruleMeta, ruleCounts), [waf.events, waf.ruleMeta, ruleCounts]);
 
 	// Full counts when the groups dataset answered; counting sampled rows only as a stated fallback.
 	const agg = waf.aggregates;
@@ -158,7 +165,7 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 	);
 	useSectionRefresh(refresh, waf.loading);
 
-	const wideWindowNote = wideWindowWarning(minutes);
+	const wideWindowNote = wideWindowWarning(minutes, !!ruleCounts);
 
 	return (
 		<PageShell progress={waf.progress}>
@@ -206,7 +213,9 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 				<p className="text-xs text-zinc-500 dark:text-zinc-400">
 					{agg ? (
 						<>
-							Totals and the chart are Cloudflare's full counts. The rule tables below are built from a sample of{" "}
+							{ruleCounts
+								? "Totals, the chart and each rule's count are Cloudflare's full counts. Hosts, paths and timing in the rule tables come from a sample of "
+								: "Totals and the chart are Cloudflare's full counts. The rule tables below are built from a sample of "}
 							{waf.events.length.toLocaleString()} events
 							{agg.sampleInterval && agg.sampleInterval > 1.05 ? ` (each sampled event stands for about ${agg.sampleInterval.toFixed(1)} on average)` : ""}.
 							{otherActions.length > 0 && (
@@ -254,7 +263,7 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 				</TabPanel>
 			) : (
 				<TabPanel id="rules" idPrefix="waf">
-					<RulesReview events={waf.events} ruleMeta={waf.ruleMeta} window={waf.window} onSelectRule={setDrawerRule} />
+					<RulesReview events={waf.events} ruleMeta={waf.ruleMeta} ruleCounts={ruleCounts} window={waf.window} onSelectRule={setDrawerRule} />
 				</TabPanel>
 			)}
 
@@ -262,6 +271,7 @@ export function WafPage({ session, zoneId, timeRange, onAuthError }: WafPageProp
 				rule={drawerRule}
 				events={waf.events}
 				ruleMeta={waf.ruleMeta}
+				ruleCounts={ruleCounts}
 				window={waf.window}
 				onClose={() => setDrawerRule(null)}
 			/>

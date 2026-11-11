@@ -3,7 +3,7 @@ import { ALERT_WARN, BADGE_NEUTRAL } from "../../lib/ui";
 import { XIcon } from "../../components/Icons";
 import { actionDrift, ruleEventDetail, topEntries } from "../../lib/waf/aggregate";
 import { relativeTime, titleCase } from "../../lib/waf/format";
-import type { FirewallEvent, RuleMetaMap } from "../../lib/waf/types";
+import type { FirewallEvent, RuleCountMap, RuleMetaMap } from "../../lib/waf/types";
 import { ActionBadges, RuleLevelBadge, RuleTypeBadge, Sparkline } from "./bars";
 
 export interface DrawerRule {
@@ -17,6 +17,8 @@ interface RuleDrawerProps {
 	rule: DrawerRule | null;
 	events: FirewallEvent[];
 	ruleMeta: RuleMetaMap;
+	/** Full per-rule counts; without them, counts are of sampled rows. */
+	ruleCounts?: RuleCountMap | null;
 	window: { since: number; until: number } | null;
 	onClose: () => void;
 }
@@ -38,7 +40,7 @@ function TopList({ title, entries }: { title: string; entries: [string, number][
 	);
 }
 
-export function RuleDrawer({ rule, events, ruleMeta, window: win, onClose }: RuleDrawerProps) {
+export function RuleDrawer({ rule, events, ruleMeta, ruleCounts, window: win, onClose }: RuleDrawerProps) {
 	const closeBtnRef = useRef<HTMLButtonElement>(null);
 
 	useEffect(() => {
@@ -51,7 +53,7 @@ export function RuleDrawer({ rule, events, ruleMeta, window: win, onClose }: Rul
 		return () => document.removeEventListener("keydown", onKey);
 	}, [rule, onClose]);
 
-	const detail = useMemo(() => (rule ? ruleEventDetail(events, rule.id) : null), [events, rule]);
+	const detail = useMemo(() => (rule ? ruleEventDetail(events, rule.id, ruleCounts) : null), [events, rule, ruleCounts]);
 
 	if (!rule || !detail) return null;
 
@@ -121,8 +123,17 @@ export function RuleDrawer({ rule, events, ruleMeta, window: win, onClose }: Rul
 
 					{detail.total === 0 ? (
 						<p className="text-sm text-zinc-500 dark:text-zinc-400">No events for this rule in the selected window.</p>
+					) : detail.sampled === 0 ? (
+						<p className="text-sm text-zinc-500 dark:text-zinc-400">
+							None of this rule's events are in the sample, so there are no paths, hosts or clients to show.
+						</p>
 					) : (
 						<div className="space-y-4">
+							{detail.sampled < detail.total && (
+								<p className="text-xs text-zinc-500 dark:text-zinc-400">
+									Top lists from {detail.sampled.toLocaleString()} sampled {detail.sampled === 1 ? "event" : "events"}.
+								</p>
+							)}
 							<TopList title="Top paths" entries={topEntries(detail.paths, 8)} />
 							<TopList title="Top hosts" entries={topEntries(detail.hosts, 5)} />
 							<TopList title="Top countries" entries={topEntries(detail.countries, 5)} />
